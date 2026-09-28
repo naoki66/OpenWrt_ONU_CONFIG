@@ -9,6 +9,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+
 msgid "Accepted"
 msgstr "认证通过"
 
@@ -20,9 +21,6 @@ msgstr "当前 GEM-ID"
 
 msgid "Applied"
 msgstr "已应用"
-
-msgid "Bind one LAN port to the operator IPTV VLAN and choose how multicast is handled. Applying the configuration removes the selected port from br-lan."
-msgstr "将一个 LAN 口绑定到运营商 IPTV VLAN，并选择组播的处理方式。应用配置时会把所选端口移出 br-lan。"
 
 msgid "Carries DHCP, authentication and video on demand."
 msgstr "承载 DHCP、鉴权和点播业务。"
@@ -108,9 +106,6 @@ msgstr "与组播流量相同"
 msgid "Service VLAN"
 msgstr "业务 VLAN"
 
-msgid "The LAN port stays out of br-lan for as long as the bridge is enabled."
-msgstr "网桥启用期间，该 LAN 口会保持在 br-lan 之外。"
-
 msgid "The package contains raw packet captures, PON state, system logs and network configuration."
 msgstr "诊断包包含原始抓包、PON 状态、系统日志和网络配置。"
 
@@ -119,9 +114,6 @@ msgstr "PON 线路和 OMCI/OAM 接口将被停止并重新启动。是否继续�
 
 msgid "The selected port is dedicated to the set-top box."
 msgstr "所选端口将专用于机顶盒。"
-
-msgid "The set-top box is bridged to the operator VLANs carried by the PON uplink."
-msgstr "机顶盒桥接到 PON 上联口承载的运营商 VLAN。"
 
 msgid "Unable to create diagnostic package: %s"
 msgstr "无法生成诊断包：%s"
@@ -1079,9 +1071,6 @@ msgstr "网桥记录哪个端口加入了组播组，不再把组播泛洪到其
 msgid "Enable IGMP proxy"
 msgstr "启用 IGMP proxy"
 
-msgid "The ONU joins the groups on behalf of the set-top box instead of bridging the reports. Needs a separate multicast or IGMP upstream VLAN and the omcproxy package."
-msgstr "由 ONU 代替机顶盒加入组播组，而不是把成员报告桥接上行。需要独立的组播 VLAN 或 IGMP 上行 VLAN，并安装 omcproxy。"
-
 msgid "Enable multicast querier"
 msgstr "启用组播查询器"
 
@@ -1210,9 +1199,6 @@ msgstr "G.711"
 
 msgid "H.248"
 msgstr "H.248"
-
-msgid "Media gateway settings reported to the softswitch. Only used with the H.248 voice protocol."
-msgstr "上报给软交换的媒体网关参数，仅在 H.248 语音协议下生效。"
 
 msgid "Basic settings"
 msgstr "基本配置"
@@ -1436,9 +1422,6 @@ msgstr "以竖线分隔的拨号模板。留空则由软交换决定。"
 msgid "Line settings"
 msgstr "线路设置"
 
-msgid "Gain, echo cancellation and the physical termination identifier of every FXS port."
-msgstr "每个 FXS 端口的增益、回声抑制与物理端点标识。"
-
 msgid "Line termination ID"
 msgstr "线路终端 ID"
 
@@ -1487,6 +1470,260 @@ msgstr "数值越小越优先。"
 msgid "PON"
 msgstr "PON 配置"
 
-msgid "Accepted"
-msgstr "已通过认证"
+msgid "Use an IPv4 address with a prefix length, for example 10.190.0.2/24."
+msgstr "请填写带前缀长度的 IPv4 地址，例如 10.190.0.2/24。"
 
+msgid "Open rtp2httpd settings"
+msgstr "打开 rtp2httpd 设置"
+
+msgid "Carry the operator IPTV VLANs to a set-top box, to a downstream router or to a multicast-to-unicast relay."
+msgstr "把运营商的 IPTV VLAN 透传给机顶盒、下挂路由器，或交给组播转单播中继。"
+
+msgid "The IPTV VLANs are carried by the PON uplink and handed over to the selected port."
+msgstr "IPTV VLAN 由 PON 上行承载，并从所选端口透传出去。"
+
+msgid "Where the operator VLANs are handed over."
+msgstr "运营商 VLAN 的透传出口。"
+
+msgid "Multicast to unicast"
+msgstr "组播转单播"
+
+msgid "Optional. Relay the multicast streams as HTTP unicast with rtp2httpd so any device on the network can play them."
+msgstr "可选。用 rtp2httpd 把组播流转成 HTTP 单播，网络里的任意设备都能直接播放。"
+
+msgid "In set-top box mode the selected LAN port stays out of br-lan for as long as the bridge is enabled."
+msgstr "机顶盒模式下，只要网桥处于启用状态，所选 LAN 口就保持在 br-lan 之外。"
+
+msgid "Hand-over mode"
+msgstr "透传方式"
+
+msgid "Set-top box on a dedicated port"
+msgstr "机顶盒独占一个端口"
+
+msgid "Single cable: VLANs tagged to one port"
+msgstr "单线复用：VLAN 带标签走同一个口"
+
+msgid "Set-top box mode bridges the VLANs to one port. Single cable mode keeps the port in br-lan and hands every VLAN over tagged, so a downstream router can carry internet and IPTV on one cable."
+msgstr "机顶盒模式把 VLAN 桥接到一个端口；单线复用模式让该端口继续留在 br-lan 内，所有 VLAN 带标签透传，下挂路由器用一根网线即可同时承载上网和 IPTV。"
+
+msgid "Trunk port"
+msgstr "Trunk 端口"
+
+msgid "The port stays a member of br-lan; the VLANs below leave it tagged."
+msgstr "该端口仍留在 br-lan 内，下面的 VLAN 以带标签的方式从这里发出。"
+
+msgid "VLANs to hand over"
+msgstr "要透传的 VLAN"
+
+msgid "One 8021q subinterface pair and one bridge per VLAN. Leave empty to use the service VLAN plus the multicast and IGMP VLANs configured below."
+msgstr "每个 VLAN 生成一对 8021q 子接口和一个独立网桥。留空时使用下面配置的业务 VLAN 以及组播、IGMP VLAN。"
+
+msgid "The ONU joins the groups on behalf of the set-top box instead of bridging the reports. Set-top box mode only: a proxy has to terminate the VLAN, which single cable mode does not do."
+msgstr "由 ONU 代替机顶盒加入组播组，而不是直接透传成员报告。仅机顶盒模式可用：代理必须终结 VLAN，而单线复用模式不做终结。"
+
+msgid "Relay multicast as HTTP unicast"
+msgstr "把组播中继为 HTTP 单播"
+
+msgid "rtp2httpd joins the groups on the ONU and serves the streams over HTTP, so phones and players can watch without IGMP."
+msgstr "rtp2httpd 在 ONU 上加入组播组并以 HTTP 提供码流，手机和播放器无需 IGMP 即可观看。"
+
+msgid "HTTP port"
+msgstr "HTTP 端口"
+
+msgid "Listening port of the relay, also set on the rtp2httpd page."
+msgstr "中继的监听端口，rtp2httpd 页面上使用同一个端口。"
+
+msgid "Relay address"
+msgstr "中继地址"
+
+msgid "Optional. An address in the operator IPTV network, needed for the ONU to join the groups itself. Leave empty to keep the bridge unaddressed."
+msgstr "可选。运营商 IPTV 网络内的地址，ONU 自行加入组播组时需要。留空则网桥不配置地址。"
+
+msgid "Upstream device"
+msgstr "上游设备"
+
+msgid "The bridge carrying the multicast VLAN. The relay listens on the bridge, never on one of its member ports."
+msgstr "承载组播 VLAN 的网桥。中继监听的是网桥本身，而不是它的某个成员端口。"
+
+msgid "Playlist and FCC settings"
+msgstr "频道列表与快速切台"
+
+msgid "Channels, fast channel change and worker tuning stay on the rtp2httpd page."
+msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。"
+
+msgid "Fax negotiation mode"
+msgstr "传真协商模式"
+
+msgid "How the fax call is negotiated when the G.711 codec is used."
+msgstr "使用 G.711 编码时传真呼叫的协商方式。"
+
+msgid "T.30 full control"
+msgstr "T.30 全控"
+
+msgid "T.30 auto negotiation"
+msgstr "T.30 自协商"
+
+msgid "Synchronize the phone clock"
+msgstr "同步话机时间"
+
+msgid "Send the gateway time to the connected phone."
+msgstr "把网关时间下发给所连接的话机。"
+
+msgid "Media gateway settings reported to the softswitch."
+msgstr "上报给软交换的媒体网关参数。"
+
+msgid "SIP"
+msgstr "SIP"
+
+msgid "Session Initiation Protocol settings used with the softswitch and IMS SIP voice protocols."
+msgstr "软交换 SIP 与 IMS SIP 语音协议使用的 SIP 参数。"
+
+msgid "Servers"
+msgstr "服务器"
+
+msgid "Standby servers"
+msgstr "备用服务器"
+
+msgid "Proxy server"
+msgstr "代理服务器"
+
+msgid "Address of the SIP proxy, an IP address or a domain name."
+msgstr "SIP 代理服务器地址，可以是 IP 地址或域名。"
+
+msgid "Proxy server port"
+msgstr "代理服务器端口"
+
+msgid "Proxy server transport"
+msgstr "代理服务器承载协议"
+
+msgid "Registrar server"
+msgstr "注册服务器"
+
+msgid "Address of the SIP registrar, an IP address or a domain name."
+msgstr "SIP 注册服务器地址，可以是 IP 地址或域名。"
+
+msgid "Registrar server port"
+msgstr "注册服务器端口"
+
+msgid "Registrar server transport"
+msgstr "注册服务器承载协议"
+
+msgid "Outbound proxy server"
+msgstr "出局代理服务器"
+
+msgid "Address of the outbound proxy. Leave empty to send requests straight to the proxy server."
+msgstr "出向代理服务器地址。留空则把请求直接发给代理服务器。"
+
+msgid "Outbound proxy port"
+msgstr "出局代理端口"
+
+msgid "Home gateway domain"
+msgstr "归属网关域"
+
+msgid "Domain the gateway registers with, an IP address or a domain name."
+msgstr "网关注册时所用的域，可以是 IP 地址或域名。"
+
+msgid "Home gateway domain port"
+msgstr "归属网关域端口"
+
+msgid "Home gateway domain transport"
+msgstr "归属网关域传输协议"
+
+msgid "Standby proxy server"
+msgstr "备用代理服务器"
+
+msgid "Address used when the SIP proxy cannot be reached."
+msgstr "SIP 代理服务器不可达时使用的地址。"
+
+msgid "Standby proxy server port"
+msgstr "备用代理服务器端口"
+
+msgid "Standby proxy server transport"
+msgstr "备用代理服务器承载协议"
+
+msgid "Standby registrar server"
+msgstr "备用注册服务器"
+
+msgid "Address used when the SIP registrar cannot be reached."
+msgstr "SIP 注册服务器不可达时使用的地址。"
+
+msgid "Standby registrar server port"
+msgstr "备用注册服务器端口"
+
+msgid "Standby registrar server transport"
+msgstr "备用注册服务器承载协议"
+
+msgid "Standby outbound proxy server"
+msgstr "备用出局代理服务器"
+
+msgid "Address of the outbound proxy used when the primary one cannot be reached."
+msgstr "主用出向代理不可达时使用的出向代理地址。"
+
+msgid "Standby outbound proxy port"
+msgstr "备用出局代理端口"
+
+msgid "Signalling DSCP"
+msgstr "信令 DSCP"
+
+msgid "DSCP mark of the SIP signalling packets."
+msgstr "SIP 信令报文的 DSCP 标记。"
+
+msgid "Media DSCP"
+msgstr "媒体 DSCP"
+
+msgid "DSCP mark of the voice packets."
+msgstr "语音报文的 DSCP 标记。"
+
+msgid "Registration period (s)"
+msgstr "注册周期(秒)"
+
+msgid "How often the gateway registers again."
+msgstr "网关重新注册的时间间隔。"
+
+msgid "Registration retry period (s)"
+msgstr "注册重试周期(秒)"
+
+msgid "How soon a failed registration is retried."
+msgstr "注册失败后隔多久重试。"
+
+msgid "Session update period (min)"
+msgstr "会话更新周期(分钟)"
+
+msgid "How often an established call refreshes its session."
+msgstr "已建立的呼叫刷新会话的时间间隔。"
+
+msgid "Minimum session update period (min)"
+msgstr "最小会话更新周期(分钟)"
+
+msgid "Shortest session refresh interval accepted from the server."
+msgstr "接受服务器下发的最小会话刷新间隔。"
+
+msgid "Enable heartbeat"
+msgstr "启用心跳"
+
+msgid "Detect whether the server is still reachable while no call is up."
+msgstr "在没有通话时检测服务器是否仍然可达。"
+
+msgid "Heartbeat timeout count"
+msgstr "心跳超时次数"
+
+msgid "Heartbeat timeouts before the registration is refreshed."
+msgstr "触发重新注册前允许的心跳超时次数。"
+
+msgid "Gain, echo cancellation and the identity of every FXS port. The two shipped sections are the two FXS ports of the device; the authentication credentials apply to the SIP voice protocols."
+msgstr "每个 FXS 端口的增益、回声抑制与身份标识。默认的两个配置段对应设备的两个 FXS 端口；鉴权凭据用于 SIP 语音协议。"
+
+msgid "Authentication user name"
+msgstr "鉴权用户名"
+
+msgid "User name the line authenticates with."
+msgstr "该线路用于认证的用户名。"
+
+msgid "Authentication password"
+msgstr "鉴权密码"
+
+msgid "Phone number"
+msgstr "电话号码"
+
+msgid "Number presented to the called party."
+msgstr "呈现给被叫方的号码。"

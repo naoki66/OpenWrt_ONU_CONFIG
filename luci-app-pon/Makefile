@@ -9,6 +9,10 @@ LUCI_TITLE:=LuCI PON configuration
 # single instance and relies on kernel multicast routing (CONFIG_IP_MROUTE /
 # CONFIG_IPV6_MROUTE). Drop it from LUCI_DEPENDS if the target has no
 # multicast routing support.
+# rtp2httpd backs the multicast-to-unicast tab. It is deliberately NOT a hard
+# dependency: iptv-apply only writes the three fields it owns and logs a
+# warning when the package is missing, so the relay tab degrades quietly.
+# Add +rtp2httpd here if the target always ships the relay.
 LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
 	+firewall4 +kmod-nft-bridge +omcproxy

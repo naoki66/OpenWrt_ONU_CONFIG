@@ -6,6 +6,7 @@
 ACTION="${1:-reload}"
 NFT_FILE="/etc/iptv.nft"
 PROXY_INIT="/etc/init.d/omcproxy"
+UNICAST_INIT="/etc/init.d/rtp2httpd"
 
 fail() {
 	logger -t iptv "$*"
@@ -43,7 +44,10 @@ validate_vlan() {
 load_iptv_config() {
 	config_load iptv
 	config_get_bool ENABLED config enabled 0
+	config_get MODE config mode bridge
 	config_get LAN_PORT config lan_port
+	config_get TRUNK_PORT config trunk_port
+	config_get TRUNK_VLANS config trunk_vlans
 	config_get UPLINK config uplink pon0
 	config_get SERVICE_VLAN config service_vlan
 	config_get MULTICAST_VLAN config multicast_vlan
@@ -53,6 +57,9 @@ load_iptv_config() {
 	config_get_bool IGMP_PROXY config igmp_proxy 0
 	config_get_bool MLD_PROXY config mld_proxy 0
 	config_get_bool MULTICAST_QUERIER config multicast_querier 0
+	config_get_bool UNICAST config unicast 0
+	config_get UNICAST_PORT config unicast_port 5140
+	config_get UNICAST_ADDR config unicast_addr
 }
 
 find_br_lan() {
@@ -90,9 +97,9 @@ detach_from_interface() {
 	local section="$1"
 	local device ifnames ifname
 
-	[ "$section" = "luci_iptv" ] && return
-	[ "$section" = "luci_iptv_mc" ] && return
-	[ "$section" = "luci_iptv_igmp" ] && return
+	case "$section" in
+		luci_iptv|luci_iptv_mc|luci_iptv_igmp|luci_iptv_v*) return ;;
+	esac
 
 	config_get device "$section" device
 	config_get ifnames "$section" ifname
@@ -115,12 +122,22 @@ detach_from_bridge_vlan() {
 	done
 }
 
+# Single cable mode hands the VLANs over tagged, so it never owns a LAN port.
+detach_lan_port() {
+	[ "$MODE" = 'bridge' ] || return 0
+	[ -n "$LAN_PORT" ] || return 0
+
+	config_foreach detach_from_device device
+	config_foreach detach_from_interface interface
+	config_foreach detach_from_bridge_vlan bridge-vlan
+	remove_selected_port_from_br_lan
+}
+
 validate_config() {
 	[ "$ENABLED" -eq 1 ] || return 0
 
-	validate_ifname "$LAN_PORT" || fail "Invalid LAN port name"
 	validate_ifname "$UPLINK" || fail "Invalid uplink device name"
-	[ "$LAN_PORT" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
+	[ -e "/sys/class/net/$UPLINK" ] || fail "Uplink device $UPLINK was not found"
 	validate_vlan "$SERVICE_VLAN" || fail "Service VLAN must be between 1 and 4094"
 
 	if [ -n "$MULTICAST_VLAN" ]; then
@@ -129,8 +146,42 @@ validate_config() {
 	fi
 	[ -z "$IGMP_VLAN" ] || validate_vlan "$IGMP_VLAN" || fail "IGMP upstream VLAN must be between 1 and 4094"
 
-	[ -e "/sys/class/net/$LAN_PORT" ] || fail "LAN port $LAN_PORT was not found"
-	[ -e "/sys/class/net/$UPLINK" ] || fail "Uplink device $UPLINK was not found"
+	if [ "$MODE" = 'bridge' ]; then
+		validate_ifname "$LAN_PORT" || fail "Invalid LAN port name"
+		[ "$LAN_PORT" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
+		[ -e "/sys/class/net/$LAN_PORT" ] || fail "LAN port $LAN_PORT was not found"
+	else
+		validate_ifname "$TRUNK_PORT" || fail "Invalid trunk port name"
+		[ "$TRUNK_PORT" != "$UPLINK" ] || fail "The trunk port and uplink must be different devices"
+		[ -e "/sys/class/net/$TRUNK_PORT" ] || fail "Trunk port $TRUNK_PORT was not found"
+	fi
+}
+
+# An empty list falls back to the VLANs configured on the other tabs, so the
+# single cable mode works without repeating them.
+resolve_trunk_vlans() {
+	local vid seen
+
+	TRUNK_VLAN_LIST=''
+	[ "$MODE" = 'trunk' ] || return 0
+
+	if [ -z "$TRUNK_VLANS" ]; then
+		TRUNK_VLANS="$SERVICE_VLAN"
+		[ -n "$MULTICAST_VLAN" ] && TRUNK_VLANS="$TRUNK_VLANS $MULTICAST_VLAN"
+		if [ -n "$IGMP_VLAN" ] && [ "$IGMP_VLAN" != "$SERVICE_VLAN" ] && [ "$IGMP_VLAN" != "$MULTICAST_VLAN" ]; then
+			TRUNK_VLANS="$TRUNK_VLANS $IGMP_VLAN"
+		fi
+	fi
+
+	for vid in $TRUNK_VLANS; do
+		validate_vlan "$vid" || fail "VLAN $vid must be between 1 and 4094"
+		for seen in $TRUNK_VLAN_LIST; do
+			[ "$seen" = "$vid" ] && continue 2
+		done
+		TRUNK_VLAN_LIST="${TRUNK_VLAN_LIST:+$TRUNK_VLAN_LIST }$vid"
+	done
+
+	[ -n "$TRUNK_VLAN_LIST" ] || fail "The trunk needs at least one VLAN"
 }
 
 resolve_igmp_port() {
@@ -157,6 +208,13 @@ resolve_proxy() {
 	PROXY_UPLINK_IFACE=''
 
 	[ "$ENABLED" -eq 1 ] || return 0
+
+	if [ "$MODE" = 'trunk' ]; then
+		[ "$IGMP_PROXY" -eq 1 ] || [ "$MLD_PROXY" -eq 1 ] || return 0
+		warn "The multicast proxy cannot run in single cable mode; the VLANs are handed over unmodified"
+		return 0
+	fi
+
 	[ "$IGMP_PROXY" -eq 1 ] || [ "$MLD_PROXY" -eq 1 ] || return 0
 
 	if [ -n "$IGMP_VLAN" ] && [ "$IGMP_VLAN" != "$SERVICE_VLAN" ] && [ "$IGMP_VLAN" != "$MULTICAST_VLAN" ]; then
@@ -178,6 +236,57 @@ resolve_proxy() {
 	PROXY_ACTIVE=1
 }
 
+# The Linux bridge has a single multicast_snooping switch covering both IGMP
+# and MLD, so either family enables it for both.
+resolve_snooping() {
+	SNOOPING=0
+	[ "$IGMP_SNOOPING" -eq 1 ] && SNOOPING=1
+	[ "$MLD_SNOOPING" -eq 1 ] && SNOOPING=1
+
+	if [ "$SNOOPING" -eq 1 ] && [ "$MULTICAST_QUERIER" -ne 1 ]; then
+		warn "Multicast snooping is on without a querier; group memberships time out and the stream may stop"
+	fi
+
+	if [ "$MULTICAST_QUERIER" -eq 1 ] && [ "$PROXY_ACTIVE" -eq 1 ]; then
+		warn "The multicast proxy owns the querier role; the querier setting is ignored while the proxy runs"
+	fi
+}
+
+# The relay has to listen on a bridge, never on one of its member ports: frames
+# reaching a bridge port are handled by the bridge and never hit the local
+# stack on that port.
+resolve_unicast() {
+	UNICAST_ACTIVE=0
+	UNICAST_DEV=''
+	UNICAST_IFACE=''
+	UNICAST_VLAN=''
+
+	[ "$ENABLED" -eq 1 ] || return 0
+	[ "$UNICAST" -eq 1 ] || return 0
+
+	if [ "$MODE" = 'trunk' ]; then
+		UNICAST_VLAN="$MULTICAST_VLAN"
+		[ -n "$UNICAST_VLAN" ] || UNICAST_VLAN="$SERVICE_VLAN"
+		UNICAST_DEV="br-iptv-$UNICAST_VLAN"
+		UNICAST_IFACE="luci_iptv_v$UNICAST_VLAN"
+	elif [ "$PROXY_ACTIVE" -eq 1 ]; then
+		UNICAST_DEV="$PROXY_UPLINK_DEV"
+		UNICAST_IFACE="$PROXY_UPLINK_IFACE"
+	else
+		UNICAST_DEV='br-iptv'
+		UNICAST_IFACE='luci_iptv'
+	fi
+
+	[ -n "$UNICAST_PORT" ] || UNICAST_PORT='5140'
+	[ -x "$UNICAST_INIT" ] || warn "rtp2httpd is not installed; the relay settings are stored but not started"
+
+	if [ -z "$UNICAST_ADDR" ]; then
+		warn "The relay has no address on $UNICAST_DEV; without one the ONU cannot join the multicast groups itself"
+	fi
+
+	UNICAST_ACTIVE=1
+}
+
 write_nft_rules() {
 	local tmp
 
@@ -186,6 +295,12 @@ write_nft_rules() {
 	if [ "$ENABLED" -ne 1 ]; then
 		cat >"$tmp" <<'EOF'
 # IPTV bridge inactive.
+EOF
+	elif [ "$MODE" = 'trunk' ]; then
+		# One bridge per VLAN already isolates the services, there is nothing
+		# left to filter between them.
+		cat >"$tmp" <<'EOF'
+# Single cable mode: every VLAN got its own bridge, no service filter needed.
 EOF
 	else
 		cat >"$tmp" <<EOF
@@ -256,29 +371,153 @@ remove_selected_port_from_br_lan() {
 	uci -q del_list "network.$BR_LAN_SECTION.ports=$LAN_PORT"
 }
 
+# Every managed section is prefixed, so a single sweep also drops the per VLAN
+# sections of a previous single cable configuration.
 remove_managed_network() {
-	uci -q delete network.luci_iptv
-	uci -q delete network.luci_iptv_bridge
-	uci -q delete network.luci_iptv_service_vlan
-	uci -q delete network.luci_iptv_multicast_vlan
-	uci -q delete network.luci_iptv_igmp_vlan
-	uci -q delete network.luci_iptv_mc
-	uci -q delete network.luci_iptv_igmp
+	local section
+
+	for section in $(uci -q show network 2>/dev/null | \
+		sed -n 's/^network\.\(luci_iptv[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		uci -q delete "network.$section"
+	done
 }
 
-# The Linux bridge has a single multicast_snooping switch covering both IGMP
-# and MLD, so either family enables it for both.
-resolve_snooping() {
-	SNOOPING=0
-	[ "$IGMP_SNOOPING" -eq 1 ] && SNOOPING=1
-	[ "$MLD_SNOOPING" -eq 1 ] && SNOOPING=1
+prefix_to_netmask() {
+	local prefix="$1"
+	local full part i octet mask=''
 
-	if [ "$SNOOPING" -eq 1 ] && [ "$MULTICAST_QUERIER" -ne 1 ]; then
-		warn "Multicast snooping is on without a querier; group memberships time out and the stream may stop"
+	full=$(( prefix / 8 ))
+	part=$(( prefix % 8 ))
+
+	for i in 0 1 2 3; do
+		if [ "$i" -lt "$full" ]; then
+			octet=255
+		elif [ "$i" -eq "$full" ]; then
+			octet=$(( 256 - (1 << (8 - part)) ))
+		else
+			octet=0
+		fi
+		mask="${mask:+$mask.}$octet"
+	done
+
+	printf '%s' "$mask"
+}
+
+# The relay needs an address to join the groups itself; without one the bridge
+# stays unaddressed and the relay has to rely on the interface index.
+configure_interface_address() {
+	local section="$1"
+	local device="$2"
+	local ip mask prefix
+
+	uci set "network.$section.auto"='1'
+	uci set "network.$section.delegate"='0'
+
+	if [ "$UNICAST_ACTIVE" -eq 1 ] && [ "$UNICAST_DEV" = "$device" ] && [ -n "$UNICAST_ADDR" ]; then
+		ip="${UNICAST_ADDR%%/*}"
+		prefix="${UNICAST_ADDR#*/}"
+		if [ "$prefix" = "$UNICAST_ADDR" ]; then
+			mask='255.255.255.0'
+		elif [ "$prefix" -ge 0 ] && [ "$prefix" -le 32 ]; then
+			mask="$(prefix_to_netmask "$prefix")"
+		else
+			fail "The relay address needs a prefix length between 0 and 32"
+		fi
+
+		uci set "network.$section.proto"='static'
+		uci set "network.$section.ipaddr"="$ip"
+		uci set "network.$section.netmask"="$mask"
+	else
+		uci set "network.$section.proto"='none'
+	fi
+}
+
+write_trunk_network() {
+	local vid
+
+	for vid in $TRUNK_VLAN_LIST; do
+		uci set "network.luci_iptv_up$vid"='device'
+		uci set "network.luci_iptv_up$vid.type"='8021q'
+		uci set "network.luci_iptv_up$vid.ifname"="$UPLINK"
+		uci set "network.luci_iptv_up$vid.vid"="$vid"
+		uci set "network.luci_iptv_up$vid.name"="ct-up$vid"
+
+		uci set "network.luci_iptv_dn$vid"='device'
+		uci set "network.luci_iptv_dn$vid.type"='8021q'
+		uci set "network.luci_iptv_dn$vid.ifname"="$TRUNK_PORT"
+		uci set "network.luci_iptv_dn$vid.vid"="$vid"
+		uci set "network.luci_iptv_dn$vid.name"="ct-dn$vid"
+
+		uci set "network.luci_iptv_br$vid"='device'
+		uci set "network.luci_iptv_br$vid.type"='bridge'
+		uci set "network.luci_iptv_br$vid.name"="br-iptv-$vid"
+		uci set "network.luci_iptv_br$vid.stp"='0'
+		uci set "network.luci_iptv_br$vid.igmp_snooping"="$SNOOPING"
+		uci set "network.luci_iptv_br$vid.multicast_querier"="$MULTICAST_QUERIER"
+		uci add_list "network.luci_iptv_br$vid.ports"="ct-up$vid"
+		uci add_list "network.luci_iptv_br$vid.ports"="ct-dn$vid"
+
+		uci set "network.luci_iptv_v$vid"='interface'
+		uci set "network.luci_iptv_v$vid.device"="br-iptv-$vid"
+		configure_interface_address "luci_iptv_v$vid" "br-iptv-$vid"
+	done
+}
+
+write_bridge_network() {
+	uci set network.luci_iptv_service_vlan='device'
+	uci set network.luci_iptv_service_vlan.type='8021q'
+	uci set network.luci_iptv_service_vlan.ifname="$UPLINK"
+	uci set network.luci_iptv_service_vlan.vid="$SERVICE_VLAN"
+	uci set network.luci_iptv_service_vlan.name='ct-iptv-svc'
+
+	if [ -n "$MULTICAST_VLAN" ]; then
+		uci set network.luci_iptv_multicast_vlan='device'
+		uci set network.luci_iptv_multicast_vlan.type='8021q'
+		uci set network.luci_iptv_multicast_vlan.ifname="$UPLINK"
+		uci set network.luci_iptv_multicast_vlan.vid="$MULTICAST_VLAN"
+		uci set network.luci_iptv_multicast_vlan.name='ct-iptv-mc'
 	fi
 
-	if [ "$MULTICAST_QUERIER" -eq 1 ] && [ "$PROXY_ACTIVE" -eq 1 ]; then
-		warn "The multicast proxy owns the querier role; the querier setting is ignored while the proxy runs"
+	if [ "$IGMP_PORT" = 'ct-iptv-igmp' ]; then
+		uci set network.luci_iptv_igmp_vlan='device'
+		uci set network.luci_iptv_igmp_vlan.type='8021q'
+		uci set network.luci_iptv_igmp_vlan.ifname="$UPLINK"
+		uci set network.luci_iptv_igmp_vlan.vid="$IGMP_VLAN"
+		uci set network.luci_iptv_igmp_vlan.name='ct-iptv-igmp'
+	fi
+
+	uci set network.luci_iptv_bridge='device'
+	uci set network.luci_iptv_bridge.type='bridge'
+	uci set network.luci_iptv_bridge.name='br-iptv'
+	uci set network.luci_iptv_bridge.stp='0'
+	# The service filter controls multicast forwarding for this bridge.
+	uci set network.luci_iptv_bridge.igmp_snooping="$SNOOPING"
+	uci set network.luci_iptv_bridge.multicast_querier="$MULTICAST_QUERIER"
+	uci add_list network.luci_iptv_bridge.ports="$LAN_PORT"
+	uci add_list network.luci_iptv_bridge.ports='ct-iptv-svc'
+	if [ "$PROXY_ACTIVE" -eq 0 ]; then
+		[ -n "$MULTICAST_VLAN" ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-mc'
+		[ "$IGMP_PORT" = 'ct-iptv-igmp' ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-igmp'
+	fi
+
+	uci set network.luci_iptv='interface'
+	uci set network.luci_iptv.device='br-iptv'
+	configure_interface_address 'luci_iptv' 'br-iptv'
+
+	if [ "$PROXY_ACTIVE" -eq 1 ]; then
+		# The proxy terminates the multicast VLANs, so they get their own
+		# interfaces instead of joining the STB bridge.
+		if [ -n "$MULTICAST_VLAN" ]; then
+			uci set network.luci_iptv_mc='interface'
+			uci set network.luci_iptv_mc.device='ct-iptv-mc'
+			configure_interface_address 'luci_iptv_mc' 'ct-iptv-mc'
+		fi
+
+		if [ "$IGMP_PORT" = 'ct-iptv-igmp' ]; then
+			uci set network.luci_iptv_igmp='interface'
+			uci set network.luci_iptv_igmp.device='ct-iptv-igmp'
+			configure_interface_address 'luci_iptv_igmp' 'ct-iptv-igmp'
+		fi
 	fi
 }
 
@@ -288,71 +527,12 @@ write_network_config() {
 
 	if [ "$ENABLED" -eq 1 ]; then
 		# A dedicated STB port needs exclusive netifd ownership.
-		config_foreach detach_from_device device
-		config_foreach detach_from_interface interface
-		config_foreach detach_from_bridge_vlan bridge-vlan
-		remove_selected_port_from_br_lan
+		detach_lan_port
 
-		uci set network.luci_iptv_service_vlan='device'
-		uci set network.luci_iptv_service_vlan.type='8021q'
-		uci set network.luci_iptv_service_vlan.ifname="$UPLINK"
-		uci set network.luci_iptv_service_vlan.vid="$SERVICE_VLAN"
-		uci set network.luci_iptv_service_vlan.name='ct-iptv-svc'
-
-		if [ -n "$MULTICAST_VLAN" ]; then
-			uci set network.luci_iptv_multicast_vlan='device'
-			uci set network.luci_iptv_multicast_vlan.type='8021q'
-			uci set network.luci_iptv_multicast_vlan.ifname="$UPLINK"
-			uci set network.luci_iptv_multicast_vlan.vid="$MULTICAST_VLAN"
-			uci set network.luci_iptv_multicast_vlan.name='ct-iptv-mc'
-		fi
-
-		if [ "$IGMP_PORT" = 'ct-iptv-igmp' ]; then
-			uci set network.luci_iptv_igmp_vlan='device'
-			uci set network.luci_iptv_igmp_vlan.type='8021q'
-			uci set network.luci_iptv_igmp_vlan.ifname="$UPLINK"
-			uci set network.luci_iptv_igmp_vlan.vid="$IGMP_VLAN"
-			uci set network.luci_iptv_igmp_vlan.name='ct-iptv-igmp'
-		fi
-
-		uci set network.luci_iptv_bridge='device'
-		uci set network.luci_iptv_bridge.type='bridge'
-		uci set network.luci_iptv_bridge.name='br-iptv'
-		uci set network.luci_iptv_bridge.stp='0'
-		# The service filter controls multicast forwarding for this bridge.
-		uci set network.luci_iptv_bridge.igmp_snooping="$SNOOPING"
-		uci set network.luci_iptv_bridge.multicast_querier="$MULTICAST_QUERIER"
-		uci add_list network.luci_iptv_bridge.ports="$LAN_PORT"
-		uci add_list network.luci_iptv_bridge.ports='ct-iptv-svc'
-		if [ "$PROXY_ACTIVE" -eq 0 ]; then
-			[ -n "$MULTICAST_VLAN" ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-mc'
-			[ "$IGMP_PORT" = 'ct-iptv-igmp' ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-igmp'
-		fi
-
-		uci set network.luci_iptv='interface'
-		uci set network.luci_iptv.proto='none'
-		uci set network.luci_iptv.device='br-iptv'
-		uci set network.luci_iptv.auto='1'
-		uci set network.luci_iptv.delegate='0'
-
-		if [ "$PROXY_ACTIVE" -eq 1 ]; then
-			# The proxy terminates the multicast VLANs, so they get their own
-			# interfaces instead of joining the STB bridge.
-			if [ -n "$MULTICAST_VLAN" ]; then
-				uci set network.luci_iptv_mc='interface'
-				uci set network.luci_iptv_mc.proto='none'
-				uci set network.luci_iptv_mc.device='ct-iptv-mc'
-				uci set network.luci_iptv_mc.auto='1'
-				uci set network.luci_iptv_mc.delegate='0'
-			fi
-
-			if [ "$IGMP_PORT" = 'ct-iptv-igmp' ]; then
-				uci set network.luci_iptv_igmp='interface'
-				uci set network.luci_iptv_igmp.proto='none'
-				uci set network.luci_iptv_igmp.device='ct-iptv-igmp'
-				uci set network.luci_iptv_igmp.auto='1'
-				uci set network.luci_iptv_igmp.delegate='0'
-			fi
+		if [ "$MODE" = 'trunk' ]; then
+			write_trunk_network
+		else
+			write_bridge_network
 		fi
 	fi
 
@@ -395,6 +575,36 @@ write_proxy_firewall_zone() {
 	uci commit firewall || fail "Cannot save firewall configuration"
 }
 
+# The relay gets a zone of its own: an interface without one is dropped by
+# firewall4, so the ONU would never receive the multicast it joined. It only
+# consumes the streams locally, hence input ACCEPT but no forwarding - unlike
+# the proxy zone, which has to let the kernel route multicast between sides.
+write_unicast_firewall_zone() {
+	uci -q delete firewall.luci_iptv_relay_zone
+
+	RELAY_ZONE=0
+	[ "$UNICAST_ACTIVE" -eq 1 ] && RELAY_ZONE=1
+
+	# With a proxy running the relay listens on the proxy uplink, and the iptv
+	# zone already covers it. An interface must not sit in two zones.
+	if [ "$PROXY_ACTIVE" -eq 1 ]; then
+		case "$UNICAST_IFACE" in
+			luci_iptv|luci_iptv_mc|luci_iptv_igmp) RELAY_ZONE=0 ;;
+		esac
+	fi
+
+	if [ "$RELAY_ZONE" -eq 1 ]; then
+		uci set firewall.luci_iptv_relay_zone='zone'
+		uci set firewall.luci_iptv_relay_zone.name='iptv_relay'
+		uci set firewall.luci_iptv_relay_zone.input='ACCEPT'
+		uci set firewall.luci_iptv_relay_zone.output='ACCEPT'
+		uci set firewall.luci_iptv_relay_zone.forward='REJECT'
+		uci add_list firewall.luci_iptv_relay_zone.network="$UNICAST_IFACE"
+	fi
+
+	uci commit firewall || fail "Cannot save firewall configuration"
+}
+
 write_firewall_config() {
 	uci set firewall.luci_iptv='include'
 	uci set firewall.luci_iptv.type='nftables'
@@ -404,16 +614,41 @@ write_firewall_config() {
 	uci commit firewall || fail "Cannot save firewall configuration"
 }
 
-restart_proxy() {
-	[ -x "$PROXY_INIT" ] || return 0
+# Only the fields owned by this page are written, the playlist, FCC and worker
+# tuning stay on the rtp2httpd page.
+write_unicast_config() {
+	local section
+
+	[ -x "$UNICAST_INIT" ] || return 0
+
+	section="$(uci -q show rtp2httpd 2>/dev/null | \
+		sed -n "s/^rtp2httpd\.\([A-Za-z0-9_]*\)='rtp2httpd'$/\1/p" | head -n 1)"
+	[ -n "$section" ] || section='main'
+
+	if [ "$UNICAST_ACTIVE" -eq 1 ]; then
+		uci set "rtp2httpd.$section.disabled"='0'
+		uci set "rtp2httpd.$section.upstream_interface"="$UNICAST_DEV"
+		uci set "rtp2httpd.$section.port"="$UNICAST_PORT"
+	else
+		uci set "rtp2httpd.$section.disabled"='1'
+	fi
+
+	uci commit rtp2httpd || fail "Cannot save multicast to unicast configuration"
+}
+
+restart_daemon() {
+	local init="$1"
+	local active="$2"
+
+	[ -x "$init" ] || return 0
 	[ "$ACTION" = "boot" ] && return 0
 
-	if [ "$PROXY_ACTIVE" -eq 1 ]; then
-		"$PROXY_INIT" enable
-		"$PROXY_INIT" restart || warn "omcproxy restart failed"
+	if [ "$active" -eq 1 ]; then
+		"$init" enable
+		"$init" restart || warn "$init restart failed"
 	else
-		"$PROXY_INIT" stop >/dev/null 2>&1
-		"$PROXY_INIT" disable
+		"$init" stop >/dev/null 2>&1
+		"$init" disable
 	fi
 }
 
@@ -433,7 +668,8 @@ reload_runtime() {
 		/etc/init.d/firewall reload || fail "firewall4 reload failed"
 	fi
 
-	restart_proxy
+	restart_daemon "$PROXY_INIT" "$PROXY_ACTIVE"
+	restart_daemon "$UNICAST_INIT" "$UNICAST_ACTIVE"
 }
 
 load_iptv_config
@@ -444,15 +680,19 @@ config_foreach find_br_lan device
 find_old_iptv_port
 
 validate_config
+resolve_trunk_vlans
 resolve_igmp_port
 resolve_proxy
 resolve_snooping
+resolve_unicast
 write_nft_rules
 write_network_config
 write_proxy_config
 write_firewall_config
 write_proxy_firewall_zone
+write_unicast_firewall_zone
+write_unicast_config
 reload_runtime
 
-logger -t iptv "IPTV bridge configuration applied"
+logger -t iptv "IPTV configuration applied (mode=$MODE)"
 exit 0

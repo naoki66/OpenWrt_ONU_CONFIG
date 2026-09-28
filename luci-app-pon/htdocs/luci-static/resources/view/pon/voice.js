@@ -7,6 +7,9 @@
 
 var STYLESHEET = 'view/pon/pon.css';
 
+/* Fully qualified name of the protocol list: <config>.<section>.<option>. */
+var PROTOCOL_OPTION = 'voice.config.protocol';
+
 /*
  * The PON views follow luci-theme-argon: cards, form rows and buttons all come
  * from the theme. Only the small helper stylesheet is ours.
@@ -47,13 +50,118 @@ function validateFlashHookRange(sectionId, value) {
 	return _('The maximum flash hook interval must be greater than the minimum one.');
 }
 
+/*
+ * LuCI combines the keys of a single depends({ ... }) object with "and" while
+ * treating repeated depends() calls as alternatives ("or"), so the protocol
+ * switch and any nested constraint have to be spelled out as one object per
+ * protocol value. A key containing a dot is resolved as cbid.<key>, which is
+ * how an option living in another section is reached - here the protocol list
+ * of the "config" section.
+ */
+function dependsOnProtocols(o, protocols, extra) {
+	protocols.forEach(function(protocol) {
+		var dep = {};
+
+		dep[PROTOCOL_OPTION] = protocol;
+
+		for (var name in extra || {})
+			dep[name] = extra[name];
+
+		o.depends(dep);
+	});
+
+	return o;
+}
+
+/* The H.248 block is only relevant for the H.248 protocol. */
+function forH248(o, extra) {
+	return dependsOnProtocols(o, [ 'h248' ], extra);
+}
+
+/* The SIP block serves both the softswitch and the IMS flavour. */
+function forSip(o, extra) {
+	return dependsOnProtocols(o, [ 'sip', 'ims_sip' ], extra);
+}
+
+/*
+ * The dependencies above hide every option of the H.248 and SIP sections, but
+ * LuCI still renders the two section containers, so switching the protocol
+ * would leave an empty card behind. LuCI puts the "cbi-voice-<name>" id on the
+ * inner "cbi-section-node" element; the card to hide is the surrounding
+ * "cbi-section" div which also carries the heading.
+ */
+function sectionCard(node, name) {
+	var inner = node.querySelector('#cbi-voice-' + name);
+
+	return inner ? (inner.closest('.cbi-section') || inner) : null;
+}
+
+function toggleProtocolSections(node, protocolOption) {
+	var h248 = sectionCard(node, 'h248');
+	var sip = sectionCard(node, 'sip');
+	var frame = node.querySelector('#cbi-voice-config-protocol');
+
+	function update() {
+		var value = protocolOption ? protocolOption.formvalue('config') : null;
+
+		if (h248)
+			h248.classList[(value === 'h248') ? 'remove' : 'add']('hidden');
+
+		if (sip)
+			sip.classList[(value === 'sip' || value === 'ims_sip') ? 'remove' : 'add']('hidden');
+	}
+
+	if (protocolOption)
+		protocolOption.onchange = update;
+
+	/* The native events bubble up to the option frame; LuCI's own
+	   "widget-change" event is already wired through onchange above. */
+	if (frame) {
+		frame.addEventListener('change', update);
+		frame.addEventListener('input', update);
+	}
+
+	update();
+}
+
+function serverOption(s, tab, name, title, descr) {
+	var o = s.taboption(tab, form.Value, name, title, descr);
+
+	o.datatype = 'or(hostname,ipaddr)';
+	o.rmempty = true;
+
+	return forSip(o);
+}
+
+function portOption(s, tab, name, title) {
+	var o = s.taboption(tab, form.Value, name, title);
+
+	o.datatype = 'range(1,65534)';
+	o.placeholder = '5060';
+	o.rmempty = false;
+
+	return forSip(o);
+}
+
+function transportOption(s, tab, name, title) {
+	var o = s.taboption(tab, form.ListValue, name, title);
+
+	o.default = 'udp';
+	o.value('udp', 'UDP');
+	o.value('tcp', 'TCP');
+	o.value('tls', 'TLS');
+	o.rmempty = false;
+
+	return forSip(o);
+}
+
 return view.extend({
 	load: function() {
 		return uci.load('voice');
 	},
 
 	render: function() {
-		var m, s, o, ports;
+		var m, s, o, ports, protocolOption;
 
 		ensureStylesheet();
 
@@ -74,7 +182,7 @@ return view.extend({
 		o.default = '0';
 		o.rmempty = false;
 
-		o = s.option(form.ListValue, 'protocol', _('Voice protocol'),
+		protocolOption = o = s.option(form.ListValue, 'protocol', _('Voice protocol'),
 			_('The signalling protocol spoken with the softswitch.'));
 		o.default = 'h248';
 		o.value('h248', _('H.248'));
@@ -146,12 +254,25 @@ return view.extend({
 		o.value('g711', _('G.711'));
 		o.rmempty = false;
 
+		o = s.option(form.ListValue, 'fax_negotiation', _('Fax negotiation mode'),
+			_('How the fax call is negotiated when the G.711 codec is used.'));
+		o.default = 'all';
+		o.value('all', _('T.30 full control'));
+		o.value('other', _('T.30 auto negotiation'));
+		o.rmempty = false;
+		o.depends('fax_mode', 'g711');
+
+		o = s.option(form.Flag, 'time_sync', _('Synchronize the phone clock'),
+			_('Send the gateway time to the connected phone.'));
+		o.default = '0';
+		o.rmempty = false;
+
 		/* ---------------------------------------------------------------- *
 		 * H.248                                                            *
 		 * ---------------------------------------------------------------- */
 
 		s = m.section(form.NamedSection, 'h248', 'h248', _('H.248'),
-			_('Media gateway settings reported to the softswitch. Only used with the H.248 voice protocol.'));
+			_('Media gateway settings reported to the softswitch.'));
 		s.anonymous = true;
 		s.addremove = false;
 		s.tab('basic', _('Basic settings'));
@@ -159,159 +280,261 @@ return view.extend({
 		s.tab('advanced', _('Advanced settings'));
 		s.tab('heartbeat', _('Heartbeat'));
 
-		o = s.taboption('basic', form.ListValue, 'message_encoding', _('Message encoding'),
-			_('Wire format of the H.248 messages.'));
+		o = forH248(s.taboption('basic', form.ListValue, 'message_encoding', _('Message encoding'),
+			_('Wire format of the H.248 messages.')));
 		o.default = 'ASN.1';
 		o.value('ABNF', _('Text (ABNF)'));
 		o.value('ASN.1', _('Binary (ASN.1)'));
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.Value, 'primary_server', _('Primary server address'),
-			_('Address of the media gateway controller.'));
+		o = forH248(s.taboption('basic', form.Value, 'primary_server', _('Primary server address'),
+			_('Address of the media gateway controller.')));
 		o.datatype = 'or(hostname,ipaddr)';
 		o.rmempty = true;
 
-		o = s.taboption('basic', form.Value, 'primary_port', _('Primary server port'));
+		o = forH248(s.taboption('basic', form.Value, 'primary_port', _('Primary server port')));
 		o.datatype = 'range(1,65534)';
 		o.placeholder = '2944';
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.Value, 'standby_server', _('Standby server address'),
-			_('Address used when the primary media gateway controller cannot be reached.'));
+		o = forH248(s.taboption('basic', form.Value, 'standby_server', _('Standby server address'),
+			_('Address used when the primary media gateway controller cannot be reached.')));
 		o.datatype = 'or(hostname,ipaddr)';
 		o.rmempty = true;
 
-		o = s.taboption('basic', form.Value, 'standby_port', _('Standby server port'));
+		o = forH248(s.taboption('basic', form.Value, 'standby_port', _('Standby server port')));
 		o.datatype = 'range(1,65534)';
 		o.placeholder = '2944';
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.ListValue, 'registration_mode', _('MG registration mode'),
-			_('Identity the media gateway registers with.'));
+		o = forH248(s.taboption('basic', form.ListValue, 'registration_mode', _('MG registration mode'),
+			_('Identity the media gateway registers with.')));
 		o.default = 'domain';
 		o.value('ip', _('IP address'));
 		o.value('domain', _('MG domain name'));
 		o.value('device', _('Device name'));
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.Value, 'domain', _('Domain name'),
-			_('Domain name registered by the media gateway.'));
-		o.datatype = 'maxlength(64)';
-		o.rmempty = true;
-		o.depends('registration_mode', 'domain');
+	o = forH248(s.taboption('basic', form.Value, 'domain', _('Domain name'),
+		_('Domain name registered by the media gateway.')), { registration_mode: 'domain' });
+	o.datatype = 'maxlength(64)';
+	o.rmempty = true;
+	forH248(o, { registration_mode: 'device' });
 
-		o = s.taboption('basic', form.Value, 'mg_port', _('MG port'),
-			_('Local port the media gateway listens on.'));
+		o = forH248(s.taboption('basic', form.Value, 'mg_port', _('MG port'),
+			_('Local port the media gateway listens on.')));
 		o.datatype = 'range(1,65534)';
 		o.placeholder = '2944';
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.ListValue, 'authentication', _('Authentication method'));
+		o = forH248(s.taboption('basic', form.ListValue, 'authentication', _('Authentication method')));
 		o.default = 'none';
 		o.value('none', _('None'));
 		o.value('md5', _('MD5'));
 		o.rmempty = false;
 
-		o = s.taboption('basic', form.Value, 'physical_term_prefix', _('Physical termination prefix'),
-			_('Prefix prepended to the physical termination identifier of every port.'));
+		o = forH248(s.taboption('basic', form.Value, 'physical_term_prefix', _('Physical termination prefix'),
+			_('Prefix prepended to the physical termination identifier of every port.')));
 		o.placeholder = 'A0';
 		o.rmempty = true;
 
-		o = s.taboption('resource', form.Value, 'rtp_prefix', _('RTP ephemeral termination prefix'),
-			_('Prefix prepended to the identifier of every ephemeral RTP termination.'));
+		o = forH248(s.taboption('resource', form.Value, 'rtp_prefix', _('RTP ephemeral termination prefix'),
+			_('Prefix prepended to the identifier of every ephemeral RTP termination.')));
 		o.datatype = 'maxlength(64)';
 		o.placeholder = 'RTP/';
 		o.rmempty = true;
 
-		o = s.taboption('resource', form.Value, 'ephemeral_term_start', _('First ephemeral termination'));
+		o = forH248(s.taboption('resource', form.Value, 'ephemeral_term_start', _('First ephemeral termination')));
 		o.datatype = 'range(0,99999)';
 		o.placeholder = '0';
 		o.rmempty = false;
 
-		o = s.taboption('resource', form.ListValue, 'ephemeral_term_align', _('Ephemeral termination alignment'),
-			_('Whether the number of ephemeral terminations is padded to a fixed width.'));
+		o = forH248(s.taboption('resource', form.ListValue, 'ephemeral_term_align', _('Ephemeral termination alignment'),
+			_('Whether the number of ephemeral terminations is padded to a fixed width.')));
 		o.default = 'aligned';
 		o.value('aligned', _('Aligned'));
 		o.value('unaligned', _('Unaligned'));
 		o.rmempty = false;
 
-		o = s.taboption('resource', form.Value, 'ephemeral_term_digits', _('Ephemeral termination digit length'));
+		o = forH248(s.taboption('resource', form.Value, 'ephemeral_term_digits', _('Ephemeral termination digit length')));
 		o.datatype = 'range(0,10)';
 		o.placeholder = '3';
 		o.rmempty = false;
 
-		o = s.taboption('resource', form.Value, 'ephemeral_term_count', _('Number of ephemeral terminations'),
-			_('Ephemeral terminations available for RTP streams.'));
+		o = forH248(s.taboption('resource', form.Value, 'ephemeral_term_count', _('Number of ephemeral terminations'),
+			_('Ephemeral terminations available for RTP streams.')));
 		o.datatype = 'range(0,1000)';
 		o.placeholder = '2';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Flag, 'ack_enabled', _('Enable ACK messages'),
-			_('Acknowledge every H.248 transaction with a dedicated message.'));
+		o = forH248(s.taboption('advanced', form.Flag, 'ack_enabled', _('Enable ACK messages'),
+			_('Acknowledge every H.248 transaction with a dedicated message.')));
 		o.default = '0';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'long_timer', _('Transaction long timer (ms)'),
-			_('How long a transaction waits for its final response.'));
+		o = forH248(s.taboption('advanced', form.Value, 'long_timer', _('Transaction long timer (ms)'),
+			_('How long a transaction waits for its final response.')));
 		o.datatype = 'range(1000,30000)';
 		o.placeholder = '30000';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'pending_timer', _('Pending timer (ms)'),
-			_('How long a transaction may stay pending before it is retried.'));
+		o = forH248(s.taboption('advanced', form.Value, 'pending_timer', _('Pending timer (ms)'),
+			_('How long a transaction may stay pending before it is retried.')));
 		o.datatype = 'range(1000,20000)';
 		o.placeholder = '1000';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'retransmit_timer', _('Retransmission timer (ms)'),
-			_('Delay before a transaction request is sent again.'));
+		o = forH248(s.taboption('advanced', form.Value, 'retransmit_timer', _('Retransmission timer (ms)'),
+			_('Delay before a transaction request is sent again.')));
 		o.datatype = 'range(1000,20000)';
 		o.placeholder = '1000';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'retransmit_count', _('Transaction retransmission count'));
+		o = forH248(s.taboption('advanced', form.Value, 'retransmit_count', _('Transaction retransmission count')));
 		o.datatype = 'range(1,10)';
 		o.placeholder = '6';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'retransmit_interval', _('Transaction retransmission interval (s)'));
+		o = forH248(s.taboption('advanced', form.Value, 'retransmit_interval', _('Transaction retransmission interval (s)')));
 		o.datatype = 'range(1,10)';
 		o.placeholder = '4';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'retransmit_duration', _('Transaction retransmission duration (s)'),
-			_('How long a transaction is retransmitted before it is given up.'));
+		o = forH248(s.taboption('advanced', form.Value, 'retransmit_duration', _('Transaction retransmission duration (s)'),
+			_('How long a transaction is retransmitted before it is given up.')));
 		o.datatype = 'range(1,60)';
 		o.placeholder = '25';
 		o.rmempty = false;
 
-		o = s.taboption('advanced', form.Value, 'reregister_period', _('Re-registration period (s)'));
+		o = forH248(s.taboption('advanced', form.Value, 'reregister_period', _('Re-registration period (s)')));
 		o.datatype = 'range(1,300)';
 		o.placeholder = '30';
 		o.rmempty = false;
 
-		o = s.taboption('heartbeat', form.ListValue, 'heartbeat_mode', _('Heartbeat mode'),
-			_('How the media gateway detects that the softswitch is still reachable.'));
+		o = forH248(s.taboption('heartbeat', form.ListValue, 'heartbeat_mode', _('Heartbeat mode'),
+			_('How the media gateway detects that the softswitch is still reachable.')));
 		o.default = 'active';
 		o.value('off', _('Off'));
 		o.value('active', _('Active'));
 		o.value('passive', _('Passive'));
 		o.rmempty = false;
 
-		o = s.taboption('heartbeat', form.Value, 'heartbeat_period', _('Heartbeat period (s)'));
-		o.datatype = 'range(0,600)';
+	o = forH248(s.taboption('heartbeat', form.Value, 'heartbeat_period', _('Heartbeat period (s)')), { heartbeat_mode: 'active' });
+	o.datatype = 'range(0,600)';
+	o.placeholder = '60';
+	o.rmempty = false;
+	forH248(o, { heartbeat_mode: 'passive' });
+
+	o = forH248(s.taboption('heartbeat', form.Value, 'heartbeat_count', _('Heartbeat count'),
+		_('Consecutive missed heartbeats before the registration is refreshed.')), { heartbeat_mode: 'active' });
+	o.datatype = 'range(1,10)';
+	o.placeholder = '3';
+	o.rmempty = false;
+	forH248(o, { heartbeat_mode: 'passive' });
+
+		/* ---------------------------------------------------------------- *
+		 * SIP                                                              *
+		 * ---------------------------------------------------------------- */
+
+		s = m.section(form.NamedSection, 'sip', 'sip', _('SIP'),
+			_('Session Initiation Protocol settings used with the softswitch and IMS SIP voice protocols.'));
+		s.anonymous = true;
+		s.addremove = false;
+		s.tab('server', _('Servers'));
+		s.tab('standby', _('Standby servers'));
+		s.tab('advanced', _('Advanced settings'));
+		s.tab('heartbeat', _('Heartbeat'));
+
+		serverOption(s, 'server', 'proxy_server', _('Proxy server'),
+			_('Address of the SIP proxy, an IP address or a domain name.'));
+		portOption(s, 'server', 'proxy_port', _('Proxy server port'));
+		transportOption(s, 'server', 'proxy_transport', _('Proxy server transport'));
+
+		serverOption(s, 'server', 'register_server', _('Registrar server'),
+			_('Address of the SIP registrar, an IP address or a domain name.'));
+		portOption(s, 'server', 'register_port', _('Registrar server port'));
+		transportOption(s, 'server', 'register_transport', _('Registrar server transport'));
+
+		serverOption(s, 'server', 'outbound_server', _('Outbound proxy server'),
+			_('Address of the outbound proxy. Leave empty to send requests straight to the proxy server.'));
+		portOption(s, 'server', 'outbound_port', _('Outbound proxy port'));
+
+		serverOption(s, 'server', 'home_domain', _('Home gateway domain'),
+			_('Domain the gateway registers with, an IP address or a domain name.'));
+		portOption(s, 'server', 'home_domain_port', _('Home gateway domain port'));
+		transportOption(s, 'server', 'home_domain_transport', _('Home gateway domain transport'));
+
+		serverOption(s, 'standby', 'standby_proxy_server', _('Standby proxy server'),
+			_('Address used when the SIP proxy cannot be reached.'));
+		portOption(s, 'standby', 'standby_proxy_port', _('Standby proxy server port'));
+		transportOption(s, 'standby', 'standby_proxy_transport', _('Standby proxy server transport'));
+
+		serverOption(s, 'standby', 'standby_register_server', _('Standby registrar server'),
+			_('Address used when the SIP registrar cannot be reached.'));
+		portOption(s, 'standby', 'standby_register_port', _('Standby registrar server port'));
+		transportOption(s, 'standby', 'standby_register_transport', _('Standby registrar server transport'));
+
+		serverOption(s, 'standby', 'standby_outbound_server', _('Standby outbound proxy server'),
+			_('Address of the outbound proxy used when the primary one cannot be reached.'));
+		portOption(s, 'standby', 'standby_outbound_port', _('Standby outbound proxy port'));
+
+		o = forSip(s.taboption('advanced', form.Value, 'signalling_dscp', _('Signalling DSCP'),
+			_('DSCP mark of the SIP signalling packets.')));
+		o.datatype = 'range(0,63)';
+		o.placeholder = '0';
+		o.rmempty = false;
+
+		o = forSip(s.taboption('advanced', form.Value, 'media_dscp', _('Media DSCP'),
+			_('DSCP mark of the voice packets.')));
+		o.datatype = 'range(0,63)';
+		o.placeholder = '0';
+		o.rmempty = false;
+
+		o = forSip(s.taboption('advanced', form.Value, 'register_period', _('Registration period (s)'),
+			_('How often the gateway registers again.')));
+		o.datatype = 'uinteger';
+		o.placeholder = '3600';
+		o.rmempty = false;
+
+		o = forSip(s.taboption('advanced', form.Value, 'register_retry_period', _('Registration retry period (s)'),
+			_('How soon a failed registration is retried.')));
+		o.datatype = 'uinteger';
 		o.placeholder = '60';
 		o.rmempty = false;
-		o.depends('heartbeat_mode', 'active');
-		o.depends('heartbeat_mode', 'passive');
 
-		o = s.taboption('heartbeat', form.Value, 'heartbeat_count', _('Heartbeat count'),
-			_('Consecutive missed heartbeats before the registration is refreshed.'));
-		o.datatype = 'range(1,10)';
-		o.placeholder = '3';
+		o = forSip(s.taboption('advanced', form.Value, 'session_update_period', _('Session update period (min)'),
+			_('How often an established call refreshes its session.')));
+		o.datatype = 'uinteger';
+		o.placeholder = '30';
 		o.rmempty = false;
-		o.depends('heartbeat_mode', 'active');
-		o.depends('heartbeat_mode', 'passive');
+
+		o = forSip(s.taboption('advanced', form.Value, 'min_session_update_period', _('Minimum session update period (min)'),
+			_('Shortest session refresh interval accepted from the server.')));
+		o.datatype = 'uinteger';
+		o.placeholder = '1';
+		o.rmempty = false;
+
+		o = forSip(s.taboption('heartbeat', form.Flag, 'heartbeat_enabled', _('Enable heartbeat'),
+			_('Detect whether the server is still reachable while no call is up.')));
+		o.default = '0';
+		o.rmempty = false;
+
+	o = forSip(s.taboption('heartbeat', form.Value, 'heartbeat_period', _('Heartbeat period (s)')), { heartbeat_enabled: '1' });
+	o.datatype = 'uinteger';
+	o.placeholder = '60';
+	o.rmempty = false;
+
+	o = forSip(s.taboption('heartbeat', form.Value, 'heartbeat_timeout_count', _('Heartbeat timeout count'),
+		_('Heartbeat timeouts before the registration is refreshed.')), { heartbeat_enabled: '1' });
+	o.datatype = 'uinteger';
+	o.placeholder = '3';
+	o.rmempty = false;
+
+	o = forSip(s.taboption('heartbeat', form.ListValue, 'heartbeat_mode', _('Heartbeat mode')), { heartbeat_enabled: '1' });
+	o.default = 'active';
+	o.value('active', _('Active'));
+	o.value('passive', _('Passive'));
+	o.rmempty = false;
 
 		/* ---------------------------------------------------------------- *
 		 * Digit map                                                        *
@@ -365,9 +588,11 @@ return view.extend({
 		ports = listVoicePorts();
 
 		s = m.section(form.TypedSection, 'line', _('Line settings'),
-			_('Gain, echo cancellation and the physical termination identifier of every FXS port.'));
+			_('Gain, echo cancellation and the identity of every FXS port. The two shipped sections are the two FXS ports of the device; the authentication credentials apply to the SIP voice protocols.'));
 		s.anonymous = false;
-		s.addremove = true;
+
+		/* The number of FXS ports is fixed by the hardware. */
+		s.addremove = false;
 
 		o = s.option(form.Flag, 'enabled', _('Enable'));
 		o.default = '1';
@@ -376,6 +601,18 @@ return view.extend({
 		o = s.option(form.Value, 'physical_term_id', _('Line termination ID'),
 			_('Termination reported to the softswitch for this port.'));
 		o.placeholder = 'A0';
+		o.rmempty = true;
+
+		o = forSip(s.option(form.Value, 'auth_username', _('Authentication user name'),
+			_('User name the line authenticates with.')));
+		o.rmempty = true;
+
+		o = forSip(s.option(form.Value, 'auth_password', _('Authentication password')));
+		o.password = true;
+		o.rmempty = true;
+
+		o = forSip(s.option(form.Value, 'phone_number', _('Phone number'),
+			_('Number presented to the called party.')));
 		o.rmempty = true;
 
 		o = s.option(form.Value, 'transmit_gain', _('Transmit gain (dB)'),
@@ -426,6 +663,10 @@ return view.extend({
 		o.placeholder = '1';
 		o.rmempty = false;
 
-		return m.render();
+		return m.render().then(function(node) {
+			toggleProtocolSections(node, protocolOption);
+
+			return node;
+		});
 	}
 });
