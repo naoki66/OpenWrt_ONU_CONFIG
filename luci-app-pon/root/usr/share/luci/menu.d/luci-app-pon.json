@@ -31,7 +31,7 @@
 		}
 	},
 	"admin/network/pon/config": {
-		"title": "Configuration",
+		"title": "Authentication configuration",
 		"order": 30,
 		"action": {
 			"type": "view",

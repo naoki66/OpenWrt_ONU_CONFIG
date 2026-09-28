@@ -74,12 +74,20 @@ function displayBoolean(value) {
 	return _('Unknown');
 }
 
-function displayFrontendMetric(frontend, field, unit) {
+/*
+ * A measurement is carried by its number and only qualified by its unit, so
+ * the unit is rendered smaller and muted next to the reading.
+ */
+function frontendReading(frontend, field, unit) {
 	if (frontend.error)
 		return _('Read failed');
 	if (!Object.prototype.hasOwnProperty.call(frontend, field))
 		return _('Not supported');
-	return Number(frontend[field]).toFixed(2) + ' ' + unit;
+
+	return E('span', {}, [
+		E('span', { 'class': 'pon-num' }, Number(frontend[field]).toFixed(2)),
+		E('span', { 'class': 'pon-unit' }, unit)
+	]);
 }
 
 function displayLifecycle(value) {
@@ -394,15 +402,18 @@ function badge(text) {
 	return E('span', { 'class': 'ifacebadge' }, text);
 }
 
-function metricTile(label, value, severity) {
+function tileValue(value) {
 	if (value == null || value === '')
-		value = _('Unknown');
-	else if (typeof value !== 'object')
-		value = String(value);
+		return _('Unknown');
+	if (typeof value === 'object')
+		return value;
+	return String(value);
+}
 
+function metricTile(label, value, severity) {
 	return E('dl', { 'class': 'pon-tile' }, [
 		E('dt', {}, label),
-		E('dd', {}, stateLabel(severity, value))
+		E('dd', {}, stateLabel(severity, tileValue(value)))
 	]);
 }
 
@@ -410,11 +421,75 @@ function metricGrid(tiles) {
 	return E('div', { 'class': 'pon-grid' }, tiles);
 }
 
-/* Counters and secondary details use the same tiles, only inside a fold. */
-function metricFold(title, tiles, instance) {
+/* One label/value pair of a detail list. */
+function listRow(label, value, severity) {
+	return [
+		E('dt', {}, label),
+		E('dd', {}, stateLabel(severity, tileValue(value)))
+	];
+}
+
+function listNodes(rows) {
+	var nodes = [];
+
+	rows.forEach(function(row) {
+		nodes.push(row[0], row[1]);
+	});
+
+	return nodes;
+}
+
+/*
+ * Line details and counters are label/value rows, not more tiles. A dozen
+ * boxed tiles of short values read as a spreadsheet; rows keep the eye on the
+ * values, give long strings room to wrap and let figures share a column start.
+ */
+function detailList(rows, flags) {
+	var classes = [ 'pon-list' ];
+
+	if (flags && flags.split)
+		classes.push('pon-list--split');
+	if (flags && flags.numeric)
+		classes.push('pon-list--numeric');
+
+	return E('dl', { 'class': classes.join(' ') }, listNodes(rows));
+}
+
+/*
+ * Line details stay visible: they answer "is the line set up the way I
+ * expect", which is read together with the headline metrics, not dug out of a
+ * fold. Only the counters are folded, because they are for troubleshooting.
+ */
+function detailBlock(title, rows) {
+	return E('div', { 'class': 'pon-block' }, [
+		E('h4', { 'class': 'pon-subhead' }, title),
+		detailList(rows)
+	]);
+}
+
+function detailGroup(group) {
+	var list = detailList(group.rows, group);
+
+	if (!group.title)
+		return list;
+
+	return E('div', {}, [
+		E('h4', { 'class': 'pon-subhead' }, group.title),
+		list
+	]);
+}
+
+function detailFold(title, groups, instance) {
+	var count = groups.reduce(function(total, group) {
+		return total + group.rows.length;
+	}, 0);
+
 	return E('details', { 'class': 'pon-fold', 'data-pon-details': instance }, [
-		E('summary', {}, title),
-		metricGrid(tiles)
+		E('summary', {}, [
+			title,
+			E('span', { 'class': 'pon-count' }, String(count))
+		]),
+		E('div', { 'class': 'pon-fold-body' }, groups.map(detailGroup))
 	]);
 }
 
@@ -426,13 +501,32 @@ function cardHeader(title, tags) {
 	]);
 }
 
-function modeTiles(mode) {
+function modeRows(mode) {
 	return [
-		metricTile(_('Current line mode'), modeLabel(mode.active)),
-		metricTile(_('Configured line mode'), modeLabel(mode.configured)),
-		metricTile(_('Configuration state'), !mode.active ? _('Line stopped') :
+		listRow(_('Current line mode'), modeLabel(mode.active)),
+		listRow(_('Configured line mode'), modeLabel(mode.configured)),
+		listRow(_('Configuration state'), !mode.active ? _('Line stopped') :
 			(mode.pending ? _('Takes effect after interface restart') : _('Applied')),
 			mode.pending && mode.active ? 'pending' : '')
+	];
+}
+
+/*
+ * The optical frontend is neither a link state nor a frame counter, so it gets
+ * its own group at the end of the counters fold.
+ */
+function frontendRows(frontend) {
+	return [
+		listRow(_('Calibration state'), ({
+			ready: _('Loaded'), missing: _('Missing'), invalid: _('Invalid format'),
+			'not-required': _('Not required'), unknown: _('Unknown')
+		})[frontend.calibration] || _('Unknown'),
+			frontend.calibration === 'ready' ? 'ok' :
+			(frontend.calibration === 'missing' || frontend.calibration === 'invalid' ?
+				'error' : '')),
+		listRow(_('Frontend TX gate enabled'), frontend.error ?
+			_('Read failed') : displayBoolean(frontend.tx_gate_enabled),
+			frontend.error ? 'error' : booleanSeverity(frontend.tx_gate_enabled))
 	];
 }
 
@@ -445,7 +539,7 @@ function renderLine(item) {
 	var mode = getLineModes(item);
 	var epon = isEponMode(mode.shown);
 	var title = _('PON line: %s (%s)').format(item.section['.name'], item.section.device || '-');
-	var tags, tiles, rows, details;
+	var tags, tiles, rows, groups;
 
 	if (item.error)
 		return { mode: mode.shown, nodes: [ E('div', { 'class': 'cbi-section' }, [
@@ -465,101 +559,101 @@ function renderLine(item) {
 			lifecycleSeverity(line.lifecycle)),
 		metricTile(_('Optical signal detected'), displayBoolean(line.optical_signal),
 			booleanSeverity(line.optical_signal)),
-		metricTile(_('Receive optical power'), displayFrontendMetric(
-			frontend, 'rx_power_dbm', 'dBm')),
-		metricTile(_('Transmit optical power'), displayFrontendMetric(
-			frontend, 'tx_power_dbm', 'dBm')),
-		metricTile(_('Optical frontend temperature'), displayFrontendMetric(
-			frontend, 'temperature_celsius', '°C'))
+		metricTile(_('Receive optical power'),
+			frontendReading(frontend, 'rx_power_dbm', 'dBm')),
+		metricTile(_('Transmit optical power'),
+			frontendReading(frontend, 'tx_power_dbm', 'dBm')),
+		metricTile(_('Optical frontend temperature'),
+			frontendReading(frontend, 'temperature_celsius', '°C'))
 	];
 
-	rows = modeTiles(mode);
+	rows = modeRows(mode);
 
 	if (epon) {
 		/* Same ordering rule as the ITU-T branch: the MPCP state stays in the
 		   always visible grid, the assigned LLID is only a number and lives
-		   in the details fold. */
+		   with the other line details. */
 		tiles.push(
 			metricTile(_('MPCP state'), displayMpcpState(registration.mpcp_state),
 				mpcpSeverity(registration.mpcp_state))
 		);
-		rows.push(
-			metricTile(_('PCS synchronized'), displayBoolean(line.pcs_sync),
+		rows = rows.concat([
+			listRow(_('PCS synchronized'), displayBoolean(line.pcs_sync),
 				booleanSeverity(line.pcs_sync)),
-			metricTile(_('LLID0'), registration.llid_valid === true ?
+			listRow(_('PCS profile'), line.pcs_profile_valid ?
+				line.pcs_profile : _('Not configured')),
+			listRow(_('LLID0'), registration.llid_valid === true ?
 				E('var', {}, String(registration.llid)) : _('Not assigned')),
-			metricTile(_('LLID0 data path configured'),
+			listRow(_('LLID0 data path configured'),
 				displayBoolean(datapath.data_path_configured),
 				booleanSeverity(datapath.data_path_configured)),
-			metricTile(_('Upstream burst transmitter ready'),
+			listRow(_('Upstream burst transmitter ready'),
 				displayBoolean(registration.upstream_tx_armed),
 				booleanSeverity(registration.upstream_tx_armed))
-		);
-		details = [
-			metricTile(_('Last start error'), line.last_start_error),
-			metricTile(_('PCS profile'), line.pcs_profile_valid ?
-				line.pcs_profile : _('Not configured')),
-			metricTile(_('Receiver activation count'), counters.rx_start_count),
-			metricTile(_('PCS synchronization losses'), counters.sync_losses),
-			metricTile(_('PCS recovery attempts'), counters.recoveries),
-			metricTile(_('Full PMA reinitializations'), counters.full_reinitializations),
-			metricTile(_('Discovery Gates received'), counters.discovery_gates),
-			metricTile(_('Register Request commands submitted'), counters.register_requests),
-			metricTile(_('Register messages received'), counters.register_messages),
-			metricTile(_('Register ACKs transmitted'), counters.register_acks),
-			metricTile(_('Register NACKs'), counters.register_nacks),
-			metricTile(_('MPCP timeouts'), counters.mpcp_timeouts),
-			metricTile(_('MAC error conditions'), counters.mac_errors)
+		]);
+		groups = [
+			{ title: _('Link events'), rows: [
+				listRow(_('Last start error'), line.last_start_error),
+				listRow(_('Receiver activation count'), counters.rx_start_count),
+				listRow(_('PCS synchronization losses'), counters.sync_losses),
+				listRow(_('PCS recovery attempts'), counters.recoveries),
+				listRow(_('Full PMA reinitializations'), counters.full_reinitializations)
+			], numeric: true, split: true },
+			{ title: _('Registration handshake'), rows: [
+				listRow(_('Discovery Gates received'), counters.discovery_gates),
+				listRow(_('Register Request commands submitted'), counters.register_requests),
+				listRow(_('Register messages received'), counters.register_messages),
+				listRow(_('Register ACKs transmitted'), counters.register_acks),
+				listRow(_('Register NACKs'), counters.register_nacks),
+				listRow(_('MPCP timeouts'), counters.mpcp_timeouts),
+				listRow(_('MAC error conditions'), counters.mac_errors)
+			], numeric: true, split: true },
+			{ title: _('Optical frontend'), rows: frontendRows(frontend),
+				split: true }
 		];
 	} else {
 		tiles.push(
 			metricTile(mode.shown === 'gpon' ? _('GTC state') : _('XGTC state'),
 				displaySync(line.xgtc_sync), syncSeverity(line.xgtc_sync)),
 			/* The ONU state matters more than the assigned ONU-ID, which is
-			   only a number shown in the details fold. */
+			   only a number and sits with the other line details. */
 			metricTile(_('ONU state'), displayOnuState(registration.onu_state),
 				onuStateSeverity(registration.onu_state))
 		);
-		rows.push(
-			metricTile(_('PHY ready'), displayBoolean(line.phy_ready),
+		rows = rows.concat([
+			listRow(_('PHY ready'), displayBoolean(line.phy_ready),
 				booleanSeverity(line.phy_ready)),
-			metricTile(_('ONU-ID'), registration.onu_id_valid === true ?
+			listRow(_('ONU-ID'), registration.onu_id_valid === true ?
 				E('var', {}, String(registration.onu_id)) : _('Not assigned')),
-			metricTile(_('Kernel data path configured'),
+			listRow(_('Kernel data path configured'),
 				displayBoolean(datapath.data_path_configured),
 				booleanSeverity(datapath.data_path_configured)),
-			metricTile(_('Service ready'), displayBoolean(datapath.service_ready),
+			listRow(_('Service ready'), displayBoolean(datapath.service_ready),
 				booleanSeverity(datapath.service_ready)),
-			metricTile(_('Upstream burst transmitter ready'),
+			listRow(_('Upstream burst transmitter ready'),
 				displayBoolean(registration.upstream_tx_armed),
 				booleanSeverity(registration.upstream_tx_armed))
-		);
-		details = [
-			metricTile(_('Last start error'), line.last_start_error),
-			metricTile(_('Receiver activation count'), counters.rx_start_count),
-			metricTile(_('Line synchronization losses'), counters.sync_losses),
-			metricTile(_('Receiver recovery attempts'), counters.recoveries),
-			metricTile(_('Full PMA reinitializations'), counters.full_reinitializations),
-			metricTile(_('Downstream transport frames'), counters.xgtc_rx),
-			metricTile(_('Downstream PLOAMd received'), counters.ploamd_rx),
-			metricTile(_('Downstream GEM frames'), counters.xgem_rx),
-			metricTile(_('Upstream bursts transmitted'), counters.upstream_bursts_tx),
-			metricTile(_('Upstream PLOAMu transmitted'), counters.ploamu_tx),
-			metricTile(_('Upstream GEM frames'), counters.xgem_tx)
+		]);
+		groups = [
+			{ title: _('Link events'), rows: [
+				listRow(_('Last start error'), line.last_start_error),
+				listRow(_('Receiver activation count'), counters.rx_start_count),
+				listRow(_('Line synchronization losses'), counters.sync_losses),
+				listRow(_('Receiver recovery attempts'), counters.recoveries),
+				listRow(_('Full PMA reinitializations'), counters.full_reinitializations)
+			], numeric: true, split: true },
+			{ title: _('Frame counters'), rows: [
+				listRow(_('Downstream transport frames'), counters.xgtc_rx),
+				listRow(_('Downstream PLOAMd received'), counters.ploamd_rx),
+				listRow(_('Downstream GEM frames'), counters.xgem_rx),
+				listRow(_('Upstream bursts transmitted'), counters.upstream_bursts_tx),
+				listRow(_('Upstream PLOAMu transmitted'), counters.ploamu_tx),
+				listRow(_('Upstream GEM frames'), counters.xgem_tx)
+			], numeric: true, split: true },
+			{ title: _('Optical frontend'), rows: frontendRows(frontend),
+				split: true }
 		];
 	}
-	details.push(
-		metricTile(_('Calibration state'), ({
-			ready: _('Loaded'), missing: _('Missing'), invalid: _('Invalid format'),
-			'not-required': _('Not required'), unknown: _('Unknown')
-		})[frontend.calibration] || _('Unknown'),
-			frontend.calibration === 'ready' ? 'ok' :
-			(frontend.calibration === 'missing' || frontend.calibration === 'invalid' ?
-				'error' : '')),
-		metricTile(_('Frontend TX gate enabled'), frontend.error ?
-			_('Read failed') : displayBoolean(frontend.tx_gate_enabled),
-			frontend.error ? 'error' : booleanSeverity(frontend.tx_gate_enabled))
-	);
 
 	return { mode: mode.shown, nodes: [
 		E('div', { 'class': 'cbi-section' }, [
@@ -567,9 +661,9 @@ function renderLine(item) {
 			E('div', { 'class': 'cbi-section-descr' },
 				_('Interface %s').format(item.section.device || '-')),
 			metricGrid(tiles),
-			metricFold(_('Line details'), rows, item.section['.name'] + '-details'),
-			metricFold(epon ? _('EPON line counters and diagnostics') :
-				_('ITU-T PON counters and diagnostics'), details,
+			detailBlock(_('Line details'), rows),
+			detailFold(epon ? _('EPON line counters and diagnostics') :
+				_('ITU-T PON counters and diagnostics'), groups,
 				item.section['.name'] + '-counters')
 		])
 	] };
@@ -602,20 +696,20 @@ function renderOmci(item) {
 			metricTile(_('Active Alloc-ID'), values.active_alloc_id),
 			metricTile(_('Active GEM-ID'), values.active_gem_id)
 		]),
-		metricFold(_('Protocol details'), [
-			metricTile(_('LOID configured locally'), displayBoolean(values.loid_configured),
+		detailFold(_('Protocol details'), [ { title: null, rows: [
+			listRow(_('LOID configured locally'), displayBoolean(values.loid_configured),
 				booleanSeverity(values.loid_configured)),
-			metricTile(_('OLT vendor ID'), values.olt_vendor_id),
-			metricTile(_('OLT equipment ID'), values.olt_equipment_id),
-			metricTile(_('OLT version'), values.olt_version),
-			metricTile(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
-			metricTile(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
-			metricTile(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
-			metricTile(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
-			metricTile(_('OLT broadcast keys'), displayBroadcastKeys(values)),
-			metricTile(_('Received OMCI messages'), values.rx_messages),
-			metricTile(_('OMCI parse errors'), values.parse_errors)
-		], item.section['.name'] + '-omci')
+			listRow(_('OLT vendor ID'), values.olt_vendor_id),
+			listRow(_('OLT equipment ID'), values.olt_equipment_id),
+			listRow(_('OLT version'), values.olt_version),
+			listRow(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
+			listRow(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
+			listRow(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
+			listRow(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
+			listRow(_('OLT broadcast keys'), displayBroadcastKeys(values)),
+			listRow(_('Received OMCI messages'), values.rx_messages),
+			listRow(_('OMCI parse errors'), values.parse_errors)
+		] } ], item.section['.name'] + '-omci')
 	]);
 }
 
@@ -652,22 +746,23 @@ function renderOam(item) {
 	];
 
 	rows = [
-		metricTile(_('Configured OAM profile'), ctc ?
+		listRow(_('Configured OAM profile'), ctc ?
 			_('IEEE 802.3ah + CTC') : _('IEEE 802.3ah')),
-		metricTile(_('CTC version'), values.ctc_version == null ?
+		listRow(_('CTC version'), values.ctc_version == null ?
 			_('Not negotiated') : '0x' + Number(values.ctc_version).toString(16)),
-		metricTile(_('LOID configured locally'), displayBoolean(values.loid_configured),
+		listRow(_('LOID configured locally'), displayBoolean(values.loid_configured),
 			booleanSeverity(values.loid_configured)),
-		metricTile(_('CTC VLAN mode'), displayVlanMode(values.vlan_mode)),
-		metricTile(_('CTC VLAN IDs'), displayVlanIds(values)),
-		metricTile(_('Received OAM messages'), values.rx_messages),
-		metricTile(_('OAM parse errors'), values.parse_errors)
+		listRow(_('CTC VLAN mode'), displayVlanMode(values.vlan_mode)),
+		listRow(_('CTC VLAN IDs'), displayVlanIds(values)),
+		listRow(_('Received OAM messages'), values.rx_messages),
+		listRow(_('OAM parse errors'), values.parse_errors)
 	];
 
 	return E('div', { 'class': 'cbi-section' }, [
 		cardHeader(title, tags),
 		metricGrid(tiles),
-		metricFold(_('Protocol details'), rows, item.section['.name'] + '-oam')
+		detailFold(_('Protocol details'), [ { title: null, rows: rows } ],
+			item.section['.name'] + '-oam')
 	]);
 }
 

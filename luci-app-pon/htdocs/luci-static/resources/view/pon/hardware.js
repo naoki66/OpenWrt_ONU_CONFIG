@@ -183,6 +183,36 @@ function loadStorages() {
 	});
 }
 
+/*
+ * Identity fields and the calibration image are two views of the same flash
+ * image: pon-board-identity patches fields in place, airoha-pon-data replaces
+ * the whole target. Both address their storage through board.json's pon_data,
+ * so the two are merged into one list of targets, each carrying the identity
+ * fields it has (if any) and the action that rewrites it.
+ */
+function mergeTargets(identity, storages) {
+	var byId = {};
+	var order = [];
+
+	storages.forEach(function(storage) {
+		byId[storage.id] = { id: storage.id, label: storage.label, fields: null };
+		order.push(storage.id);
+	});
+
+	Object.keys((identity && identity.layout.targets) || {}).forEach(function(name) {
+		if (!byId[name]) {
+			byId[name] = { id: name, label: name, fields: null };
+			order.push(name);
+		}
+
+		byId[name].fields = identity.layout.targets[name].fields || {};
+	});
+
+	return order.map(function(id) {
+		return byId[id];
+	});
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -301,101 +331,100 @@ return view.extend({
 
 		var cards = [];
 
-		if (identity)
-			cards.push(this.renderBoardIdentity(identity));
-
-		if (storages.length)
-			cards.push(this.renderCalibrationData(storages));
+		/* One card for everything written to the board's flash, grouped by
+		   storage target. The two halves still degrade independently. */
+		if (identity || storages.length)
+			cards.push(this.renderBoardData(identity, storages));
 
 		return m.render().then(L.bind(function(map) {
 			return E([], cards.concat([ map ]));
 		}, this));
 	},
 
-	renderBoardIdentity: function(identity) {
+	renderBoardData: function(identity, storages) {
 		var self = this;
 		var entries = [];
-		var blocks = Object.keys(identity.layout.targets || {}).map(function(target) {
-			var fields = identity.layout.targets[target].fields || {};
-			var rows = Object.keys(fields).map(function(field) {
-				var id = 'pon-identity-' + target + '-' + field;
+		var blocks = mergeTargets(identity, storages).map(function(target) {
+			var rows = [];
+
+			Object.keys(target.fields || {}).forEach(function(field) {
+				var id = 'pon-identity-' + target.id + '-' + field;
 				var input = E('input', {
 					'class': 'cbi-input-text',
 					'type': 'text',
 					'id': id,
-					'value': identity.data[target][field] || ''
+					'value': (((identity || {}).data || {})[target.id] || {})[field] || ''
 				});
 
 				if (self.readonly)
 					input.disabled = true;
 
-				entries.push({ target: target, field: field, def: fields[field], input: input });
+				entries.push({ target: target.id, field: field, def: target.fields[field], input: input });
 
-				return E('div', { 'class': 'cbi-value' }, [
+				rows.push(E('div', { 'class': 'cbi-value' }, [
 					E('label', { 'class': 'cbi-value-title', 'for': id },
 						boardLabels[field] || field),
 					E('div', { 'class': 'cbi-value-field' }, input)
-				]);
+				]));
 			});
 
+			if (!rows.length)
+				return null;
+
 			return E('div', {}, [
-				E('h4', { 'class': 'pon-subhead' }, _('Storage target: %s').format(target)),
-				rows
+				E('h4', { 'class': 'pon-subhead' }, _('Storage target: %s').format(target.label)),
+				rows,
+				E('div', { 'class': 'cbi-page-actions' }, [
+					E('button', {
+						'class': 'cbi-button cbi-button-action',
+						'disabled': self.readonly || null,
+						'click': ui.createHandlerFn(self, 'handleIdentityWrite', target.id)
+					}, _('Write board identity'))
+				])
 			]);
+		}).filter(function(block) {
+			return block != null;
 		});
 
+		/*
+		 * One calibration image, one target: the image replaces the whole
+		 * target, so it is picked explicitly instead of getting a button per
+		 * target next to the identity fields.
+		 */
+		/*
+		 * A board carries a single board data partition, so the image always
+		 * goes to the one target that pon_data declares — no target picker.
+		 */
+		if (storages.length)
+			blocks.push(E('div', {}, [
+				E('h4', { 'class': 'pon-subhead' }, _('Calibration image')),
+				E('div', { 'class': 'cbi-page-actions' }, [
+					/* The button id travels instead of the node: the handler
+					   looks it up when the upload actually starts. */
+					E('button', {
+						'class': 'cbi-button cbi-button-action',
+						'id': 'pon-calibration-upload',
+						'disabled': self.readonly || null,
+						'click': ui.createHandlerFn(self, 'handleCalibrationUpload',
+							storages[0], 'pon-calibration-upload')
+					}, [ _('Upload and write') ])
+				])
+			]));
+
 		this.identityEntries = entries;
-		this.identityOriginal = JSON.parse(JSON.stringify(identity.data));
-
-		return E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Board identity')),
-			E('div', { 'class': 'cbi-section-descr' },
-				_('Values stored on the board. They are used after a reboot; the previous image is kept as /tmp/pon-board-identity.*.bin.')),
-			blocks,
-			E('div', { 'class': 'cbi-page-actions' }, [
-				E('button', {
-					'class': 'cbi-button cbi-button-action',
-					'disabled': this.readonly || null,
-					'click': ui.createHandlerFn(this, 'handleIdentityWrite')
-				}, _('Write board identity'))
-			])
-		]);
-	},
-
-	renderCalibrationData: function(storages) {
-		var selector = E('select', {
-			'class': 'cbi-input-select',
-			'id': 'pon-calibration-target'
-		}, storages.map(function(storage, index) {
-			return E('option', { 'value': String(index) }, storage.label);
-		}));
-
-		if (this.readonly)
-			selector.disabled = true;
+		this.identityOriginal = JSON.parse(JSON.stringify((identity || {}).data || {}));
 
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Calibration data')),
 			E('div', { 'class': 'cbi-section-descr' },
-				_('Upload a calibration image and write it to the selected target. The previous image is kept as /tmp/pon-board-data.*.bin.')),
-			E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title', 'for': 'pon-calibration-target' },
-					_('Target storage')),
-				E('div', { 'class': 'cbi-value-field' }, [
-					selector,
-					E('button', {
-						'class': 'cbi-button cbi-button-action',
-						'disabled': this.readonly || null,
-						'click': ui.createHandlerFn(this, 'handleCalibrationUpload', storages, selector)
-					}, [ _('Upload and write') ])
-				])
-			])
+				_('The identity fields and the calibration image are the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; a calibration image replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.')),
+			blocks
 		]);
 	},
 
-	handleCalibrationUpload: function(storages, selector) {
+	handleCalibrationUpload: function(target, buttonId) {
 		var self = this;
-		var storage = storages[Number(selector.value)];
-		var button = selector.nextElementSibling;
+		var button = document.getElementById(buttonId);
 
 		/*
 		 * The button is only locked while the image is written. Locking it
@@ -408,14 +437,14 @@ return view.extend({
 				button.classList.add('spinning');
 			}
 
-			return fs.exec('/usr/libexec/airoha-pon-data', [ 'write', storage.id ]);
+			return fs.exec('/usr/libexec/airoha-pon-data', [ 'write', target.id ]);
 		}).then(function(result) {
 			if (result.code != 0)
 				throw new Error(result.stderr || result.stdout || _('Write failed.'));
 
 			var message = [
 				_('Calibration data written to %s and verified. Reboot the device to apply it.')
-					.format(storage.label)
+					.format(target.label)
 			];
 
 			if (result.stdout.trim())
@@ -434,18 +463,25 @@ return view.extend({
 		});
 	},
 
-	handleIdentityWrite: function() {
+	/* Writes the changed identity fields of a single storage target. */
+	handleIdentityWrite: function(target) {
 		var self = this;
 		var pending = [];
 		var failure = null;
 
 		this.identityEntries.forEach(function(entry) {
-			var value = entry.input.value.trim();
-			var result = validateBoardField(entry.def, value);
+			var original, value, result;
+
+			if (entry.target !== target)
+				return;
+
+			original = (self.identityOriginal[entry.target] || {})[entry.field] || '';
+			value = entry.input.value.trim();
+			result = validateBoardField(entry.def, value);
 
 			entry.input.classList.remove('cbi-input-invalid');
 
-			if (value == (self.identityOriginal[entry.target][entry.field] || ''))
+			if (value == original)
 				return;
 
 			if (result !== true) {
@@ -468,36 +504,21 @@ return view.extend({
 			return;
 		}
 
-		var groups = {};
+		var args = [ 'write', target ];
+
 		pending.forEach(function(entry) {
-			groups[entry.target] = groups[entry.target] || [];
-			groups[entry.target].push(entry);
+			args.push(entry.field + '=' + entry.input.value);
 		});
 
-		var sequence = Promise.resolve();
-		var results = [];
-
-		Object.keys(groups).forEach(function(target) {
-			sequence = sequence.then(function() {
-				var args = [ 'write', target ];
-
-				groups[target].forEach(function(entry) {
-					args.push(entry.field + '=' + entry.input.value);
-				});
-
-				return runIdentity(args).then(function(output) {
-					results.push(output);
-					groups[target].forEach(function(entry) {
-						self.identityOriginal[entry.target][entry.field] = entry.input.value;
-					});
-				});
+		return runIdentity(args).then(function(output) {
+			pending.forEach(function(entry) {
+				self.identityOriginal[entry.target] = self.identityOriginal[entry.target] || {};
+				self.identityOriginal[entry.target][entry.field] = entry.input.value;
 			});
-		});
 
-		return sequence.then(function() {
 			ui.addNotification(null, E('p', [
 				_('Board identity written. Reboot the device to use the new values.'),
-				E('br'), results.join('; ')
+				E('br'), output
 			]), 'info');
 		}).catch(function(error) {
 			ui.addNotification(null, E('p', [

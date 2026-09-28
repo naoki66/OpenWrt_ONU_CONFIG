@@ -5,22 +5,29 @@
 luci-theme-argon 已经提供了完整的调色板、字体栈、卡片与表单样式。PON 页面**不引入第二套设计系统**，
 所有颜色与字体都通过主题变量解析，因此浅色/深色主题、用户自定义主色都能自动生效。
 
-luci-app-pon 只补充主题没有提供的三样东西，全部集中在 `view/pon/pon.css`（约 100 行）：
+luci-app-pon 只补充主题没有提供的东西，全部集中在 `view/pon/pon.css`（约 230 行）：
 
 | 类名 | 用途 | 为什么主题不够用 |
 | --- | --- | --- |
 | `.pon-grid` | 自适应指标网格 | Argon 内嵌 Pure 的 `.pure-u-*` 是固定宽度，小屏不换行 |
-| `.pon-tile` | 指标卡片（含计数项） | 主题只有整块 `cbi-section`，没有小尺寸指标瓦片 |
+| `.pon-tile` | 常显指标瓦片 | 主题只有整块 `cbi-section`，没有小尺寸指标瓦片 |
+| `.pon-num` / `.pon-unit` | 读数与单位分级 | 数值与单位同号会淹没读数本身 |
+| `.pon-list` | 明细/计数用的键值行列表 | 主题没有无边框的键值列表；十几块瓦片会读成一张表格 |
+| `.pon-block` | 常显分组（线路详情） | 主题只给 `.cbi-section > h4:first-child` 加了间距 |
+| `.pon-fold` / `.pon-fold-body` | 折叠分组（计数与诊断） | 主题的 `details` 无间距 |
+| `.pon-count` | 折叠标题上的条目数 | 主题没有计数徽标 |
 | `.pon-dot` / `.pon-state` | 状态圆点 | 主题没有状态指示件 |
-| `.pon-fold` | 折叠指标组 | 主题的 `details` 无间距，且旧写法内部是表格，风格与瓦片割裂 |
-| `.pon-subhead` | 卡片内分组标题 | 主题只给 `.cbi-section > h4:first-child` 加了间距 |
+| `.pon-subhead` | 分组标题 | 主题只给 `.cbi-section > h4:first-child` 加了间距 |
 
 复用（零新增样式）：`.cbi-map`、`.cbi-section`、`.cbi-section-descr`、`.cbi-value`、
 `.cbi-value-title`、`.cbi-value-field`、`.cbi-input-text`、`.cbi-input-invalid`、
 `.ifacebadge`、`.cbi-page-actions`、`.cbi-button-action`、`.pull-right`、`details/summary`。
 
-> **统一性约束**：状态页不使用 `.table`。所有数值、状态与计数项一律走 `.pon-tile`，
-> 只是放在常显网格还是折叠组里的区别——避免同一页出现「卡片 + 表格」两套视觉语言。
+> **统一性约束**：状态页不使用 `.table`。数值、状态与计数只用两种件——
+> **瓦片**（一眼扫读的状态量）和**键值行**（明细与计数）——同一页不出现「卡片 + 表格」
+> 两套视觉语言。层级由**位置与密度**表达，而不是由「换一种组件」表达：
+> 瓦片有边框有阴影、键值行只有发丝分隔线，因此「把明细也做成瓦片」和「把明细做成表格」
+> 是两个极端，都会毁掉层级——前者十几个方块读起来就是一张表格，后者与卡片割裂。
 
 ## 2. 配色方案
 
@@ -68,6 +75,10 @@ luci-app-pon 只补充主题没有提供的三样东西，全部集中在 `view/
 | 分组标题 | `.pon-subhead`，0.875rem | 板级身份下的存储目标 |
 | 指标名 | `.pon-tile > dt`，0.75rem，`--text-secondary` | 接收光功率等 |
 | 指标值 | `.pon-tile > dd`，1.125rem / 600 | 同上 |
+| 读数 | `.pon-num`，1.375rem / 600 | 收/发光功率、温度的数字部分 |
+| 读数单位 | `.pon-unit`，0.8125rem / 500，`--text-secondary` | dBm / °C |
+| 明细名 | `.pon-list > dt`，0.8125rem，`--text-secondary` | 线路详情与计数的标签 |
+| 明细值 | `.pon-list > dd`，0.875rem / 600 | 线路详情与计数的值 |
 | 说明文字 | `.cbi-section-descr`，small / 1.5 行高 | 卡片说明、字段描述 |
 | 标识值 | `<var>`（主题：斜体 `#0069d6`） | ONU-ID、LLID、序列号、各类 ID |
 
@@ -79,6 +90,8 @@ luci-app-pon 只补充主题没有提供的三样东西，全部集中在 `view/
 - 容器：`.cbi-map`（主题已为 flex 列 + 1rem 间距），卡片即 `.cbi-section`（白底、圆角、阴影）。
 - 指标网格：`grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr))`，**无需媒体查询即可自适应**；
   仅在 ≤30rem（约 480px）时显式降为单列，避免小屏挤压。
+- 键值列表：`.pon-list` 两列 `minmax(7.5rem, 32%) 1fr`；计数加 `.pon-list--split` 后
+  ≥48rem（768px）变四列、每行两对，组内间距 1rem、组间 1.5rem，窄屏自动退回一对一行。
 - 表单行：`.cbi-value` + `.cbi-value-title`（右对齐固定宽）+ `.cbi-value-field`，沿用主题表单节奏。
 - 移动端优先：先保证 320px 单列可用，再向上增强为多列。
 
@@ -88,8 +101,10 @@ luci-app-pon 只补充主题没有提供的三样东西，全部集中在 `view/
 | --- | --- | --- |
 | 模式/协议徽章 | `.ifacebadge` | 静态文本（XGS-PON / OMCI / EPON OAM） |
 | 状态指示 | `.pon-state` + `.pon-dot[data-state]` | ok / pending / error / 灰 |
-| 指标瓦片 | `dl.pon-tile` + `dt` + `dd` | 值缺失显示「未知」，计数项也用它 |
-| 折叠指标组 | `details.pon-fold[data-pon-details]` + 内部 `.pon-grid` | 轮询重建后保持展开态 |
+| 常显指标瓦片 | `dl.pon-tile` + `dt` + `dd`（读数用 `.pon-num` + `.pon-unit`） | 值缺失显示「未知」 |
+| 常显明细分组 | `.pon-block` + `.pon-subhead` + `dl.pon-list` | 单列，标签 32%，长文本可换行 |
+| 折叠计数分组 | `details.pon-fold[data-pon-details]` + 若干 `.pon-subhead` + `dl.pon-list--split` | ≥48rem 时每行两对；数字 `tabular-nums` 对齐；轮询重建后保持展开态 |
+| 折叠条目数 | `summary` 上的 `.pon-count` | 纯数字，提示是否值得展开 |
 | 文本输入 | `input.cbi-input-text` | 校验失败加 `.cbi-input-invalid`（主题红色描边） |
 | 操作按钮 | `.cbi-button-action` / `.cbi-button-negative` | 只读权限时 `disabled` |
 
@@ -108,7 +123,7 @@ luci-app-pon 只补充主题没有提供的三样东西，全部集中在 `view/
 
 1. **状态** `pon/status`
 2. **硬件身份** `pon/hardware`
-3. **配置认证** `pon/config`
+3. **认证配置** `pon/config`
 4. **IPTV** `pon/iptv`
 5. **语音配置** `pon/voice`
 6. **网络诊断** `pon/diagnostics`
@@ -131,31 +146,54 @@ IPTV 页只在 `/etc/config/iptv` 存在时显示（`depends.uci`）。
 
 ### 状态页
 
-每张 PON 线路 = **一张卡片**：标题（线路名 + 模式徽章 + 线路状态点）→ 说明 → **常显指标网格**
-（线路状态、光信号、收/发光功率、光模块温度、ONU 状态或 MPCP 状态）
-→ 折叠「线路详情」网格（模式、配置状态、PHY/PCS、ONU-ID 或 LLID0、数据通路、业务就绪等）
-→ 折叠「计数与诊断」网格（EPON 与 ITU-T 各自的计数项、校准状态、发射门）。
+每张 PON 线路 = **一张卡片**，自上而下三层，密度递减：
+
+1. **常显指标网格** `.pon-grid`（瓦片）：线路状态、光信号、收/发光功率、光模块温度，
+   以及 ONU 状态 / MPCP 状态。收发光功率与温度用 `.pon-num` + `.pon-unit`，数字压过单位。
+2. **常显「线路详情」** `.pon-block` + `.pon-list`（键值行，**不折叠**）：线路模式三项、
+   PHY/PCS、ONU-ID 或 LLID0、数据通路、业务就绪、突发发射机就绪。
+3. **折叠「计数与诊断」** `details.pon-fold`：按主题分组的计数行——
+   「链路事件」「帧计数」（ITU-T）或「注册过程」（EPON）、「光模块」；
+   展开后是 `.pon-list--split`（宽屏每行两对）而非十几块瓦片。
+
+> **为什么线路详情不再折叠**：它回答的是"这条线是不是按我预期配置的"，与常显指标
+> 一起读，藏进折叠里等于逼用户每次都点开。真正只在排障时才看的是计数，所以只有它折叠。
 
 > **排序原则：状态优先于标识。** 常显网格只放"看一眼就知道线通不通"的量——
 > 即设备状态（ONU state / MPCP state）和实时光功率这类会随链路变化的量。
 > ONU-ID / LLID0 这类**分配下来的编号**只在注册成功后才有意义、且不随链路状态变化，
-> 一律下沉到「线路详情」折叠里，需要排查时再展开。
+> 一律放在「线路详情」里。
 
-层级由**折叠**表达，而不是由「换一种组件」表达：三层全是同一种瓦片，因此不存在风格割裂。
-OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』网格」，并按线路模式只显示对应协议的那一张。
+层级由**密度**表达：瓦片（有边框有阴影）→ 键值行（只有发丝分隔线），折叠只改变可见性、
+不改变语言，因此展开折叠不会突然换一种组件。
+OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列表」，并按线路模式只显示对应协议的那一张。
 
 ### 硬件身份页（板级数据与 ONU 身份统一入口）
 
 | 区块 | 数据来源 | 说明 |
 | --- | --- | --- |
-| 板级身份 | `pon-board-identity`（Flash） | 按存储目标分组，独立「写入板级身份」按钮，重启后生效 |
-| 校准数据 | `airoha-pon-data`（Flash） | 上传校验镜像写入所选目标，原镜像另存 `/tmp/pon-board-data.*.bin` |
+| 校准数据（含板级身份） | `pon-board-identity` + `airoha-pon-data`（Flash） | **一张卡片**：身份字段按存储目标分组（每组一个「写入板级身份」）+ 末尾一个「校准镜像」分组（唯一一个「上传并写入」） |
 | ONU 身份 — OMCI | UCI `pon.omci` | 仅当线路为 **GPON / XG-PON / XGS-PON** 时显示 |
 | ONU 身份 — EPON OAM | UCI `pon.oam` | 仅当线路为 **EPON / 10G-EPON** 时显示 |
 
-卡片顺序即上表顺序：先板级（身份 → 校准），再按线路模式分流的上报身份。
-板级身份与校准数据都取自 Flash、都要重启生效，因此放在一起；
-`airoha-pon-data list` 取不到目标时该卡片自动隐藏，不影响其余区块。
+**板级身份与校准数据本来就是同一个东西**，所以合成一张卡片「校准数据」：两者都通过
+`board.json` 的 `pon_data` 定位存储目标，`pon-board-identity write` 是读出镜像后
+**按 offset 就地改写字段**再写回，`airoha-pon-data write` 则是**整份镜像替换**。
+
+一台设备只有**一个** `pon_data` 目标（DSD 分区），因此页面上：
+
+- **不做目标选择器**——下拉永远只有一项，是噪音；分区名与容量由 `airoha-pon-data list`
+  的 label 显示在身份分组的标题上（`存储目标：DSD · MTD · 128 KiB`），校准镜像就写它；
+- 也不存在"只能写校准、没有身份字段"的目标，所以分组只在 `identity.targets` 声明了字段时出现；
+- 全卡**只有一个**「上传并写入」，放在卡片末尾的「校准镜像」分组里，与身份分组分开——
+  它是整份替换，与"改几个字段"不是一个量级的操作。
+
+> ⚠️ 两个动作共用一份镜像：**写校准镜像会覆盖同一目标里的身份字段**。这不是能靠 UI 规避的，
+> 所以在卡片说明里直接写明，而不是把两者藏在不同的卡片里假装无关。
+
+降级仍然是各自独立：`pon-board-identity list` 失败 → 只剩存储目标与上传按钮；
+`airoha-pon-data list` 失败 → 只剩身份目标与写入按钮；两者都失败 → 整张卡片隐藏，
+不影响下面的 ONU 身份区块。
 
 两个 ONU 身份区块都由 `s.filter` 按 `xpon.mode` 生效（与状态页同一套 `isEponMode()` 判据），
 并在区块内显示「PON 线路」和「线路模式」两个只读字段，避免多线路设备上认错区块。
@@ -281,6 +319,32 @@ Trunk 端口不需要移出 `br-lan`：内核 `vlan_do_receive()` 会先把带�
 HTTP 监听端口不需要额外放行：rtp2httpd 监听 `0.0.0.0`，LAN 侧客户端走 `br-lan` 地址访问，
 落在 lan zone 的 input ACCEPT 上。
 
+#### 硬件加速：本平台没有组播卸载通道（已核实，勿再投入）
+
+结论：**不要移植 `airoha_sdk/private/{gpon,xpon}_igmp`，也不要为组播找硬件卸载。**
+
+- 那两个模块是 MediaTek/EcoNet 的内核态组播控制模块（IGMPv1/2/3 + MLDv1/2 的 snooping/proxy、
+  静态与动态白名单 ACL、`check_max_group()` 每端口组数上限、CTC 规范行为、跨 VLAN 组播 VLAN 转换）。
+  硬件部分在 `xpon_igmp/xpon_igmp_hw.c`，把组播流写进 **MediaTek HWNAT 的 FOE**
+  （`hwnat_skb_to_foe_hook`）+ **MT7530** 交换口掩码（`macMT7530LanPortMap2Switch`）。
+- 它们依赖 `ecnt_hook_pon_mac.h`、`ecnt_hook_pon_vlan.h`、`ecnt_hook_xpon_mapping.h`、
+  `lan_port/lan_port_info.h`、`xpon_igmp_ioctl.h`——SDK 里连 `xpon_igmp_ioctl.h` 都没带，编译必然失败。
+  我们的树（openwrt main + `target/linux/airoha`，kernel 6.18）里 `ecnt_hook` **零命中**；
+  SDK 是 `arch/arm/mach-econet` 的 vendor BSP，驱动侧是 clean-room 重写的 `_pbs05-pon-drivers`，不提供这些 hook。
+- 硬件也对不上：AN7581 用的是 **Airoha 自己的 PPE/NPU**（`CONFIG_NET_AIROHA_NPU=y`，mainline `airoha_eth`），
+  XG2010G 设备树里没有 MT7530。
+- 本平台唯一的卸载通道是 **netfilter flowtable → airoha PPE**（`airoha_ppe_flow_offload_cmd`）。
+  flowtable **不卸载组播**（无 conntrack、无反向流），主线 airoha 驱动里除 MIB 统计外没有任何 multicast 卸载代码。
+  rtp2httpd 这一侧同样吃不到：它的流量是本机产生的 HTTP，flowtable 只卸载 forward 的流，本机发出的不卸。
+- 唯一相关的硬件开关是 `airoha_fe_init()` 里 `REG_FE_PCE_CFG` 的 `PCE_MC_EN_MASK`（组播复制一份给 CPU），
+  v7.1 补丁已默认关闭。将来真要做 PPE 组播复制时要重新打开，否则 snooping/proxy 看不到报文。
+
+**CPU 预算**：IPTV 组播通常几十 Mbps，Cortex-A53 软转发足够，不需要硬件卸载。
+
+SDK 里真正值得借鉴的是**功能规格**而非代码：每端口最大组数、组播白名单、IGMPv3 的 SSM 源过滤、
+CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge 的 `multicast_fast_leave`），
+其余需要内核态支持，纯 userspace + Linux bridge 做不到。
+
 两边都要能触发对端重算拓扑：`/etc/init.d/iptv` 的 `service_triggers()` 同时挂了 `iptv` 和 `rtp2httpd`
 两个 reload trigger——任一侧改动都会重新推导一遍网桥/子接口结构。
 
@@ -290,14 +354,14 @@ HTTP 监听端口不需要额外放行：rtp2httpd 监听 `0.0.0.0`，LAN 侧客
 
 | 文件 | 改动 |
 | --- | --- |
-| `htdocs/.../view/pon/pon.css` | 新增：指标网格、指标瓦片、状态圆点、分组标题 |
-| `htdocs/.../view/pon/status.js` | 重构为卡片 + 指标网格 + 状态点，保留轮询与展开态 |
-| `htdocs/.../view/pon/hardware.js` | 合并板级身份、校准数据与 ONU 身份，按 EPON/GPON 分流 |
+| `htdocs/.../view/pon/pon.css` | 新增：指标网格、指标瓦片、读数/单位、键值列表（含 `--split` / `--numeric`）、常显分组、折叠分组与条目数徽标、状态圆点、分组标题 |
+| `htdocs/.../view/pon/status.js` | 重构为卡片 + 指标网格 + 状态点；线路详情改为常显键值列表，计数改为分组键值列表并折叠，保留轮询与展开态 |
+| `htdocs/.../view/pon/hardware.js` | 板级身份与校准数据合并为一张「校准数据」卡片：身份字段按存储目标分组（每组一个「写入板级身份」），末尾一个「校准镜像」分组承载唯一的「上传并写入」，无目标选择器；写入身份改为按目标生效；ONU 身份仍按 EPON/GPON 分流 |
 | `htdocs/.../view/pon/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
 | `htdocs/.../view/pon/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；五个 tab（bridge / IPv4 / IPv6 / 组播 VLAN / 组播转单播），新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段 |
 | `htdocs/.../view/pon/voice.js` | 新增：语音配置页（语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置 六个 section，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`） |
 | `root/etc/config/voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段，两个 `line` 段（双 FXS 口）与八个 `codec` 段，同时作为该标签页的可见条件 |
-| `root/usr/share/luci/menu.d/luci-app-pon.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页顺序改为状态 / 硬件身份 / 配置认证 / IPTV / 语音配置 / 网络诊断 |
+| `root/usr/share/luci/menu.d/luci-app-pon.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页顺序改为状态 / 硬件身份 / 认证配置 / IPTV / 语音配置 / 网络诊断 |
 | `root/usr/share/rpcd/acl.d/luci-app-pon.json` | 并入原 `luci-app-iptv` 的 uci iptv/network 与 network.device 权限 |
 | `root/etc/config/iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入；新增 `mode` / `trunk_port` / `trunk_vlans` / `unicast` / `unicast_port` / `unicast_addr`，`iptv-apply` 重写为按模式推导拓扑并写 `/etc/config/rtp2httpd` |
 | `Makefile` | 新增 `+firewall4 +kmod-nft-bridge +omcproxy` 依赖，`PKG_RELEASE` 6 |

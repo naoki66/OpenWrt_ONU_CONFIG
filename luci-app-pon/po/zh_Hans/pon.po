@@ -124,9 +124,6 @@ msgstr "无法重启 PON：%s"
 msgid "Board serial number"
 msgstr "板载序列号"
 
-msgid "Board identity"
-msgstr "板级身份"
-
 msgid "Board identity operation failed."
 msgstr "板级身份操作失败。"
 
@@ -151,17 +148,14 @@ msgstr "写入板级身份"
 msgid "Storage target: %s"
 msgstr "存储目标：%s"
 
-msgid "Values stored on the board. They are used after a reboot; the previous image is kept as /tmp/pon-board-identity.*.bin."
-msgstr "保存在板载存储中的身份值，重启后生效；原镜像另存为 /tmp/pon-board-identity.*.bin。"
-
 msgid "Enter a MAC address such as 00:11:22:33:44:55."
 msgstr "请输入 MAC 地址，例如 00:11:22:33:44:55。"
 
 msgid "Registration changes take effect on the next PON activation or interface restart."
 msgstr "注册参数在下次 PON 激活或接口重启时生效。"
 
-msgid "Configuration"
-msgstr "配置认证"
+msgid "Authentication configuration"
+msgstr "认证配置"
 
 msgid "Data path error"
 msgstr "数据通路错误"
@@ -205,11 +199,11 @@ msgstr "硬件版本"
 msgid "Calibration data"
 msgstr "校准数据"
 
-msgid "Upload a calibration image and write it to the selected target. The previous image is kept as /tmp/pon-board-data.*.bin."
-msgstr "上传校准数据镜像并写入所选目标，原镜像会保留为 /tmp/pon-board-data.*.bin。"
+msgid "Calibration image"
+msgstr "校准镜像"
 
-msgid "Target storage"
-msgstr "目标存储"
+msgid "The identity fields and the calibration image are the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; a calibration image replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin."
+msgstr "身份字段与校准镜像是同一个存储目标上的同一份 Flash 镜像，都要重启后生效。身份字段就地改写，校准镜像则整体替换该目标。原镜像另存为 /tmp/pon-board-*.bin。"
 
 msgid "Upload and write"
 msgstr "上传并写入"
@@ -361,6 +355,18 @@ msgstr "线路详情"
 
 msgid "Protocol details"
 msgstr "协议详情"
+
+msgid "Link events"
+msgstr "链路事件"
+
+msgid "Frame counters"
+msgstr "帧计数"
+
+msgid "Registration handshake"
+msgstr "注册过程"
+
+msgid "Optical frontend"
+msgstr "光模块"
 
 msgid "Not configured"
 msgstr "未配置"
