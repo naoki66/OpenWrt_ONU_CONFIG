@@ -1,7 +1,7 @@
 {
 	"admin/network/pon": {
-		"title": "PON",
-		"order": 85,
+		"title": "ONU",
+		"order": 5,
 		"action": {
 			"type": "firstchild"
 		},
@@ -18,29 +18,53 @@
 			"path": "pon/status"
 		}
 	},
-	"admin/network/pon/config": {
-		"title": "Configuration",
-		"order": 20,
-		"action": {
-			"type": "view",
-			"path": "pon/config"
-		}
-	},
 	"admin/network/pon/hardware": {
 		"title": "Hardware identity",
-		"order": 30,
+		"order": 20,
 		"action": {
 			"type": "view",
 			"path": "pon/hardware"
 		},
 		"depends": {
 			"acl": [ "luci-app-pon" ],
-			"fs": { "/tmp/pon-board-identity.available": "file" }
+			"uci": { "pon": true }
+		}
+	},
+	"admin/network/pon/config": {
+		"title": "Configuration",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "pon/config"
+		}
+	},
+	"admin/network/pon/iptv": {
+		"title": "IPTV",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "pon/iptv"
+		},
+		"depends": {
+			"acl": [ "luci-app-pon" ],
+			"uci": { "iptv": true }
+		}
+	},
+	"admin/network/pon/voice": {
+		"title": "Voice",
+		"order": 45,
+		"action": {
+			"type": "view",
+			"path": "pon/voice"
+		},
+		"depends": {
+			"acl": [ "luci-app-pon" ],
+			"uci": { "voice": true }
 		}
 	},
 	"admin/network/pon/diagnostics": {
 		"title": "Diagnostics",
-		"order": 40,
+		"order": 50,
 		"action": {
 			"type": "view",
 			"path": "pon/diagnostics"

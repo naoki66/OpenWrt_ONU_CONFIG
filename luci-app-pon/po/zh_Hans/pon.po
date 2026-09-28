@@ -9,7 +9,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-
 msgid "Accepted"
 msgstr "认证通过"
 
@@ -21,6 +20,48 @@ msgstr "当前 GEM-ID"
 
 msgid "Applied"
 msgstr "已应用"
+
+msgid "Bind one LAN port to the operator IPTV VLAN. Applying the configuration removes the selected port from br-lan."
+msgstr "将一个 LAN 口绑定到运营商 IPTV VLAN。应用配置时会把所选端口移出 br-lan。"
+
+msgid "Carries DHCP, authentication, video on demand and, when no separate multicast VLAN is set, multicast traffic."
+msgstr "承载 DHCP、鉴权和点播；未设置独立组播 VLAN 时也承载组播流量。"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Grant access to PON configuration, board identity, calibration data and the IPTV bridge"
+msgstr "允许访问 PON 配置、板级身份、校准数据与 IPTV 网桥"
+
+msgid "IGMP upstream VLAN"
+msgstr "IGMP 上行 VLAN"
+
+msgid "IPTV"
+msgstr "IPTV"
+
+msgid "IPTV LAN port"
+msgstr "IPTV LAN 口"
+
+msgid "IPTV bridge"
+msgstr "IPTV 网桥"
+
+msgid "Leave the multicast VLAN empty when both services use the same VLAN."
+msgstr "两种业务共用同一 VLAN 时，请将组播 VLAN 留空。"
+
+msgid "Multicast VLAN"
+msgstr "组播 VLAN"
+
+msgid "Network device carrying the operator VLANs, normally pon0."
+msgstr "承载运营商 VLAN 的网络设备，通常为 pon0。"
+
+msgid "Optional. In separate multicast VLAN mode, IPv4 multicast flows downstream and IGMP is allowed upstream."
+msgstr "可选。使用独立组播 VLAN 时，IPv4 组播向机顶盒下行，并允许 IGMP 上行。"
+
+msgid "Optional. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured."
+msgstr "可选。留空时使用组播 VLAN；未设置独立组播 VLAN 时使用业务 VLAN。"
+
+msgid "PON interfaces"
+msgstr "PON 接口"
 
 msgid "PON line stopped"
 msgstr "PON 线路已停止"
@@ -38,7 +79,7 @@ msgid "Diagnostic operations"
 msgstr "诊断操作"
 
 msgid "Diagnostics"
-msgstr "诊断"
+msgstr "网络诊断"
 
 msgid "Download diagnostic package"
 msgstr "下载诊断包"
@@ -61,11 +102,26 @@ msgstr "PON 重启失败。"
 msgid "Restart PON line"
 msgstr "重启 PON 线路"
 
+msgid "Same as multicast traffic"
+msgstr "与组播流量相同"
+
+msgid "Service VLAN"
+msgstr "业务 VLAN"
+
+msgid "The LAN port stays out of br-lan for as long as the bridge is enabled."
+msgstr "网桥启用期间，该 LAN 口会保持在 br-lan 之外。"
+
 msgid "The package contains raw packet captures, PON state, system logs and network configuration."
 msgstr "诊断包包含原始抓包、PON 状态、系统日志和网络配置。"
 
 msgid "The PON line and OMCI/OAM interfaces will be stopped and restarted. Continue?"
 msgstr "PON 线路和 OMCI/OAM 接口将被停止并重新启动。是否继续？"
+
+msgid "The selected port is dedicated to the set-top box."
+msgstr "所选端口将专用于机顶盒。"
+
+msgid "The set-top box is bridged to the operator VLANs carried by the PON uplink."
+msgstr "机顶盒桥接到 PON 上联口承载的运营商 VLAN。"
 
 msgid "Unable to create diagnostic package: %s"
 msgstr "无法生成诊断包：%s"
@@ -76,11 +132,44 @@ msgstr "无法重启 PON：%s"
 msgid "Board serial number"
 msgstr "板载序列号"
 
+msgid "Board identity"
+msgstr "板级身份"
+
+msgid "Board identity operation failed."
+msgstr "板级身份操作失败。"
+
+msgid "Board identity written. Reboot the device to use the new values."
+msgstr "板级身份已写入，重启后使用新值。"
+
+msgid "Board identity write failed: %s"
+msgstr "板级身份写入失败：%s"
+
+msgid "No board identity field was changed."
+msgstr "没有修改任何板级身份字段。"
+
+msgid "Uplink device"
+msgstr "上联设备"
+
+msgid "Use a Linux network device name containing at most 15 characters."
+msgstr "请输入不超过 15 个字符的 Linux 网络设备名称。"
+
+msgid "Write board identity"
+msgstr "写入板级身份"
+
+msgid "Storage target: %s"
+msgstr "存储目标：%s"
+
+msgid "Values stored on the board. They are used after a reboot; the previous image is kept as /tmp/pon-board-identity.*.bin."
+msgstr "保存在板载存储中的身份值，重启后生效；原镜像另存为 /tmp/pon-board-identity.*.bin。"
+
+msgid "Enter a MAC address such as 00:11:22:33:44:55."
+msgstr "请输入 MAC 地址，例如 00:11:22:33:44:55。"
+
 msgid "Registration changes take effect on the next PON activation or interface restart."
 msgstr "注册参数在下次 PON 激活或接口重启时生效。"
 
 msgid "Configuration"
-msgstr "配置"
+msgstr "配置认证"
 
 msgid "Data path error"
 msgstr "数据通路错误"
@@ -121,8 +210,11 @@ msgstr "允许访问 PON 身份配置"
 msgid "Hardware version"
 msgstr "硬件版本"
 
-msgid "PON board data"
-msgstr "PON 板级数据"
+msgid "Calibration data"
+msgstr "校准数据"
+
+msgid "Upload a calibration image and write it to the selected target. The previous image is kept as /tmp/pon-board-data.*.bin."
+msgstr "上传校准数据镜像并写入所选目标，原镜像会保留为 /tmp/pon-board-data.*.bin。"
 
 msgid "Target storage"
 msgstr "目标存储"
@@ -130,11 +222,11 @@ msgstr "目标存储"
 msgid "Upload and write"
 msgstr "上传并写入"
 
-msgid "Board data written to %s and verified. Reboot the device to apply it."
-msgstr "板级数据已写入 %s 并通过读回校验，请重启设备使其生效。"
+msgid "Calibration data written to %s and verified. Reboot the device to apply it."
+msgstr "校准数据已写入 %s 并通过读回校验，请重启设备使其生效。"
 
-msgid "Writing board data failed: %s"
-msgstr "写入板级数据失败：%s"
+msgid "Writing calibration data failed: %s"
+msgstr "写入校准数据失败：%s"
 
 msgid "Unable to list storage."
 msgstr "无法读取存储列表。"
@@ -202,9 +294,6 @@ msgstr "线路状态"
 msgid "Multiple data paths require packet classification"
 msgstr "多条数据通路需要报文分类支持"
 
-msgid "No"
-msgstr "否"
-
 msgctxt "PON status boolean"
 msgid "No"
 msgstr "否"
@@ -226,6 +315,9 @@ msgstr "尚未认证"
 
 msgid "Not reported"
 msgstr "OLT 尚未上报"
+
+msgid "ONU"
+msgstr "ONU"
 
 msgid "OMCI VLAN IDs"
 msgstr "OMCI VLAN ID"
@@ -251,8 +343,44 @@ msgstr "OMCI 解析错误"
 msgid "OMCI settings"
 msgstr "OMCI 设置"
 
-msgid "ONU identity"
-msgstr "ONU 身份"
+msgid "ONU identity — OMCI"
+msgstr "ONU 身份 — OMCI"
+
+msgid "ONU identity — EPON OAM"
+msgstr "ONU 身份 — EPON OAM"
+
+msgid "Reported to the OLT over OMCI when the line runs in GPON, XG-PON or XGS-PON mode."
+msgstr "线路为 GPON、XG-PON 或 XGS-PON 模式时，通过 OMCI 上报给 OLT。"
+
+msgid "Reported to the OLT over EPON OAM when the line runs in EPON or 10G-EPON mode."
+msgstr "线路为 EPON 或 10G-EPON 模式时，通过 OAM 上报给 OLT。"
+
+msgid "The ONU identity reported over OMCI is configured on the hardware identity page."
+msgstr "通过 OMCI 上报的 ONU 身份在「硬件身份」页面配置。"
+
+msgid "The ONU identity reported over OAM is configured on the hardware identity page."
+msgstr "通过 OAM 上报的 ONU 身份在「硬件身份」页面配置。"
+
+msgid "Board identity and calibration data stored in flash, and the ONU identity reported to the OLT."
+msgstr "保存在 Flash 中的板级身份与校准数据，以及上报给 OLT 的 ONU 身份。"
+
+msgid "Line details"
+msgstr "线路详情"
+
+msgid "Protocol details"
+msgstr "协议详情"
+
+msgid "Not configured"
+msgstr "未配置"
+
+msgid "Interface %s"
+msgstr "接口 %s"
+
+msgid "OMCI"
+msgstr "OMCI"
+
+msgid "EPON OAM"
+msgstr "EPON OAM"
 
 msgid "ONU state"
 msgstr "ONU 状态"
@@ -277,9 +405,6 @@ msgstr "已检测到光信号"
 
 msgid "PHY ready"
 msgstr "PHY 就绪"
-
-msgid "PON"
-msgstr "PON"
 
 msgid "PON interface"
 msgstr "PON 接口"
@@ -416,6 +541,21 @@ msgstr "通常与序列号前四个字符相同。"
 msgid "Vendor ID"
 msgstr "厂商 ID"
 
+msgid "Voice"
+msgstr "语音配置"
+
+msgid "Voice services carried by the PON uplink."
+msgstr "由 PON 上联承载的语音业务。"
+
+msgid "FXO voice"
+msgstr "FXO 语音"
+
+msgid "FXO voice configuration is not available yet."
+msgstr "FXO 语音配置暂不可用。"
+
+msgid "The settings will be stored in /etc/config/voice once the voice daemon is available."
+msgstr "待语音守护进程就绪后，相关设置将保存在 /etc/config/voice。"
+
 msgid "Waiting for GEM configuration"
 msgstr "等待 GEM 配置"
 
@@ -433,9 +573,6 @@ msgstr "PON 线路"
 
 msgid "XGTC state"
 msgstr "XGTC 状态"
-
-msgid "Yes"
-msgstr "是"
 
 msgctxt "PON status boolean"
 msgid "Yes"
@@ -620,15 +757,6 @@ msgstr "PON MAC 地址"
 
 msgid "LAN base MAC address"
 msgstr "LAN 基础 MAC 地址"
-
-msgid "Board identity operation failed."
-msgstr "硬件身份操作失败。"
-
-msgid "Hardware identity written. Reboot the device to use the new values."
-msgstr "硬件身份已写入，重启后使用新值。"
-
-msgid "Hardware identity write failed: %s"
-msgstr "硬件身份写入失败：%s"
 
 msgid "Current line mode"
 msgstr "当前线路模式"
@@ -924,8 +1052,8 @@ msgstr "光前端发射门已启用"
 msgid "Compatibility"
 msgstr "兼容性"
 
-msgid "Project source:"
-msgstr "项目源码："
+msgid "Line mode, registration and authentication settings for the PON interfaces. Calibration data is written on the hardware identity page."
+msgstr "PON 接口的线路模式、注册与认证设置。校准数据在「硬件身份」页面写入。"
 
 msgid "OMCC version"
 msgstr "OMCC 版本"
@@ -941,3 +1069,4 @@ msgstr "Alloc-ID 等待超时"
 
 msgid "Seconds a data path may wait for PLOAM to assign its Alloc-ID before it is reported as failed. The ONU keeps waiting afterwards; 0 disables the timeout."
 msgstr "数据通道等待 PLOAM 分配 Alloc-ID 的秒数，超过后报告失败。之后 ONU 仍会继续等待；0 表示不超时。"
+

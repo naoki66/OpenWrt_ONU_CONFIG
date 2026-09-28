@@ -1,2 +1,11 @@
 **/target/
 /luci-app-pon/src/identity-image
+
+# WorkBuddy workspace data (memory, notes) - not part of the tree
+/.workbuddy/
+
+# Offline UI preview: argon.css is a manual copy of the theme's cascade.css,
+# pon.css and index.html are written by generate.js.
+/preview/argon.css
+/preview/pon.css
+/preview/index.html

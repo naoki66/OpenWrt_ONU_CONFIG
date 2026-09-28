@@ -1,11 +1,13 @@
 {
 	"luci-app-pon": {
-		"description": "Grant access to PON configuration and board data",
+		"description": "Grant access to PON configuration, board identity, calibration data, the IPTV bridge and voice",
 		"read": {
 			"cgi-io": [ "exec" ],
-			"uci": [ "pon", "airoha-pon-debug" ],
+			"uci": [ "pon", "airoha-pon-debug", "iptv", "voice", "network" ],
 			"ubus": {
-				"file": [ "read" ]
+				"file": [ "read" ],
+				"network.device": [ "status" ],
+				"network.interface": [ "dump" ]
 			},
 			"file": {
 				"/usr/sbin/ponctl --device * status": [ "exec" ],
@@ -19,7 +21,7 @@
 		},
 		"write": {
 			"cgi-io": [ "upload" ],
-			"uci": [ "pon", "airoha-pon-debug" ],
+			"uci": [ "pon", "airoha-pon-debug", "iptv", "voice" ],
 			"ubus": {
 				"file": [ "exec", "write" ]
 			},

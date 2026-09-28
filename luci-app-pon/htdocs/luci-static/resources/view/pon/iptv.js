@@ -6,6 +6,30 @@
 'require uci';
 'require view';
 
+var STYLESHEET = 'view/pon/pon.css';
+
+/*
+ * The PON views follow luci-theme-argon: cards, form rows and buttons all come
+ * from the theme. Only the small helper stylesheet is ours.
+ */
+function ensureStylesheet() {
+	var href;
+
+	if (document.querySelector('link[data-pon-stylesheet]'))
+		return;
+
+	href = (typeof L.resource == 'function') ? L.resource(STYLESHEET) : null;
+
+	if (!href)
+		href = ((L.env && L.env.base_url) || '/luci-static/resources') + '/' + STYLESHEET;
+
+	document.head.appendChild(E('link', {
+		'rel': 'stylesheet',
+		'href': href,
+		'data-pon-stylesheet': ''
+	}));
+}
+
 function validateIfname(sectionId, value) {
 	if (!/^[A-Za-z0-9_.:-]{1,15}$/.test(value || ''))
 		return _('Use a Linux network device name containing at most 15 characters.');
@@ -13,27 +37,44 @@ function validateIfname(sectionId, value) {
 	return true;
 }
 
+function listPonDevices() {
+	return uci.sections('pon', 'xpon').map(function(line) {
+		return line.device || line['.name'];
+	}).join(', ') || '-';
+}
+
 return view.extend({
 	load: function() {
-		return network.getDevices();
+		return Promise.all([ network.getDevices(), uci.load('pon') ])
+			.then(function(results) {
+				return results[0];
+			});
 	},
 
 	render: function(devices) {
 		var m, s, o, currentPort, lanPorts;
 
+		ensureStylesheet();
+
 		m = new form.Map('iptv', _('IPTV'),
 			_('Bind one LAN port to the operator IPTV VLAN. Applying the configuration removes the selected port from br-lan.'));
+		m.readonly = !L.hasViewPermission();
 
-		s = m.section(form.NamedSection, 'config', 'iptv');
+		s = m.section(form.NamedSection, 'config', 'iptv', _('IPTV bridge'),
+			_('The set-top box is bridged to the operator VLANs carried by the PON uplink.'));
 		s.anonymous = true;
 		s.addremove = false;
+
+		o = s.option(form.DummyValue, '_pon', _('PON interfaces'));
+		o.cfgvalue = listPonDevices;
 
 		o = s.option(form.Flag, 'enabled', _('Enable'));
 		o.default = '0';
 		o.rmempty = false;
+		o.description = _('The LAN port stays out of br-lan for as long as the bridge is enabled.');
 
 		currentPort = uci.get('iptv', 'config', 'lan_port');
-		lanPorts = devices.map(function(device) {
+		lanPorts = (devices || []).map(function(device) {
 			return device.getName();
 		}).filter(function(name) {
 			return /^lan[0-9]+$/.test(name);

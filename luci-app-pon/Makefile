@@ -3,11 +3,13 @@
 include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI PON configuration
-LUCI_URL:=https://github.com/pbs05/openwrt-pon-userspace/tree/main/luci-app-pon
+# firewall4 and kmod-nft-bridge are required by the IPTV bridge: iptv-apply
+# writes /etc/iptv.nft and reloads the firewall whenever the bridge changes.
 LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
-	+mtd +ubi-utils +nand-utils +jshn +jsonfilter
+	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
+	+firewall4 +kmod-nft-bridge
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=3
+PKG_RELEASE:=5
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

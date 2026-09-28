@@ -1,0 +1,2 @@
+config voice 'config'
+	option enabled '0'

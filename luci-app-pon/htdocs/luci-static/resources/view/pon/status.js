@@ -7,6 +7,32 @@
 'require uci';
 'require view';
 
+var STYLESHEET = 'view/pon/pon.css';
+
+/*
+ * The PON views follow luci-theme-argon: cards, tables, buttons and the type
+ * scale all come from the theme. Only the metric grid, the metric tiles and
+ * the status dots are ours, and they are loaded from a single stylesheet once
+ * per document.
+ */
+function ensureStylesheet() {
+	var href;
+
+	if (document.querySelector('link[data-pon-stylesheet]'))
+		return;
+
+	href = (typeof L.resource == 'function') ? L.resource(STYLESHEET) : null;
+
+	if (!href)
+		href = ((L.env && L.env.base_url) || '/luci-static/resources') + '/' + STYLESHEET;
+
+	document.head.appendChild(E('link', {
+		'rel': 'stylesheet',
+		'href': href,
+		'data-pon-stylesheet': ''
+	}));
+}
+
 function isEponMode(mode) {
 	return (mode || '').indexOf('epon-') === 0;
 }
@@ -203,6 +229,86 @@ function displayBroadcastKeys(values) {
 		? _('Key index %s').format(values.broadcast_key_indexes.join(', ')) : _('Not provisioned');
 }
 
+/*
+ * Severity is a visual reinforcement only. Each tile and row still prints the
+ * state as text, so the page stays readable without colour.
+ */
+function lifecycleSeverity(value) {
+	switch (value) {
+	case 'operational': return 'ok';
+	case 'error': return 'error';
+	case 'stopped': return '';
+	default: return 'pending';
+	}
+}
+
+function booleanSeverity(value) {
+	if (value === true || value === 1 || value === '1')
+		return 'ok';
+	if (value === false || value === 0 || value === '0')
+		return 'error';
+	return '';
+}
+
+function syncSeverity(value) {
+	if (value === 'in-sync')
+		return 'ok';
+	if (value === 'not-applicable')
+		return '';
+	return 'pending';
+}
+
+function onuStateSeverity(value) {
+	if (value === 'O5')
+		return 'ok';
+	if (value === 'O7')
+		return 'error';
+	return 'pending';
+}
+
+function mpcpSeverity(value) {
+	if (value === 'registered')
+		return 'ok';
+	if (value === 'denied')
+		return 'error';
+	return 'pending';
+}
+
+function authenticationSeverity(value) {
+	switch (value) {
+	case 'accepted': return 'ok';
+	case 'pending':
+	case 'not-reported':
+	case 'not-requested': return 'pending';
+	case 'not-authenticated':
+	case 'loid-not-found':
+	case 'password-mismatch':
+	case 'loid-conflict':
+	case 'reserved-status': return 'error';
+	default: return '';
+	}
+}
+
+function backendSeverity(value) {
+	switch (value) {
+	case 'applied': return 'ok';
+	case 'inactive': return '';
+	case 'alloc-id-timeout':
+	case 'multiple-gems-unsupported':
+	case 'apply-failed':
+	case 'clear-failed': return 'error';
+	default: return 'pending';
+	}
+}
+
+function ctcSeverity(value) {
+	if (value === 'operational')
+		return 'ok';
+	if (value === 'passive-wait')
+		return 'pending';
+	return '';
+}
+
 function loadProtocolStatus(section, unavailable, invalid) {
 	return L.resolveDefault(
 		fs.exec_direct('/usr/bin/pondctl', [ 'status', '--line', section.line ]), null
@@ -274,35 +380,59 @@ function loadStatus() {
 	});
 }
 
-function row(label, value) {
-	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left', 'style': 'width: 42%' }, label),
-		E('td', { 'class': 'td left' }, value == null || value === '' ? _('Unknown') : String(value))
+function stateLabel(severity, text) {
+	if (!severity)
+		return E('span', { 'class': 'pon-state' }, text);
+
+	return E('span', { 'class': 'pon-state' }, [
+		E('span', { 'class': 'pon-dot', 'data-state': severity, 'aria-hidden': 'true' }),
+		text
 	]);
 }
 
-function statusTable(title, rows) {
-	return E('div', { 'class': 'cbi-section' }, [
-		E('h3', {}, title), E('table', { 'class': 'table' }, rows)
+function badge(text) {
+	return E('span', { 'class': 'ifacebadge' }, text);
+}
+
+function metricTile(label, value, severity) {
+	if (value == null || value === '')
+		value = _('Unknown');
+	else if (typeof value !== 'object')
+		value = String(value);
+
+	return E('dl', { 'class': 'pon-tile' }, [
+		E('dt', {}, label),
+		E('dd', {}, stateLabel(severity, value))
 	]);
 }
 
-function detailsTable(title, rows, instance) {
-	return E('details', {
-		'class': 'cbi-section',
-		'data-pon-details': instance
-	}, [
-		E('summary', {}, E('strong', {}, title)),
-		E('table', { 'class': 'table' }, rows)
+function metricGrid(tiles) {
+	return E('div', { 'class': 'pon-grid' }, tiles);
+}
+
+/* Counters and secondary details use the same tiles, only inside a fold. */
+function metricFold(title, tiles, instance) {
+	return E('details', { 'class': 'pon-fold', 'data-pon-details': instance }, [
+		E('summary', {}, title),
+		metricGrid(tiles)
 	]);
 }
 
-function modeRows(mode) {
+function cardHeader(title, tags) {
+	return E('h3', {}, [
+		title,
+		/* Argon floats .pull-right, so the tags stay on the header row. */
+		E('span', { 'class': 'pull-right pon-tags' }, tags)
+	]);
+}
+
+function modeTiles(mode) {
 	return [
-		row(_('Current line mode'), modeLabel(mode.active)),
-		row(_('Configured line mode'), modeLabel(mode.configured)),
-		row(_('Configuration state'), !mode.active ? _('Line stopped') :
-			(mode.pending ? _('Takes effect after interface restart') : _('Applied')))
+		metricTile(_('Current line mode'), modeLabel(mode.active)),
+		metricTile(_('Configured line mode'), modeLabel(mode.configured)),
+		metricTile(_('Configuration state'), !mode.active ? _('Line stopped') :
+			(mode.pending ? _('Takes effect after interface restart') : _('Applied')),
+			mode.pending && mode.active ? 'pending' : '')
 	];
 }
 
@@ -313,83 +443,135 @@ function renderLine(item) {
 	var counters = item.counters || {};
 	var datapath = item.datapath || {};
 	var mode = getLineModes(item);
+	var epon = isEponMode(mode.shown);
 	var title = _('PON line: %s (%s)').format(item.section['.name'], item.section.device || '-');
-	var main = modeRows(mode);
-	var details;
+	var tags, tiles, rows, details;
 
 	if (item.error)
-		return { mode: mode.shown, nodes: [ statusTable(title, [ row(_('Error'), item.error) ]) ] };
-	main.push(
-		row(_('Line state'), displayLifecycle(line.lifecycle)),
-		row(_('Optical signal detected'), displayBoolean(line.optical_signal)),
-		row(_('Receive optical power'), displayFrontendMetric(
+		return { mode: mode.shown, nodes: [ E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, title),
+			E('div', { 'class': 'cbi-section-descr' },
+				_('Interface %s').format(item.section.device || '-')),
+			metricGrid([ metricTile(_('Error'), item.error, 'error') ])
+		]) ] };
+
+	tags = [
+		badge(modeLabel(mode.shown)),
+		stateLabel(lifecycleSeverity(line.lifecycle), displayLifecycle(line.lifecycle))
+	];
+
+	tiles = [
+		metricTile(_('Line state'), displayLifecycle(line.lifecycle),
+			lifecycleSeverity(line.lifecycle)),
+		metricTile(_('Optical signal detected'), displayBoolean(line.optical_signal),
+			booleanSeverity(line.optical_signal)),
+		metricTile(_('Receive optical power'), displayFrontendMetric(
 			frontend, 'rx_power_dbm', 'dBm')),
-		row(_('Transmit optical power'), displayFrontendMetric(
+		metricTile(_('Transmit optical power'), displayFrontendMetric(
 			frontend, 'tx_power_dbm', 'dBm')),
-		row(_('Optical frontend temperature'), displayFrontendMetric(
+		metricTile(_('Optical frontend temperature'), displayFrontendMetric(
 			frontend, 'temperature_celsius', '°C'))
-	);
-	if (isEponMode(mode.shown)) {
-		main.push(
-			row(_('PCS synchronized'), displayBoolean(line.pcs_sync)),
-			row(_('MPCP state'), displayMpcpState(registration.mpcp_state)),
-			row(_('LLID0'), registration.llid_valid === true ? registration.llid : _('Not assigned')),
-			row(_('LLID0 data path configured'), displayBoolean(datapath.data_path_configured)),
-			row(_('Upstream burst transmitter ready'), displayBoolean(registration.upstream_tx_armed))
+	];
+
+	rows = modeTiles(mode);
+
+	if (epon) {
+		/* Same ordering rule as the ITU-T branch: the MPCP state stays in the
+		   always visible grid, the assigned LLID is only a number and lives
+		   in the details fold. */
+		tiles.push(
+			metricTile(_('MPCP state'), displayMpcpState(registration.mpcp_state),
+				mpcpSeverity(registration.mpcp_state))
+		);
+		rows.push(
+			metricTile(_('PCS synchronized'), displayBoolean(line.pcs_sync),
+				booleanSeverity(line.pcs_sync)),
+			metricTile(_('LLID0'), registration.llid_valid === true ?
+				E('var', {}, String(registration.llid)) : _('Not assigned')),
+			metricTile(_('LLID0 data path configured'),
+				displayBoolean(datapath.data_path_configured),
+				booleanSeverity(datapath.data_path_configured)),
+			metricTile(_('Upstream burst transmitter ready'),
+				displayBoolean(registration.upstream_tx_armed),
+				booleanSeverity(registration.upstream_tx_armed))
 		);
 		details = [
-			row(_('Last start error'), line.last_start_error),
-			row(_('PCS profile'), line.pcs_profile_valid ? line.pcs_profile : _('Not configured')),
-			row(_('Receiver activation count'), counters.rx_start_count),
-			row(_('PCS synchronization losses'), counters.sync_losses),
-			row(_('PCS recovery attempts'), counters.recoveries),
-			row(_('Full PMA reinitializations'), counters.full_reinitializations),
-			row(_('Discovery Gates received'), counters.discovery_gates),
-			row(_('Register Request commands submitted'), counters.register_requests),
-			row(_('Register messages received'), counters.register_messages),
-			row(_('Register ACKs transmitted'), counters.register_acks),
-			row(_('Register NACKs'), counters.register_nacks),
-			row(_('MPCP timeouts'), counters.mpcp_timeouts),
-			row(_('MAC error conditions'), counters.mac_errors)
+			metricTile(_('Last start error'), line.last_start_error),
+			metricTile(_('PCS profile'), line.pcs_profile_valid ?
+				line.pcs_profile : _('Not configured')),
+			metricTile(_('Receiver activation count'), counters.rx_start_count),
+			metricTile(_('PCS synchronization losses'), counters.sync_losses),
+			metricTile(_('PCS recovery attempts'), counters.recoveries),
+			metricTile(_('Full PMA reinitializations'), counters.full_reinitializations),
+			metricTile(_('Discovery Gates received'), counters.discovery_gates),
+			metricTile(_('Register Request commands submitted'), counters.register_requests),
+			metricTile(_('Register messages received'), counters.register_messages),
+			metricTile(_('Register ACKs transmitted'), counters.register_acks),
+			metricTile(_('Register NACKs'), counters.register_nacks),
+			metricTile(_('MPCP timeouts'), counters.mpcp_timeouts),
+			metricTile(_('MAC error conditions'), counters.mac_errors)
 		];
 	} else {
-		main.push(
-			row(_('PHY ready'), displayBoolean(line.phy_ready)),
-			row(mode.shown === 'gpon' ? _('GTC state') : _('XGTC state'),
-				displaySync(line.xgtc_sync)),
-			row(_('ONU state'), displayOnuState(registration.onu_state)),
-			row(_('ONU-ID'), registration.onu_id_valid === true ? registration.onu_id : _('Not assigned')),
-			row(_('Kernel data path configured'), displayBoolean(datapath.data_path_configured)),
-			row(_('Service ready'), displayBoolean(datapath.service_ready)),
-			row(_('Upstream burst transmitter ready'), displayBoolean(registration.upstream_tx_armed))
+		tiles.push(
+			metricTile(mode.shown === 'gpon' ? _('GTC state') : _('XGTC state'),
+				displaySync(line.xgtc_sync), syncSeverity(line.xgtc_sync)),
+			/* The ONU state matters more than the assigned ONU-ID, which is
+			   only a number shown in the details fold. */
+			metricTile(_('ONU state'), displayOnuState(registration.onu_state),
+				onuStateSeverity(registration.onu_state))
+		);
+		rows.push(
+			metricTile(_('PHY ready'), displayBoolean(line.phy_ready),
+				booleanSeverity(line.phy_ready)),
+			metricTile(_('ONU-ID'), registration.onu_id_valid === true ?
+				E('var', {}, String(registration.onu_id)) : _('Not assigned')),
+			metricTile(_('Kernel data path configured'),
+				displayBoolean(datapath.data_path_configured),
+				booleanSeverity(datapath.data_path_configured)),
+			metricTile(_('Service ready'), displayBoolean(datapath.service_ready),
+				booleanSeverity(datapath.service_ready)),
+			metricTile(_('Upstream burst transmitter ready'),
+				displayBoolean(registration.upstream_tx_armed),
+				booleanSeverity(registration.upstream_tx_armed))
 		);
 		details = [
-			row(_('Last start error'), line.last_start_error),
-			row(_('Receiver activation count'), counters.rx_start_count),
-			row(_('Line synchronization losses'), counters.sync_losses),
-			row(_('Receiver recovery attempts'), counters.recoveries),
-			row(_('Full PMA reinitializations'), counters.full_reinitializations),
-			row(_('Downstream transport frames'), counters.xgtc_rx),
-			row(_('Downstream PLOAMd received'), counters.ploamd_rx),
-			row(_('Downstream GEM frames'), counters.xgem_rx),
-			row(_('Upstream bursts transmitted'), counters.upstream_bursts_tx),
-			row(_('Upstream PLOAMu transmitted'), counters.ploamu_tx),
-			row(_('Upstream GEM frames'), counters.xgem_tx)
+			metricTile(_('Last start error'), line.last_start_error),
+			metricTile(_('Receiver activation count'), counters.rx_start_count),
+			metricTile(_('Line synchronization losses'), counters.sync_losses),
+			metricTile(_('Receiver recovery attempts'), counters.recoveries),
+			metricTile(_('Full PMA reinitializations'), counters.full_reinitializations),
+			metricTile(_('Downstream transport frames'), counters.xgtc_rx),
+			metricTile(_('Downstream PLOAMd received'), counters.ploamd_rx),
+			metricTile(_('Downstream GEM frames'), counters.xgem_rx),
+			metricTile(_('Upstream bursts transmitted'), counters.upstream_bursts_tx),
+			metricTile(_('Upstream PLOAMu transmitted'), counters.ploamu_tx),
+			metricTile(_('Upstream GEM frames'), counters.xgem_tx)
 		];
 	}
 	details.push(
-		row(_('Calibration state'), ({
+		metricTile(_('Calibration state'), ({
 			ready: _('Loaded'), missing: _('Missing'), invalid: _('Invalid format'),
 			'not-required': _('Not required'), unknown: _('Unknown')
-		})[frontend.calibration] || _('Unknown')),
-		row(_('Frontend TX gate enabled'), frontend.error ?
-			_('Read failed') : displayBoolean(frontend.tx_gate_enabled))
+		})[frontend.calibration] || _('Unknown'),
+			frontend.calibration === 'ready' ? 'ok' :
+			(frontend.calibration === 'missing' || frontend.calibration === 'invalid' ?
+				'error' : '')),
+		metricTile(_('Frontend TX gate enabled'), frontend.error ?
+			_('Read failed') : displayBoolean(frontend.tx_gate_enabled),
+			frontend.error ? 'error' : booleanSeverity(frontend.tx_gate_enabled))
 	);
 
 	return { mode: mode.shown, nodes: [
-		statusTable(title, main),
-		detailsTable(isEponMode(mode.shown) ? _('EPON line counters and diagnostics') :
-			_('ITU-T PON counters and diagnostics'), details, item.section['.name'])
+		E('div', { 'class': 'cbi-section' }, [
+			cardHeader(title, tags),
+			E('div', { 'class': 'cbi-section-descr' },
+				_('Interface %s').format(item.section.device || '-')),
+			metricGrid(tiles),
+			metricFold(_('Line details'), rows, item.section['.name'] + '-details'),
+			metricFold(epon ? _('EPON line counters and diagnostics') :
+				_('ITU-T PON counters and diagnostics'), details,
+				item.section['.name'] + '-counters')
+		])
 	] };
 }
 
@@ -398,57 +580,95 @@ function renderOmci(item) {
 	var title = _('OMCI: %s (%s)').format(item.section['.name'], item.section.device || '-');
 
 	if (item.error)
-		return statusTable(title, [ row(_('Error'), item.error) ]);
-	return statusTable(title, [
-		row(_('OMCI channel online'), displayBoolean(values.channel_available)),
-		row(_('LOID configured locally'), displayBoolean(values.loid_configured)),
-		row(_('LOID authentication'), displayAuthentication(values.authentication_meaning)),
-		row(_('OLT vendor ID'), values.olt_vendor_id),
-		row(_('OLT equipment ID'), values.olt_equipment_id),
-		row(_('OLT version'), values.olt_version),
-		row(_('Data path state'), displayBackendState(values.backend_state)),
-		row(_('Active Alloc-ID'), values.active_alloc_id),
-		row(_('Active GEM-ID'), values.active_gem_id),
-		row(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
-		row(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
-		row(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
-		row(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
-		row(_('OLT broadcast keys'), displayBroadcastKeys(values)),
-		row(_('Received OMCI messages'), values.rx_messages),
-		row(_('OMCI parse errors'), values.parse_errors)
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, title),
+			metricGrid([ metricTile(_('Error'), item.error, 'error') ])
+		]);
+
+	return E('div', { 'class': 'cbi-section' }, [
+		cardHeader(title, [
+			badge(_('OMCI')),
+			stateLabel(booleanSeverity(values.channel_available),
+				displayBoolean(values.channel_available))
+		]),
+		metricGrid([
+			metricTile(_('OMCI channel online'), displayBoolean(values.channel_available),
+				booleanSeverity(values.channel_available)),
+			metricTile(_('LOID authentication'),
+				displayAuthentication(values.authentication_meaning),
+				authenticationSeverity(values.authentication_meaning)),
+			metricTile(_('Data path state'), displayBackendState(values.backend_state),
+				backendSeverity(values.backend_state)),
+			metricTile(_('Active Alloc-ID'), values.active_alloc_id),
+			metricTile(_('Active GEM-ID'), values.active_gem_id)
+		]),
+		metricFold(_('Protocol details'), [
+			metricTile(_('LOID configured locally'), displayBoolean(values.loid_configured),
+				booleanSeverity(values.loid_configured)),
+			metricTile(_('OLT vendor ID'), values.olt_vendor_id),
+			metricTile(_('OLT equipment ID'), values.olt_equipment_id),
+			metricTile(_('OLT version'), values.olt_version),
+			metricTile(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
+			metricTile(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
+			metricTile(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
+			metricTile(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
+			metricTile(_('OLT broadcast keys'), displayBroadcastKeys(values)),
+			metricTile(_('Received OMCI messages'), values.rx_messages),
+			metricTile(_('OMCI parse errors'), values.parse_errors)
+		], item.section['.name'] + '-omci')
 	]);
 }
 
 function renderOam(item) {
 	var values = item.values;
 	var title = _('EPON OAM: %s (%s)').format(item.section['.name'], item.section.device || '-');
-	var rows;
+	var ctc = values.operator === 'ctc';
+	var tiles, rows, tags;
 
 	if (item.error)
-		return statusTable(title, [ row(_('Error'), item.error) ]);
-	rows = [
-		row(_('LLID OAM channel online'), displayBoolean(values.channel_available)),
-		row(_('IEEE OAM discovery completed'),
-			displayBoolean(values.ieee_discovery_completed)),
-		row(_('Configured OAM profile'), values.operator === 'ctc' ?
-			_('IEEE 802.3ah + CTC') : _('IEEE 802.3ah'))
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', {}, title),
+			metricGrid([ metricTile(_('Error'), item.error, 'error') ])
+		]);
+
+	tags = [
+		badge(_('EPON OAM')),
+		stateLabel(booleanSeverity(values.channel_available),
+			displayBoolean(values.channel_available))
 	];
-	if (values.operator === 'ctc') {
-		rows.push(
-			row(_('CTC discovery'), displayCtcDiscovery(values.ctc_discovery_state)),
-			row(_('CTC version'), values.ctc_version == null ?
-				_('Not negotiated') : '0x' + Number(values.ctc_version).toString(16)),
-			row(_('LOID configured locally'), displayBoolean(values.loid_configured)),
-			row(_('LOID authentication'), displayAuthentication(values.authentication_status)),
-			row(_('CTC VLAN mode'), displayVlanMode(values.vlan_mode)),
-			row(_('CTC VLAN IDs'), displayVlanIds(values))
-		);
-	}
-	rows.push(
-		row(_('Received OAM messages'), values.rx_messages),
-		row(_('OAM parse errors'), values.parse_errors)
-	);
-	return statusTable(title, rows);
+
+	tiles = [
+		metricTile(_('LLID OAM channel online'), displayBoolean(values.channel_available),
+			booleanSeverity(values.channel_available)),
+		metricTile(_('IEEE OAM discovery completed'),
+			displayBoolean(values.ieee_discovery_completed),
+			booleanSeverity(values.ieee_discovery_completed)),
+		metricTile(_('CTC discovery'), ctc ?
+			displayCtcDiscovery(values.ctc_discovery_state) : _('Not applicable'),
+			ctc ? ctcSeverity(values.ctc_discovery_state) : ''),
+		metricTile(_('LOID authentication'), ctc ?
+			displayAuthentication(values.authentication_status) : _('Not applicable'),
+			ctc ? authenticationSeverity(values.authentication_status) : '')
+	];
+
+	rows = [
+		metricTile(_('Configured OAM profile'), ctc ?
+			_('IEEE 802.3ah + CTC') : _('IEEE 802.3ah')),
+		metricTile(_('CTC version'), values.ctc_version == null ?
+			_('Not negotiated') : '0x' + Number(values.ctc_version).toString(16)),
+		metricTile(_('LOID configured locally'), displayBoolean(values.loid_configured),
+			booleanSeverity(values.loid_configured)),
+		metricTile(_('CTC VLAN mode'), displayVlanMode(values.vlan_mode)),
+		metricTile(_('CTC VLAN IDs'), displayVlanIds(values)),
+		metricTile(_('Received OAM messages'), values.rx_messages),
+		metricTile(_('OAM parse errors'), values.parse_errors)
+	];
+
+	return E('div', { 'class': 'cbi-section' }, [
+		cardHeader(title, tags),
+		metricGrid(tiles),
+		metricFold(_('Protocol details'), rows, item.section['.name'] + '-oam')
+	]);
 }
 
 function renderStatus(data) {
@@ -485,6 +705,8 @@ return view.extend({
 		var root = E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, _('PON status')), container
 		]);
+
+		ensureStylesheet();
 
 		poll.add(function() {
 			return loadStatus().then(function(status) {
