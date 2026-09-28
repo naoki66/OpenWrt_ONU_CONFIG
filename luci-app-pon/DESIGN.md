@@ -166,28 +166,70 @@ EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本�
 原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页，改名为「校准数据」
 （它是写进 Flash 的校准镜像，性质与板级身份同类；config 页只留一行指向说明）。
 
-### 语音配置页（占位）
+### 语音配置页
 
-`view/pon/voice.js` 目前**只有一张说明卡片**，不渲染表单：语音守护进程与 UCI 结构都还不存在，
-现在画表单等于凭空造一套 schema，等真做好了还要推倒重来。页面存在的意义是先把标签页位置占住（order 45），
-让「设置放哪儿」有确定答案。菜单标题 `Voice` 由 po 译为「语音配置」。
+`view/pon/voice.js` 是一张 `form.Map('voice')`，按运营商光猫「应用 → 宽带电话设置」的三个子页
+（语音配置 / 数图配置 / 线路设置）组织成四个 section，顺序与设备一致：
 
-要落地时按这个顺序做（与前几页保持一致）：
+| Section | 类型 | 内容 |
+| --- | --- | --- |
+| 语音配置 | `NamedSection('config','voice')` | 启用、语音协议、DTMF 转移模式、PayLoad 类型值、来电显示、拍叉时间间隔上下限、催挂音/忙音/久叫不应时间、Codec 协商规则、传真编码方式 |
+| H.248 | `NamedSection('h248','h248')` | 四个 tab：基本配置（编码类型、主备服务器地址与端口、MG 注册方式、域名、MG 端口、授权方式、物理端点前缀）、资源（RTP 临时端点前缀/起始/对齐模式/数字长度/数目）、高级配置（ACK 消息、长定时器、PENDING 定时器、重传定时器、重传次数/间隔/时长、重注册周期）、心跳（模式、周期、次数） |
+| 数图配置 | `NamedSection('digitmap','digitmap')` | 启用拨号计划、匹配模式（最大/最小匹配）、摘机不拨号时间、拨号短定时器、拨号长定时器、数图（多行文本） |
+| 线路设置 | `TypedSection('line')` | 每个 FXS 端口：启用、线路终端 ID、呼出增益、呼入增益、开启回声抑制 |
+| 编码设置 | `TableSection('codec')` | 每个端口的 codec 列表：语音端口、编码、打包时长、优先级 |
 
-1. 在 `root/etc/config/voice` 里定 schema（目前只有一个 `config voice 'config'` 占位段）；
-2. `voice.js` 换成 `form.Map('voice', ...)` + `NamedSection`/`TypedSection`，沿用主题表单行；
-3. 需要读硬件/守护进程状态时，加 `load()` 与状态瓦片，并走 `.pon-tile`，不要新造组件；
-4. rpcd ACL 已经预留了 uci `voice` 的读写，不用再改。
+字段与取值来自真机（中国移动 ONT，`voice_config.cgi?v=prof|dmap|line`）实测抓取，
+命名沿用 TR-104/CT 前缀（`X_CT_COM_*`、`X_ASB_COM_*` 之外的公开字段），
+但 UCI 里统一改为小写下划线：例如 `X_CT_COM_ServerType` → `protocol`（`h248`/`sip`/`ims_sip`）。
+
+注意点：
+
+- 设备原始值是数字/驼峰（`InBand`、`ASN.1`、`RemoteFirst`），除协议类型外尽量保留原始取值，
+  便于将来直接喂给守护进程，不再做一次映射；
+- `dtmf_payload` 只在 `dtmf_method == RFC2833` 时显示，心跳周期/次数在心跳模式非「关闭」时显示，
+  都用 `o.depends()`，隐藏字段不参与校验；
+- 拍叉时间上下限用自定义 `validate` 比较（最小值留空时报的是「必填」，不重复报错）；
+- 增益是 `range(-14,6)`，LuCI 的 `range()` 支持负数；
+- 线路端口用 `TypedSection`（端口是硬件决定的，允许增删），codec 用 `TableSection`（一端口多行）；
+- 页面只读性仍走 `m.readonly = !L.hasViewPermission()`，rpcd ACL 已预留 uci `voice` 的读写，不用再改。
 
 菜单可见条件是 `depends.uci.voice`，即 `/etc/config/voice` 存在——该文件已随包安装，所以现在就能看到标签页。
 
 ### IPTV 页
 
-一张卡片：`form.Map('iptv')` → 单个 `NamedSection('config')`，标题「IPTV bridge」。
-首行是只读的「PON interfaces」（列出 `pon` 配置里的 `xpon` 设备），用来告诉用户上联设备该填什么；
-其后依次是启用开关、IPTV LAN 口（只列 `lanN`）、上联设备、业务 VLAN、组播 VLAN、IGMP 上行 VLAN。
-除启用开关外所有字段 `depends('enabled','1')`，未启用时只留一个开关，和原页面一致。
+一张卡片：`form.Map('iptv')` → 单个 `NamedSection('config')`，标题「IPTV」，卡内四个 tab：
+
+| Tab | 字段 |
+| --- | --- |
+| IPTV bridge | PON interfaces（只读）、启用、IPTV LAN 口（只列 `lanN`）、上联设备、业务 VLAN |
+| IPv4 | 启用 IGMP snooping、启用 IGMP proxy、启用组播查询器 |
+| IPv6 | 启用 MLD snooping、启用 MLD proxy |
+| 组播 VLAN | 组播 VLAN、上游连接（IGMP 上行 VLAN） |
+
+用 `s.tab()` + `s.taboption()` 分组，而不是拆成多张卡片：运营商光猫的 IGMP 面板就是
+「IPv4 / IPv6 / 组播VLAN」三个小分组挤在一个页面里，tab 既还原了这个结构，又保持「一页一卡片」。
+注意一旦定义了 tab，就必须用 `taboption()`，`option()` 添加的字段不会被渲染。
+除启用开关外所有字段 `depends('enabled','1')`；`depends` 按字段 id 匹配，与 tab 无关，跨 tab 依然生效。
 页面加载共享的 `pon.css`，卡片/说明/表单行全部沿用主题，不新增样式。
+
+#### Option 与 OpenWrt 能力的对应关系（四个开关不是都能独立实现）
+
+| 开关 | 落地方式 | 说明 |
+| --- | --- | --- |
+| IGMP snooping | bridge `igmp_snooping` | netifd 直接支持 |
+| IGMP proxy | `omcproxy` 的 `config proxy` 段 | 需要独立组播或 IGMP 上行 VLAN，且 omcproxy 已安装 |
+| MLD snooping | 同上，**同一个内核开关** | 内核 `multicast_snooping` 同时管 IGMP 和 MLD，netifd 没有 `mld_snooping` 选项 → 取两者的或 |
+| MLD proxy | 同上，**同一个代理实例** | omcproxy 一次同时代理 IGMPv3 与 MLDv2，无法只代理其中一种 |
+| 组播查询器 | bridge `multicast_querier` | 不配查询器时 snooping 的组成员会超时断流 |
+
+「上游连接」对应光猫界面里的 WAN 连接选择；本设备只有一条 PON 上联，因此用 VLAN 号表达，
+即 `igmp_vlan`，留空时按组播 VLAN → 业务 VLAN 的顺序回落。
+
+代理模式会改变网桥结构：`iptv-apply` 把组播/IGMP 子接口**移出** `br-iptv`，改为独立 interface
+（`luci_iptv_mc` / `luci_iptv_igmp`）作为 omcproxy 的 uplink，`luci_iptv`（br-iptv）作为 downlink，
+并新建一个全放行的 firewall zone 承载内核组播路由的 forward 流量。
+单 VLAN（既无独立组播 VLAN 也无独立 IGMP 上行 VLAN）时无处可终止，脚本打日志并退回透明桥接。
 
 ## 8. 本次改动文件
 
@@ -197,9 +239,9 @@ EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本�
 | `htdocs/.../view/pon/status.js` | 重构为卡片 + 指标网格 + 状态点，保留轮询与展开态 |
 | `htdocs/.../view/pon/hardware.js` | 合并板级身份、校准数据与 ONU 身份，按 EPON/GPON 分流 |
 | `htdocs/.../view/pon/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
-| `htdocs/.../view/pon/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页，加分区标题与 PON 接口只读行 |
-| `htdocs/.../view/pon/voice.js` | 新增：FXO 语音配置占位页（说明卡片，暂无表单） |
-| `root/etc/config/voice` | 新增：`voice` 配置骨架，同时作为该标签页的可见条件 |
+| `htdocs/.../view/pon/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；新增 IPv4 / IPv6 / 组播 VLAN 三个 tab 与四个 snooping/proxy 开关 |
+| `htdocs/.../view/pon/voice.js` | 新增：语音配置页（语音配置 / H.248 / 数图配置 / 线路设置 / 编码设置 五个 section，字段取自真机「宽带电话设置」） |
+| `root/etc/config/voice` | 新增：`voice` / `h248` / `digitmap` 三个配置段与 `line`、`codec` 段，同时作为该标签页的可见条件 |
 | `root/usr/share/luci/menu.d/luci-app-pon.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页顺序改为状态 / 硬件身份 / 配置认证 / IPTV / 语音配置 / 网络诊断 |
 | `root/usr/share/rpcd/acl.d/luci-app-pon.json` | 并入原 `luci-app-iptv` 的 uci iptv/network 与 network.device 权限 |
 | `root/etc/config/iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入 |

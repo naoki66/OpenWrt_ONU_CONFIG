@@ -5,11 +5,16 @@
 
 ACTION="${1:-reload}"
 NFT_FILE="/etc/iptv.nft"
+PROXY_INIT="/etc/init.d/omcproxy"
 
 fail() {
 	logger -t iptv "$*"
 	echo "iptv: $*" >&2
 	exit 1
+}
+
+warn() {
+	logger -t iptv "$*"
 }
 
 validate_ifname() {
@@ -43,6 +48,11 @@ load_iptv_config() {
 	config_get SERVICE_VLAN config service_vlan
 	config_get MULTICAST_VLAN config multicast_vlan
 	config_get IGMP_VLAN config igmp_vlan
+	config_get_bool IGMP_SNOOPING config igmp_snooping 0
+	config_get_bool MLD_SNOOPING config mld_snooping 0
+	config_get_bool IGMP_PROXY config igmp_proxy 0
+	config_get_bool MLD_PROXY config mld_proxy 0
+	config_get_bool MULTICAST_QUERIER config multicast_querier 0
 }
 
 find_br_lan() {
@@ -81,6 +91,8 @@ detach_from_interface() {
 	local device ifnames ifname
 
 	[ "$section" = "luci_iptv" ] && return
+	[ "$section" = "luci_iptv_mc" ] && return
+	[ "$section" = "luci_iptv_igmp" ] && return
 
 	config_get device "$section" device
 	config_get ifnames "$section" ifname
@@ -135,6 +147,37 @@ resolve_igmp_port() {
 	fi
 }
 
+# The multicast proxy terminates the multicast VLAN instead of bridging it, so
+# it needs an upstream device that is not a member of br-iptv. Without a
+# separate multicast or IGMP VLAN there is nothing left to terminate and the
+# configuration falls back to transparent bridging.
+resolve_proxy() {
+	PROXY_ACTIVE=0
+	PROXY_UPLINK_DEV=''
+	PROXY_UPLINK_IFACE=''
+
+	[ "$ENABLED" -eq 1 ] || return 0
+	[ "$IGMP_PROXY" -eq 1 ] || [ "$MLD_PROXY" -eq 1 ] || return 0
+
+	if [ -n "$IGMP_VLAN" ] && [ "$IGMP_VLAN" != "$SERVICE_VLAN" ] && [ "$IGMP_VLAN" != "$MULTICAST_VLAN" ]; then
+		PROXY_UPLINK_DEV='ct-iptv-igmp'
+		PROXY_UPLINK_IFACE='luci_iptv_igmp'
+	elif [ -n "$MULTICAST_VLAN" ]; then
+		PROXY_UPLINK_DEV='ct-iptv-mc'
+		PROXY_UPLINK_IFACE='luci_iptv_mc'
+		if [ "$IGMP_PORT" = 'ct-iptv-svc' ]; then
+			warn "IGMP upstream VLAN follows the service VLAN; the proxy uses the multicast VLAN instead"
+		fi
+	else
+		warn "The multicast proxy needs a separate multicast or IGMP upstream VLAN; keeping the bridge transparent"
+		return 0
+	fi
+
+	[ -x "$PROXY_INIT" ] || warn "omcproxy is not installed; the proxy configuration is stored but not started"
+
+	PROXY_ACTIVE=1
+}
+
 write_nft_rules() {
 	local tmp
 
@@ -156,7 +199,7 @@ table bridge iptv {
 		iifname "$LAN_PORT" oifname "ct-iptv-svc" counter accept
 		iifname "ct-iptv-svc" oifname "$LAN_PORT" counter accept
 EOF
-		if [ -n "$MULTICAST_VLAN" ]; then
+		if [ "$PROXY_ACTIVE" -eq 0 ] && [ -n "$MULTICAST_VLAN" ]; then
 			cat >>"$tmp" <<EOF
 		# The multicast VLAN carries downstream IPv4 multicast to the STB.
 		iifname "ct-iptv-mc" oifname "$LAN_PORT" \
@@ -167,7 +210,7 @@ EOF
 			counter drop comment "block-multicast-to-service"
 EOF
 		fi
-		if [ "$IGMP_PORT" != 'ct-iptv-svc' ]; then
+		if [ "$PROXY_ACTIVE" -eq 0 ] && [ "$IGMP_PORT" != 'ct-iptv-svc' ]; then
 			cat >>"$tmp" <<EOF
 		# IGMP Join/Leave follows the OLT-selected upstream VLAN and its GEM.
 		iifname "$LAN_PORT" oifname "$IGMP_PORT" \
@@ -219,6 +262,24 @@ remove_managed_network() {
 	uci -q delete network.luci_iptv_service_vlan
 	uci -q delete network.luci_iptv_multicast_vlan
 	uci -q delete network.luci_iptv_igmp_vlan
+	uci -q delete network.luci_iptv_mc
+	uci -q delete network.luci_iptv_igmp
+}
+
+# The Linux bridge has a single multicast_snooping switch covering both IGMP
+# and MLD, so either family enables it for both.
+resolve_snooping() {
+	SNOOPING=0
+	[ "$IGMP_SNOOPING" -eq 1 ] && SNOOPING=1
+	[ "$MLD_SNOOPING" -eq 1 ] && SNOOPING=1
+
+	if [ "$SNOOPING" -eq 1 ] && [ "$MULTICAST_QUERIER" -ne 1 ]; then
+		warn "Multicast snooping is on without a querier; group memberships time out and the stream may stop"
+	fi
+
+	if [ "$MULTICAST_QUERIER" -eq 1 ] && [ "$PROXY_ACTIVE" -eq 1 ]; then
+		warn "The multicast proxy owns the querier role; the querier setting is ignored while the proxy runs"
+	fi
 }
 
 write_network_config() {
@@ -259,20 +320,79 @@ write_network_config() {
 		uci set network.luci_iptv_bridge.name='br-iptv'
 		uci set network.luci_iptv_bridge.stp='0'
 		# The service filter controls multicast forwarding for this bridge.
-		uci set network.luci_iptv_bridge.igmp_snooping='0'
+		uci set network.luci_iptv_bridge.igmp_snooping="$SNOOPING"
+		uci set network.luci_iptv_bridge.multicast_querier="$MULTICAST_QUERIER"
 		uci add_list network.luci_iptv_bridge.ports="$LAN_PORT"
 		uci add_list network.luci_iptv_bridge.ports='ct-iptv-svc'
-		[ -n "$MULTICAST_VLAN" ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-mc'
-		[ "$IGMP_PORT" = 'ct-iptv-igmp' ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-igmp'
+		if [ "$PROXY_ACTIVE" -eq 0 ]; then
+			[ -n "$MULTICAST_VLAN" ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-mc'
+			[ "$IGMP_PORT" = 'ct-iptv-igmp' ] && uci add_list network.luci_iptv_bridge.ports='ct-iptv-igmp'
+		fi
 
 		uci set network.luci_iptv='interface'
 		uci set network.luci_iptv.proto='none'
 		uci set network.luci_iptv.device='br-iptv'
 		uci set network.luci_iptv.auto='1'
 		uci set network.luci_iptv.delegate='0'
+
+		if [ "$PROXY_ACTIVE" -eq 1 ]; then
+			# The proxy terminates the multicast VLANs, so they get their own
+			# interfaces instead of joining the STB bridge.
+			if [ -n "$MULTICAST_VLAN" ]; then
+				uci set network.luci_iptv_mc='interface'
+				uci set network.luci_iptv_mc.proto='none'
+				uci set network.luci_iptv_mc.device='ct-iptv-mc'
+				uci set network.luci_iptv_mc.auto='1'
+				uci set network.luci_iptv_mc.delegate='0'
+			fi
+
+			if [ "$IGMP_PORT" = 'ct-iptv-igmp' ]; then
+				uci set network.luci_iptv_igmp='interface'
+				uci set network.luci_iptv_igmp.proto='none'
+				uci set network.luci_iptv_igmp.device='ct-iptv-igmp'
+				uci set network.luci_iptv_igmp.auto='1'
+				uci set network.luci_iptv_igmp.delegate='0'
+			fi
+		fi
 	fi
 
 	uci commit network || fail "Cannot save network configuration"
+}
+
+write_proxy_config() {
+	# omcproxy proxies IGMPv3 and MLDv2 as one instance, so a single section
+	# serves both families. Uplink and downlink are logical interface names.
+	uci -q delete omcproxy.luci_iptv
+
+	if [ "$PROXY_ACTIVE" -eq 1 ]; then
+		uci set omcproxy.luci_iptv='proxy'
+		uci set omcproxy.luci_iptv.scope='global'
+		uci set omcproxy.luci_iptv.uplink="$PROXY_UPLINK_IFACE"
+		uci add_list omcproxy.luci_iptv.downlink='luci_iptv'
+	fi
+
+	uci commit omcproxy || fail "Cannot save multicast proxy configuration"
+}
+
+# Proxied multicast is routed by the kernel and therefore hits the forward
+# hook; both sides have to sit in one permissive zone.
+write_proxy_firewall_zone() {
+	uci -q delete firewall.luci_iptv_zone
+
+	if [ "$PROXY_ACTIVE" -eq 1 ]; then
+		uci set firewall.luci_iptv_zone='zone'
+		uci set firewall.luci_iptv_zone.name='iptv'
+		uci set firewall.luci_iptv_zone.input='ACCEPT'
+		uci set firewall.luci_iptv_zone.output='ACCEPT'
+		uci set firewall.luci_iptv_zone.forward='ACCEPT'
+		# Downstream side first, then every upstream subinterface: the multicast
+		# data may arrive on the multicast VLAN even when IGMP leaves on its own.
+		uci add_list firewall.luci_iptv_zone.network='luci_iptv'
+		[ -n "$MULTICAST_VLAN" ] && uci add_list firewall.luci_iptv_zone.network='luci_iptv_mc'
+		[ "$IGMP_PORT" = 'ct-iptv-igmp' ] && uci add_list firewall.luci_iptv_zone.network='luci_iptv_igmp'
+	fi
+
+	uci commit firewall || fail "Cannot save firewall configuration"
 }
 
 write_firewall_config() {
@@ -282,6 +402,19 @@ write_firewall_config() {
 	uci set firewall.luci_iptv.path="$NFT_FILE"
 	uci set firewall.luci_iptv.enabled="$ENABLED"
 	uci commit firewall || fail "Cannot save firewall configuration"
+}
+
+restart_proxy() {
+	[ -x "$PROXY_INIT" ] || return 0
+	[ "$ACTION" = "boot" ] && return 0
+
+	if [ "$PROXY_ACTIVE" -eq 1 ]; then
+		"$PROXY_INIT" enable
+		"$PROXY_INIT" restart || warn "omcproxy restart failed"
+	else
+		"$PROXY_INIT" stop >/dev/null 2>&1
+		"$PROXY_INIT" disable
+	fi
 }
 
 reload_runtime() {
@@ -299,6 +432,8 @@ reload_runtime() {
 		fi
 		/etc/init.d/firewall reload || fail "firewall4 reload failed"
 	fi
+
+	restart_proxy
 }
 
 load_iptv_config
@@ -310,9 +445,13 @@ find_old_iptv_port
 
 validate_config
 resolve_igmp_port
+resolve_proxy
+resolve_snooping
 write_nft_rules
 write_network_config
+write_proxy_config
 write_firewall_config
+write_proxy_firewall_zone
 reload_runtime
 
 logger -t iptv "IPTV bridge configuration applied"
