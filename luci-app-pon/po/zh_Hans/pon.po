@@ -502,6 +502,21 @@ msgstr "Password 认证"
 msgid "Leave empty for pure LOID authentication; set it only when the OLT asks for a password next to the LOID."
 msgstr "留空即为纯 LOID 认证；仅在 OLT 要求除 LOID 外另提供密码时填写。"
 
+msgid "Board serial number (SN)"
+msgstr "板级序列号（SN）"
+
+msgid "Read from the board identity image. Edit it under Calibration data below."
+msgstr "从板级身份镜像读取。可在此页下方「校准数据」中修改。"
+
+msgid "Overrides the serial number burned into the board identity. Leave empty to register under the burned value."
+msgstr "覆盖烧录在板级身份中的序列号。留空则按烧录值注册。"
+
+msgid "Storage target"
+msgstr "存储目标"
+
+msgid "The board image carries the identity fields and the calibration data together; there is no calibration-only target."
+msgstr "板级镜像同时承载身份字段与校准数据，不存在只含校准数据的目标。"
+
 msgid "Rejected"
 msgstr "认证失败"
 
@@ -787,6 +802,12 @@ msgstr "未运行"
 
 msgid "Not available"
 msgstr "无数据"
+
+msgid "Not set"
+msgstr "未设置"
+
+msgid "No storage target is available."
+msgstr "没有可用的存储目标。"
 
 msgid "Line stopped"
 msgstr "线路已停止"

@@ -177,21 +177,38 @@ OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列�
 
 | 区块 | 数据来源 | 说明 |
 | --- | --- | --- |
-| 校准数据（含板级身份） | `pon-board-identity` + `airoha-pon-data`（Flash） | **一张卡片**：身份字段按存储目标分组（每组一个「写入板级身份」）+ 末尾一个「板级身份文件」分组（唯一一个「上传并写入」） |
-| ONU 身份 — OMCI | UCI `pon.omci` | 仅当线路为 **GPON / XG-PON / XGS-PON** 时显示 |
+| 校准数据（含板级身份） | `pon-board-identity` + `airoha-pon-data`（Flash） | **一个 section**：身份字段按存储目标分组 + 末尾「板级身份文件」分组（唯一一个「上传并写入」） |
+| ONU 身份 — OMCI | UCI `pon.omci` + UCI `pon.xpon`（序列号） | 仅当线路为 **GPON / XG-PON / XGS-PON** 时显示 |
 | ONU 身份 — EPON OAM | UCI `pon.oam` | 仅当线路为 **EPON / 10G-EPON** 时显示 |
 
-**板级身份与校准数据本来就是同一个东西**，所以合成一张卡片「校准数据」：两者都通过
+#### ⚠️ 页面里的东西必须挂在 form map 上，不能自己在 `m.render()` 外面拼 DOM
+
+判定"某个区块在标签页下不显示"时，先看它是**怎么被挂上去的**，而不是先怀疑样式。
+LuCI 的 `form.js` 在 `renderTabContainers()` 里只为 **section 内注册的 option** 建
+`data-tab` 容器，主题（Argon）的标签 JS 只显示这些容器里的内容：
+
+- `s.option()` / `s.taboption()` 注册的 → 一定会被渲染进对应标签页；
+- 在 `m.render().then(map => E([], [ ...手写卡片..., map ]))` 里**自己拼的 DOM** →
+  只是 map 的兄弟节点，既不进任何 `data-tab` 容器，也不会被标签逻辑显示。
+
+> ⚠️ **本页原先就是这个坑**：板级身份卡片是手写的 `E('div', { class: 'cbi-section' })`，
+> 被 `cards.concat([ map ])` 放在 map 外面，于是整张「校准数据」卡在任何情况下都不显示，
+> 而被误判成"上传入口丢失"。修法是**把卡片改成 form section**（`m.section(...)` +
+> `s.option(...)`），让所有内容都进入 map。上游 `pbs05/openwrt-pon-userspace` 的
+> `config.js` 里那段 "PON board data" 也是同样的写法，所以同样不显示——不能照抄。
+
+**板级身份与校准数据本来就是同一个东西**，所以合成一个 section「校准数据」：两者都通过
 `board.json` 的 `pon_data` 定位存储目标，`pon-board-identity write` 是读出镜像后
 **按 offset 就地改写字段**再写回，`airoha-pon-data write` 则是**整份镜像替换**。
 
 一台设备只有**一个** `pon_data` 目标（DSD 分区），因此页面上：
 
 - **不做目标选择器**——下拉永远只有一项，是噪音；分区名与容量由 `airoha-pon-data list`
-  的 label 显示在身份分组的标题上（`存储目标：DSD · MTD · 128 KiB`），上传的文件就写它；
-- 也不存在"只能写校准、没有身份字段"的目标，所以分组只在 `identity.targets` 声明了字段时出现；
-- 全卡**只有一个**「上传并写入」，放在卡片末尾的「**板级身份文件**」分组里，与身份分组分开——
-  它是整份替换，与"改几个字段"不是一个量级的操作。
+  的 label 显示在身份分组的标题上，上传的文件就写它；
+- 也不存在"只能写校准、没有身份字段"的目标，所以身份字段只在 `identity.targets` 声明了
+  字段时出现；`airoha-pon-data list` 失败时仍会退到 `pon-board-identity` 报告的目标；
+- 全页**只有一个**「上传并写入」，放在「**板级身份文件**」分组里——它是整份替换，
+  与"改几个字段"不是一个量级的操作。
 
 > ⚠️ **这个上传入口的措辞必须是「板级身份文件」，不能叫「校准镜像」。** 上传的就是 DSD 分区的
 > 整份镜像，身份字段与校准数据都在里面；设备并不存在一个"只能写校准"的目标。早期版本把它标成
@@ -199,11 +216,15 @@ OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列�
 > "这个分区是什么"的信息，不能随意降级成其中一半。
 
 > ⚠️ 两个动作共用一份镜像：**写板级身份文件会覆盖同一目标里的身份字段**。这不是能靠 UI 规避的，
-> 所以在卡片说明里直接写明，而不是把两者藏在不同的卡片里假装无关。
+> 所以在 section 说明里直接写明，而不是把两者藏在不同的 section 里假装无关。
+
+保存走 `handleSave()`：先 `save` 表单（UCI 的线路身份覆盖项），再逐目标
+`pon-board-identity write` 写板级字段，最后 `apply`。板级写入放在 UCI 之后，
+这样板级失败时不会留下"UCI 已改、镜像没动"的静默不一致。
 
 降级仍然是各自独立：`pon-board-identity list` 失败 → 只剩存储目标与上传按钮；
 `airoha-pon-data list` 失败 → **上传按钮仍然保留**（`pon-board-identity` 的目标名同样来自
-`pon_data`，可以直接当 `airoha-pon-data write` 的目标用）；两者都失败 → 整张卡片隐藏，
+`pon_data`，可以直接当 `airoha-pon-data write` 的目标用）；两者都失败 → 整个 section 隐藏，
 不影响下面的 ONU 身份区块。
 
 两个 ONU 身份区块都由 `s.filter` 按 `xpon.mode` 生效（与状态页同一套 `isEponMode()` 判据），
@@ -211,9 +232,76 @@ OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列�
 EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本、芯片 ID、以太网口数量，
 且各字段长度上限不同），因此分两个 section 而不是合并成一个。
 
+#### 序列号（SN）从「PON 线路」移到这里
+
+序列号是**ONU 向 OLT 注册用的身份**，与板级身份同属一类，因此放在 ONU 身份—OMCI 区块，
+紧挨着厂商 ID 等身份字段。**成对出现**：
+
+| 字段 | 来源 | 可编辑 | 说明 |
+| --- | --- | --- | --- |
+| 序列号（SN） | UCI `pon.xpon.serial_number` | 是 | 覆盖板级烧录值；留空则按烧录值注册 |
+| 板级序列号（SN） | `pon-board-identity read <target> pon_sn` | 否（在「校准数据」里改） | 烧录在 Flash 里的值 |
+
+两者并排是为了**一眼看出不匹配**——注册失败时这是第一个要查的点。可编辑的那个仍写回
+`pon.xpon.serial_number`（由 `pon.init` 下发给内核 `xpon/serial_number`），没有换存储位置，
+只是换了所属区块与措辞。
+
+`pon.init` 的回落顺序相应变为 **UCI 覆盖值 → 板级烧录值 → `default`**：留空不再直接等于
+`default`，而是先用烧录值。板级读取失败（无 `pon_sn` 字段、无 `pon-board-identity`）仍
+回落 `default`，行为与从前一致。
+
 原 configuration 页的两个「ONU identity」标签页已移除，改为在该分区留下指向硬件身份页的说明。
 原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页，改名为「校准数据」
 （它就是写进 Flash 的板级身份文件，与身份字段同类；config 页只留一行指向说明）。
+
+### 认证方式：LOID 与 Password 是二选一，不是"LOID 是否配置"
+
+**运营商发什么凭据，就用哪种认证方式**，这是运营商的属性而不是 ONU 的偏好：
+
+| 认证方式 | 凭据 | 上报的 ME |
+| --- | --- | --- |
+| LOID 认证 | `loid`（纯 LOID，或 LOID + LOID 密码） | `CLASS_CTC_LOID_AUTH`（0xfffa） |
+| Password 认证 | `registration_id` | 不上报 LOID ME，`registration_id` 作为凭据 |
+
+> ⚠️ **不要把 `loid` 为空直接解释成 `loid-not-found`。** 空 LOID 只是"没有 LOID"，而
+> OLT 报 `loid-not-found` 是因为**它被要求查一个不存在的 LOID**。两者之间隔着一个真正的
+> 错误：把空的 CTC LOID ME 报给 OLT。
+
+> ⚠️ **不要把 `loid_configured=false` 当作必然失败条件。** Password 认证的线路上它就是
+> 正常状态，标红是把用户的正确配置说成故障。
+
+因此判定收敛到**一个**函数 `advertise_ctc_loid_auth()`：
+
+```rust
+match self.auth_mode {
+    AuthMode::Password => false,          // 凭据是 Registration-ID，不上报 LOID
+    AuthMode::Loid => !self.loid.is_empty(), // 有 LOID 才有东西可供 OLT 查
+}
+```
+
+MIB 只在这个函数为真时才 `insert(CLASS_CTC_LOID_AUTH, ...)`——**没东西可查就根本不提供这个
+ME**，OLT 也就无从报 `loid-not-found`，更不会对已经到 O5 的线路 Deactivate。这是
+password-only 场景下 O5 反复掉线的根因。
+
+`AuthMode` 只有 `Loid` / `Password` 两个值（`auth_mode` 未配置时不叫"第三种模式"）：
+`loid` 非空 → `Loid`，否则 → `Password`。落库则在 `pon.omci.auth_mode`，下拉二选一，
+`loid` / `loid_password` 仅在 LOID 认证下显示（兼容早期配置：两个 `depends()` 调用是 OR，
+`auth_mode` 为空时同样显示，不至于把老配置的 LOID 藏起来）。
+
+状态页同理由 `credentialSeverity()` 判定，不再直接用 `booleanSeverity(loid_configured)`：
+
+| 场景 | 显示 | 严重度 |
+| --- | --- | --- |
+| Password 认证，未配 LOID | Registration-ID | 中性 |
+| Password 认证，残留 LOID | 已保存 LOID，但当前不使用 | 中性 |
+| LOID 认证，已配置 | 已配置 | ok |
+| LOID 认证，已上报 LOID ME 但 LOID 为空 | 未配置 | **error**（唯一真故障） |
+| LOID 认证，未上报 LOID ME | 未配置 | 中性 |
+| 旧 agent 未上报 `auth_mode` | 回退为布尔显示 | 有 LOID 才 ok |
+
+`auth_mode` 与 `ctc_loid_advertised` 都进了 OMCI 状态 JSON，所以页面判定的是
+**agent 实际做了什么**，而不是**配置看起来像什么**。
+
 
 ### 语音配置页
 

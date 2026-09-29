@@ -40,6 +40,51 @@ function ensureStylesheet() {
 	}));
 }
 
+function validateSerialNumber(sectionId, value) {
+	if (value == null || value === '')
+		return true;
+
+	if (/^[0-9a-fA-F]{16}$/.test(value) ||
+	    /^[A-Za-z0-9]{4}[0-9a-fA-F]{8}$/.test(value))
+		return true;
+
+	return _('Use 16 hexadecimal digits or VEND followed by 8 hexadecimal digits.');
+}
+
+/*
+ * Every line reports its identity through the one storage target that holds the
+ * board image, so the target does not depend on the section being rendered. The
+ * identity layout is consulted first because it is the side that owns the
+ * pon_sn field; the storage list is the fallback for a board that only declares
+ * pon_data.
+ */
+function boardTarget(identity, storages) {
+	var names = Object.keys((identity || {}).layout
+		? (identity.layout.targets || {}) : {});
+
+	if (!names.length && identity)
+		names = Object.keys(identity.targets || {});
+
+	if (!names.length)
+		names = (storages || []).map(function(storage) {
+			return storage.id;
+		});
+
+	return names.length ? names[0] : null;
+}
+
+/* The burned serial is one field of that image, read on demand. */
+function readBoardSerial(target) {
+	if (!target)
+		return Promise.resolve(null);
+
+	return runIdentity([ 'read', target, 'pon_sn' ]).then(function(value) {
+		return value || null;
+	}).catch(function() {
+		return null;
+	});
+}
+
 function isEponMode(mode) {
 	return (mode || '').indexOf('epon-') === 0;
 }
@@ -231,7 +276,23 @@ return view.extend({
 			L.resolveDefault(loadIdentity(), null),
 			L.resolveDefault(loadStorages(), [])
 		]).then(function(results) {
-			return { identity: results[1], storages: results[2] };
+			var identity = results[1];
+			var storageList = results[2];
+			var target = boardTarget(identity, storageList);
+
+			/*
+			 * The burned serial is shown next to the UCI override so a mismatch
+			 * is visible at a glance; it is read here because a form option can
+			 * only render a value, not wait for one.
+			 */
+			return L.resolveDefault(readBoardSerial(target), null).then(function(serial) {
+				return {
+					identity: identity,
+					storages: storageList,
+					boardSerial: target ? serial : null,
+					boardTarget: target
+				};
+			});
 		});
 	},
 
@@ -271,276 +332,368 @@ return view.extend({
 			return modeLabel(uci.get('pon', uci.get('pon', sectionId, 'line'), 'mode'));
 		};
 
+		/*
+		 * The serial number is what the OLT registers; the board identity is
+		 * what it is burned from. They are shown together here because a
+		 * mismatch is the first thing to check when registration fails, but
+		 * only the override is editable here — the burned value belongs to
+		 * the flash image, edited further down the page.
+		 */
+		o = s.option(form.Value, '_serial_number', _('Serial number (SN)'));
+		o.placeholder = _('Board serial number');
+		o.rmempty = true;
+		o.validate = validateSerialNumber;
+		o.cfgvalue = function(sectionId) {
+			var line = uci.get('pon', sectionId, 'line');
+
+			return uci.get('pon', line, 'serial_number') || '';
+		};
+		o.write = function(sectionId, value) {
+			var line = uci.get('pon', sectionId, 'line');
+
+			uci.set('pon', line, 'serial_number', value);
+		};
+		o.remove = function(sectionId) {
+			var line = uci.get('pon', sectionId, 'line');
+
+			uci.unset('pon', line, 'serial_number');
+		};
+		o.description = _('Overrides the serial number burned into the board identity. Leave empty to register under the burned value.');
+
+		o = s.option(form.DummyValue, '_board_serial', _('Board serial number (SN)'));
+		o.cfgvalue = function(sectionId) {
+			var serial = state.boardSerial;
+
+			if (serial === null || serial === undefined)
+				return _('Not available');
+
+			return serial || _('Not set');
+		};
+		o.description = _('Read from the board identity image. Edit it under Calibration data below.');
+
 		o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
 		o.rmempty = true;
 		o.validate = asciiLength(4, 4);
 		o.description = _('Usually the same as the first four characters of the serial number.');
 
-		o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 20);
+	o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 20);
 
-		o = s.option(form.Value, 'hardware_version', _('Hardware version'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 14);
+	o = s.option(form.Value, 'hardware_version', _('Hardware version'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 14);
 
-		o = s.option(form.Value, 'software_version', _('Software version'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 14);
+	o = s.option(form.Value, 'software_version', _('Software version'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 14);
 
-		o = s.option(form.Value, 'operator_id', _('Operator ID'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 4);
+	o = s.option(form.Value, 'operator_id', _('Operator ID'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 4);
 
-		s = m.section(form.TypedSection, 'oam', _('ONU identity — EPON OAM'),
-			_('Reported to the OLT over EPON OAM when the line runs in EPON or 10G-EPON mode.'));
-		s.anonymous = false;
-		s.addremove = false;
-		s.filter = function(sectionId) {
-			return sectionUsesEpon(sectionId);
-		};
+	s = m.section(form.TypedSection, 'oam', _('ONU identity — EPON OAM'),
+		_('Reported to the OLT over EPON OAM when the line runs in EPON or 10G-EPON mode.'));
+	s.anonymous = false;
+	s.addremove = false;
+	s.filter = function(sectionId) {
+		return sectionUsesEpon(sectionId);
+	};
 
-		o = s.option(form.DummyValue, 'line', _('PON line'));
-		o.default = '-';
+	o = s.option(form.DummyValue, 'line', _('PON line'));
+	o.default = '-';
 
-		o = s.option(form.DummyValue, '_mode', _('Line mode'));
-		o.cfgvalue = function(sectionId) {
-			return modeLabel(uci.get('pon', uci.get('pon', sectionId, 'line'), 'mode'));
-		};
+	o = s.option(form.DummyValue, '_mode', _('Line mode'));
+	o.cfgvalue = function(sectionId) {
+		return modeLabel(uci.get('pon', uci.get('pon', sectionId, 'line'), 'mode'));
+	};
 
-		o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
-		o.rmempty = true;
-		o.validate = asciiLength(4, 4);
+	o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
+	o.rmempty = true;
+	o.validate = asciiLength(4, 4);
 
-		o = s.option(form.Value, 'model', _('ONU short model'));
-		o.rmempty = true;
-		o.validate = asciiLength(4, 4);
+	o = s.option(form.Value, 'model', _('ONU short model'));
+	o.rmempty = true;
+	o.validate = asciiLength(4, 4);
 
-		o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 16);
+	o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 16);
 
-		o = s.option(form.Value, 'hardware_version', _('Hardware version'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 8);
+	o = s.option(form.Value, 'hardware_version', _('Hardware version'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 8);
 
-		o = s.option(form.Value, 'software_version', _('Software version'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 16);
+	o = s.option(form.Value, 'software_version', _('Software version'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 16);
 
-		o = s.option(form.Value, 'firmware_version', _('Firmware version'));
-		o.rmempty = true;
-		o.validate = asciiLength(1, 127);
+	o = s.option(form.Value, 'firmware_version', _('Firmware version'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 127);
 
-		o = s.option(form.Value, 'chipset_id', _('Chipset ID'));
-		o.rmempty = true;
-		o.validate = validateChipsetId;
+	o = s.option(form.Value, 'chipset_id', _('Chipset ID'));
+	o.rmempty = true;
+	o.validate = validateChipsetId;
 
 		o = s.option(form.Value, 'ge_ports', _('Ethernet port count'));
 		o.default = '1';
 		o.datatype = 'range(1,64)';
 
-		var cards = [];
+		/*
+		 * The board flash half of the page. It is built as a form section rather
+		 * than as a hand-made card: a form map renders its own children into the
+		 * tab containers it creates, so anything assembled outside render() ends
+		 * up beside the tabs instead of inside them and is never shown.
+		 */
+		this.renderBoardData(m, identity, storages);
 
-		/* One card for everything written to the board's flash, grouped by
-		   storage target. The two halves still degrade independently. */
-		if (identity || storages.length)
-			cards.push(this.renderBoardData(identity, storages));
-
-		return m.render().then(L.bind(function(map) {
-			return E([], cards.concat([ map ]));
-		}, this));
+		return m.render();
 	},
 
-	renderBoardData: function(identity, storages) {
+	renderBoardData: function(m, identity, storages) {
 		var self = this;
-		var entries = [];
-		var blocks = mergeTargets(identity, storages).map(function(target) {
-			var rows = [];
-
-			Object.keys(target.fields || {}).forEach(function(field) {
-				var id = 'pon-identity-' + target.id + '-' + field;
-				var input = E('input', {
-					'class': 'cbi-input-text',
-					'type': 'text',
-					'id': id,
-					'value': (((identity || {}).data || {})[target.id] || {})[field] || ''
-				});
-
-				if (self.readonly)
-					input.disabled = true;
-
-				entries.push({ target: target.id, field: field, def: target.fields[field], input: input });
-
-				rows.push(E('div', { 'class': 'cbi-value' }, [
-					E('label', { 'class': 'cbi-value-title', 'for': id },
-						boardLabels[field] || field),
-					E('div', { 'class': 'cbi-value-field' }, input)
-				]));
-			});
-
-			if (!rows.length)
-				return null;
-
-			return E('div', {}, [
-				E('h4', { 'class': 'pon-subhead' }, _('Storage target: %s').format(target.label)),
-				rows,
-				E('div', { 'class': 'cbi-page-actions' }, [
-					E('button', {
-						'class': 'cbi-button cbi-button-action',
-						'disabled': self.readonly || null,
-						'click': ui.createHandlerFn(self, 'handleIdentityWrite', target.id)
-					}, _('Write board identity'))
-				])
-			]);
-		}).filter(function(block) {
-			return block != null;
+		var targets = mergeTargets(identity, storages);
+		var withFields = targets.filter(function(target) {
+			return Object.keys(target.fields || {}).length;
 		});
+		var s, o;
+
+		if (!withFields.length && !storages.length)
+			return;
+
+		s = m.section(form.TypedSection, 'pon_identity', _('Calibration data'),
+			_('The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.'));
+		s.anonymous = false;
+		s.addremove = false;
 
 		/*
-		 * The file uploaded here is the board identity file: the whole image
-		 * of the storage target, which carries the identity fields and the
-		 * calibration data side by side. There is no calibration-only target,
-		 * so there is exactly one file to write and one button to write it
-		 * with — and no target picker, because pon_data declares a single
-		 * partition.
+		 * The fields live in the board image, not in UCI, so the section is only
+		 * a container: it is backed by a single synthetic instance whose options
+		 * read and write the storages through pon-board-identity.
 		 */
+		s.cfgsections = function() {
+			return [ 'board' ];
+		};
+
+		o = s.option(form.DummyValue, '_intro', _('Storage target'));
+		o.cfgvalue = function() {
+			return targets.map(function(target) {
+				return target.label;
+			}).join(', ') ||
+				_('The board image carries the identity fields and the calibration data together; there is no calibration-only target.');
+		};
+
+		this.identityEntries = [];
+
+		withFields.forEach(function(target) {
+			Object.keys(target.fields).forEach(function(field) {
+				var value = (((identity || {}).data || {})[target.id] || {})[field] || '';
+				var optionName = '_identity_' + target.id + '_' + field;
+
+				var field_option = s.option(form.Value, optionName,
+					boardLabels[field] || field);
+				field_option.rmempty = true;
+				field_option.default = value;
+				field_option.cfgvalue = function() {
+					return value;
+				};
+				field_option.validate = function(sectionId, newValue) {
+					return validateBoardField(target.fields[field], newValue);
+				};
+
+				self.identityEntries.push({
+					target: target.id,
+					field: field,
+					def: target.fields[field],
+					option: field_option,
+					original: value
+				});
+			});
+		});
+
+		o = s.option(form.DummyValue, '_file_action', _('Board identity file'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return self.renderFileActions(storages, identity);
+		};
+	},
+
+	/*
+	 * The file uploaded here is the board identity file: the whole image of the
+	 * storage target, which carries the identity fields and the calibration data
+	 * side by side. There is no calibration-only target, so there is exactly one
+	 * file to write and one button to write it with — and no target picker,
+	 * because pon_data declares a single partition.
+	 */
+	renderFileActions: function(storages, identity) {
+		var self = this;
 		var uploadTarget = storages.length ? storages[0] : firstIdentityTarget(identity);
 
-		if (uploadTarget)
-			blocks.push(E('div', {}, [
-				E('h4', { 'class': 'pon-subhead' }, _('Board identity file')),
-				E('div', { 'class': 'cbi-section-descr' },
-					_('Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin.')),
-				E('div', { 'class': 'cbi-page-actions' }, [
-					/* The button id travels instead of the node: the handler
-					   looks it up when the upload actually starts. */
-					E('button', {
-						'class': 'cbi-button cbi-button-action',
-						'id': 'pon-identity-upload',
-						'disabled': self.readonly || null,
-						'click': ui.createHandlerFn(self, 'handleIdentityUpload',
-							uploadTarget, 'pon-identity-upload')
-					}, [ _('Upload and write') ])
-				])
-			]));
+		if (!uploadTarget)
+			return E('span', {}, _('No storage target is available.'));
 
-		this.identityEntries = entries;
-		this.identityOriginal = JSON.parse(JSON.stringify((identity || {}).data || {}));
-
-		return E('div', { 'class': 'cbi-section' }, [
-			E('h3', {}, _('Calibration data')),
+		return E('div', {}, [
 			E('div', { 'class': 'cbi-section-descr' },
-				_('The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.')),
-			blocks
+				_('Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin.')),
+			E('div', { 'class': 'cbi-page-actions' }, [
+				/* The button id travels instead of the node: the handler
+				   looks it up when the upload actually starts. */
+				E('button', {
+					'class': 'cbi-button cbi-button-action',
+					'id': 'pon-identity-upload',
+					'disabled': self.readonly || null,
+					'click': ui.createHandlerFn(self, 'handleIdentityUpload',
+						uploadTarget, 'pon-identity-upload')
+				}, [ _('Upload and write') ])
+			])
 		]);
 	},
 
-	/* Writes a complete board identity file to one storage target. */
-	handleIdentityUpload: function(target, buttonId) {
-		var self = this;
-		var button = document.getElementById(buttonId);
+/* Writes a complete board identity file to one storage target. */
+handleIdentityUpload: function(target, buttonId) {
+	var self = this;
+	var button = document.getElementById(buttonId);
 
-		/*
-		 * The button is only locked while the image is written. Locking it
-		 * during the file picker too would leave it stuck if the user cancels
-		 * the dialog, because ui.uploadFile() never settles in that case.
-		 */
-		return ui.uploadFile('/tmp/pon-board-data.bin').then(function() {
-			if (button) {
-				button.disabled = true;
-				button.classList.add('spinning');
-			}
+	/*
+	 * The button is only locked while the image is written. Locking it
+	 * during the file picker too would leave it stuck if the user cancels
+	 * the dialog, because ui.uploadFile() never settles in that case.
+	 */
+	return ui.uploadFile('/tmp/pon-board-data.bin').then(function() {
+		if (button) {
+			button.disabled = true;
+			button.classList.add('spinning');
+		}
 
-			return fs.exec('/usr/libexec/airoha-pon-data', [ 'write', target.id ]);
-		}).then(function(result) {
-			if (result.code != 0)
-				throw new Error(result.stderr || result.stdout || _('Write failed.'));
+		return fs.exec('/usr/libexec/airoha-pon-data', [ 'write', target.id ]);
+	}).then(function(result) {
+		if (result.code != 0)
+			throw new Error(result.stderr || result.stdout || _('Write failed.'));
 
-			var message = [
-				_('Board identity file written to %s and verified. Reboot the device to apply it.')
-					.format(target.label)
-			];
+		var message = [
+			_('Board identity file written to %s and verified. Reboot the device to apply it.')
+				.format(target.label)
+		];
 
-			if (result.stdout.trim())
-				message.push(E('br'), result.stdout.trim());
+		if (result.stdout.trim())
+			message.push(E('br'), result.stdout.trim());
 
-			ui.addNotification(null, E('p', message), 'info');
-		}).catch(function(error) {
-			ui.addNotification(null, E('p', [
-				_('Writing the board identity file failed: %s').format(error.message)
-			]), 'danger');
-		}).finally(function() {
-			if (button) {
-				button.disabled = self.readonly || null;
-				button.classList.remove('spinning');
-			}
-		});
-	},
+		ui.addNotification(null, E('p', message), 'info');
+	}).catch(function(error) {
+		ui.addNotification(null, E('p', [
+			_('Writing the board identity file failed: %s').format(error.message)
+		]), 'danger');
+	}).finally(function() {
+		if (button) {
+			button.disabled = self.readonly || null;
+			button.classList.remove('spinning');
+		}
+	});
+},
 
-	/* Writes the changed identity fields of a single storage target. */
-	handleIdentityWrite: function(target) {
-		var self = this;
-		var pending = [];
-		var failure = null;
+/*
+ * Writes the changed identity fields of every storage target. The values come
+ * from the form's own inputs, so the fields are read exactly as the page shows
+ * them, whether or not the browser kept a node reference around.
+ */
+handleIdentityWrite: function() {
+	var self = this;
+	var pending = [];
+	var failure = null;
 
-		this.identityEntries.forEach(function(entry) {
-			var original, value, result;
+	this.identityEntries.forEach(function(entry) {
+		var node, value, result;
 
-			if (entry.target !== target)
-				return;
+		node = entry.option.getUIElement ? entry.option.getUIElement('board') : null;
+		value = node && node.value != null ? node.value.trim() : String(entry.original || '');
 
-			original = (self.identityOriginal[entry.target] || {})[entry.field] || '';
-			value = entry.input.value.trim();
-			result = validateBoardField(entry.def, value);
+		if (value == entry.original)
+			return;
 
-			entry.input.classList.remove('cbi-input-invalid');
+		result = validateBoardField(entry.def, value);
 
-			if (value == original)
-				return;
-
-			if (result !== true) {
-				entry.input.classList.add('cbi-input-invalid');
-				failure = failure || result;
-				return;
-			}
-
-			entry.input.value = value;
-			pending.push(entry);
-		});
-
-		if (failure) {
-			ui.addNotification(null, E('p', {}, failure), 'danger');
+		if (result !== true) {
+			failure = failure || result;
 			return;
 		}
 
-		if (!pending.length) {
-			ui.addNotification(null, E('p', {}, _('No board identity field was changed.')), 'info');
-			return;
-		}
+		pending.push({ target: entry.target, field: entry.field, value: value });
+	});
 
-		var args = [ 'write', target ];
+	if (failure) {
+		ui.addNotification(null, E('p', {}, failure), 'danger');
+		return Promise.resolve();
+	}
 
-		pending.forEach(function(entry) {
-			args.push(entry.field + '=' + entry.input.value);
-		});
+	if (!pending.length) {
+		ui.addNotification(null, E('p', {}, _('No board identity field was changed.')), 'info');
+		return Promise.resolve();
+	}
 
-		return runIdentity(args).then(function(output) {
-			pending.forEach(function(entry) {
-				self.identityOriginal[entry.target] = self.identityOriginal[entry.target] || {};
-				self.identityOriginal[entry.target][entry.field] = entry.input.value;
+	var byTarget = {};
+
+	pending.forEach(function(change) {
+		byTarget[change.target] = byTarget[change.target] || [];
+		byTarget[change.target].push(change);
+	});
+
+	var sequence = Promise.resolve();
+	var output = [];
+
+	Object.keys(byTarget).forEach(function(target) {
+		sequence = sequence.then(function() {
+			var args = [ 'write', target ];
+
+			byTarget[target].forEach(function(change) {
+				args.push(change.field + '=' + change.value);
 			});
 
-			ui.addNotification(null, E('p', [
-				_('Board identity written. Reboot the device to use the new values.'),
-				E('br'), output
-			]), 'info');
-		}).catch(function(error) {
-			ui.addNotification(null, E('p', [
-				_('Board identity write failed: %s').format(error.message)
-			]), 'danger');
+			return runIdentity(args).then(function(result) {
+				output.push(result);
+			});
 		});
-	},
+	});
 
-	handleSaveApply: null
+	return sequence.then(function() {
+		self.identityEntries.forEach(function(entry) {
+			var node = entry.option.getUIElement ? entry.option.getUIElement('board') : null;
+
+			if (node && node.value != null)
+				entry.original = node.value.trim();
+		});
+
+		ui.addNotification(null, E('p', [
+			_('Board identity written. Reboot the device to use the new values.'),
+			E('br'), output.join('; ')
+		]), 'info');
+	}).catch(function(error) {
+		ui.addNotification(null, E('p', [
+			_('Board identity write failed: %s').format(error.message)
+		]), 'danger');
+	});
+},
+
+/*
+ * Saving the page covers both halves: UCI carries the line identity overrides,
+ * while the board fields are written straight into the flash image. The board
+ * write runs first so a failure there does not silently leave UCI ahead of the
+ * image it is supposed to agree with.
+ */
+handleSave: function() {
+	var self = this;
+	var map = document.querySelector('.cbi-map');
+
+	if (!map)
+		return Promise.resolve();
+
+	return dom.callClassMethod(map, 'save').then(function() {
+		return self.handleIdentityWrite();
+	}).then(function() {
+		ui.hideModal();
+		return L.ui.changes.apply();
+	});
+},
+
+handleSaveApply: null
 });
