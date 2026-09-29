@@ -60,6 +60,7 @@ load_iptv_config() {
 	config_get_bool UNICAST config unicast 0
 	config_get UNICAST_PORT config unicast_port 5140
 	config_get UNICAST_ADDR config unicast_addr
+	config_get UNICAST_VLAN_OVERRIDE config unicast_vlan
 }
 
 find_br_lan() {
@@ -252,6 +253,36 @@ resolve_snooping() {
 	fi
 }
 
+# Single cable mode builds one bridge per handed-over VLAN, so the relay can be
+# pointed at a VLAN of its own instead of following the multicast VLAN. Only the
+# VLANs actually handed over on the trunk get a bridge, so the override is
+# checked against the trunk list rather than trusted: a relay bound to a bridge
+# that does not exist never receives a single packet.
+#
+# Outside single cable mode there is no per-VLAN bridge to pick from, so the
+# setting cannot apply. It is ignored with a warning instead of failing the
+# apply: the value stays valid for whenever the mode is switched back.
+resolve_unicast_vlan() {
+	local vid
+
+	[ -n "$UNICAST_VLAN_OVERRIDE" ] || return 0
+
+	if [ "$MODE" != 'trunk' ]; then
+		warn "unicast_vlan needs single cable mode; the relay VLAN follows the bridge"
+		UNICAST_VLAN_OVERRIDE=''
+		return 0
+	fi
+
+	validate_vlan "$UNICAST_VLAN_OVERRIDE" ||
+		fail "unicast_vlan must be a VLAN ID between 1 and 4094"
+
+	for vid in $TRUNK_VLAN_LIST; do
+		[ "$vid" = "$UNICAST_VLAN_OVERRIDE" ] && return 0
+	done
+
+	fail "VLAN $UNICAST_VLAN_OVERRIDE is not handed over on the trunk; add it to the handed over VLANs or clear unicast_vlan"
+}
+
 # The relay has to listen on a bridge, never on one of its member ports: frames
 # reaching a bridge port are handled by the bridge and never hit the local
 # stack on that port.
@@ -264,8 +295,11 @@ resolve_unicast() {
 	[ "$ENABLED" -eq 1 ] || return 0
 	[ "$UNICAST" -eq 1 ] || return 0
 
+	resolve_unicast_vlan
+
 	if [ "$MODE" = 'trunk' ]; then
-		UNICAST_VLAN="$MULTICAST_VLAN"
+		UNICAST_VLAN="$UNICAST_VLAN_OVERRIDE"
+		[ -n "$UNICAST_VLAN" ] || UNICAST_VLAN="$MULTICAST_VLAN"
 		[ -n "$UNICAST_VLAN" ] || UNICAST_VLAN="$SERVICE_VLAN"
 		UNICAST_DEV="br-iptv-$UNICAST_VLAN"
 		UNICAST_IFACE="luci_iptv_v$UNICAST_VLAN"
