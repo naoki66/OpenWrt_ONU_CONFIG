@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: luci-app-onu\n"
-"PO-Revision-Date: 2026-08-22 12:00+0800\n"
+"PO-Revision-Date: 2026-09-30 04:00+0800\n"
 "Last-Translator: Ziyou Xu <xuziyougm@gmail.com>\n"
 "Language: zh_Hans\n"
 "Language-Team: Chinese (Simplified)\n"
@@ -25,6 +25,9 @@ msgstr "已应用"
 msgid "Carries DHCP, authentication and video on demand and, when no separate multicast VLAN is set, multicast traffic."
 msgstr "承载 DHCP、鉴权与点播业务；未单独设置组播 VLAN 时组播流量也走这条。"
 
+msgid "Choose the mode according to the carrier's requirements."
+msgstr "请按运营商的要求选择线路模式。"
+
 msgid "Enable"
 msgstr "启用"
 
@@ -32,7 +35,7 @@ msgid "Grant access to PON configuration, board identity, calibration data, the 
 msgstr "允许访问 PON 配置、校准分区、校准数据、上网业务、IPTV 网桥与语音"
 
 msgid "IGMP upstream VLAN"
-msgstr "上游连接（IGMP 上行 VLAN）"
+msgstr "IGMP 上行 VLAN"
 
 msgid "IPTV"
 msgstr "IPTV"
@@ -118,6 +121,9 @@ msgstr "PON 线路和 OMCI/OAM 接口将被停止并重新启动。是否继续�
 msgid "The selected port is dedicated to the set-top box."
 msgstr "所选端口将专用于机顶盒。"
 
+msgid "The above information should match the equipment nameplate."
+msgstr "以上信息应与设备铭牌一致。"
+
 msgid "Unable to create diagnostic package: %s"
 msgstr "无法生成诊断包：%s"
 
@@ -170,7 +176,7 @@ msgid "Downstream PLOAMd received"
 msgstr "MAC 接收 PLOAMd"
 
 msgid "Equipment ID"
-msgstr "设备型号"
+msgstr "设备标识"
 
 msgid "Firmware version"
 msgstr "固件版本"
@@ -199,14 +205,32 @@ msgstr "允许访问 PON 身份配置"
 msgid "Hardware version"
 msgstr "硬件版本"
 
-msgid "Calibration data"
-msgstr "校准数据"
+msgid "Board identity"
+msgstr "板载身份"
+
+msgid "PON board data"
+msgstr "PON 板级数据"
 
 msgid "Board identity file"
 msgstr "校准分区文件"
 
-msgid "The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin."
-msgstr "身份字段与校准数据是同一个存储目标上同一份 Flash 镜像的两种视图，都要重启后生效。身份字段就地改写，校准分区文件则整体替换该目标。原镜像另存为 /tmp/pon-board-*.bin。"
+msgid "The identity fields burned into the flash image of a storage target, patched in place one field at a time. They take effect after a reboot; the image as a whole is handled by PON board data below."
+msgstr "烧录在存储目标 Flash 镜像里的身份字段，逐个就地改写，重启后生效；整份镜像的处理在本页下方「PON 板级数据」。"
+
+msgid "The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot."
+msgstr "板级数据镜像就是整个存储目标，身份字段与校准数据都在里面。备份是把它下载下来，上传是整份替换；原镜像另存于 /tmp，两者都要重启后生效。"
+
+msgid "Board identity fields"
+msgstr "板载身份字段"
+
+msgid "No board identity layout is available: /etc/board.json declares no identity targets, or pon-board-identity cannot be run."
+msgstr "读不到板载身份布局：/etc/board.json 没有声明 identity 目标，或 pon-board-identity 无法执行。"
+
+msgid "This board declares no writable identity fields."
+msgstr "本设备没有声明可写的身份字段。"
+
+msgid "No storage target is available: /etc/board.json declares no pon_data target, so there is no image to back up or write."
+msgstr "没有可用的存储目标：/etc/board.json 没有声明 pon_data 目标，因此没有可备份或写入的镜像。"
 
 msgid "Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin."
 msgstr "上传存储目标的完整镜像并整体替换，身份字段与校准数据一并覆盖。原镜像另存为 /tmp/pon-board-data.*.bin。"
@@ -311,6 +335,9 @@ msgstr "否"
 msgid "No PON instances are configured."
 msgstr "没有配置 PON 实例。"
 
+msgid "No LAN port devices are available to bridge."
+msgstr "没有可用于桥接的 LAN 口设备。"
+
 msgid "No device configured"
 msgstr "未配置设备"
 
@@ -319,6 +346,9 @@ msgstr "无"
 
 msgid "Not assigned"
 msgstr "未分配"
+
+msgid "Note"
+msgstr "提示"
 
 msgid "Not authenticated"
 msgstr "尚未认证"
@@ -440,6 +470,9 @@ msgstr "PON 接口"
 msgid "PON line: %s (%s)"
 msgstr "PON 线路：%s（%s）"
 
+msgid "PON Mode"
+msgstr "PON 模式"
+
 msgid "PON status"
 msgstr "PON 状态"
 
@@ -513,7 +546,7 @@ msgid "LOID auth: LOID + optional password. Password auth: registration ID only,
 msgstr "LOID 认证：LOID + 可选密码；密码认证：仅注册 ID，无 LOID。"
 
 msgid "Enter the LOID password provided by your ISP. Leave empty if not required."
-msgstr "输入运营商提供的 LOID和密码。密码可留空。。"
+msgstr "输入运营商提供的 LOID 密码。无需密码时留空。"
 
 msgctxt "PON authentication mode"
 msgid "LOID authentication"
@@ -521,7 +554,7 @@ msgstr "LOID 认证"
 
 msgctxt "PON authentication mode"
 msgid "Password authentication"
-msgstr "Password 认证"
+msgstr "密码认证"
 
 msgid "Leave empty for pure LOID authentication; set it only when the OLT asks for a password next to the LOID."
 msgstr "留空即为纯 LOID 认证；仅在 OLT 要求除 LOID 外另提供密码时填写。"
@@ -529,8 +562,8 @@ msgstr "留空即为纯 LOID 认证；仅在 OLT 要求除 LOID 外另提供密�
 msgid "Board serial number (SN)"
 msgstr "板级序列号（SN）"
 
-msgid "Read from the board identity image. Edit it under Calibration data below."
-msgstr "从校准分区镜像读取。可在此页下方「校准数据」中修改。"
+msgid "Read from the board identity image. Edit it under Board identity below."
+msgstr "从校准分区镜像读取。可在此页下方「板载身份」中修改。"
 
 msgid "Overrides the serial number burned into the board identity. Leave empty to register under the burned value."
 msgstr "覆盖烧录在校准分区中的序列号。留空则按烧录值注册。"
@@ -795,6 +828,12 @@ msgid "Ethernet port count"
 msgstr "以太网口数量"
 
 msgid "Hardware ID"
+msgstr "硬件身份"
+
+msgid "Hardware"
+msgstr "硬件"
+
+msgid "Hardware identity"
 msgstr "硬件身份"
 
 msgid "Board MAC address"
@@ -1200,7 +1239,7 @@ msgid "RFC 2833"
 msgstr "RFC 2833"
 
 msgid "Payload type value"
-msgstr "PayLoad 类型值"
+msgstr "载荷类型值"
 
 msgid "RTP payload type announced for RFC 2833 telephony events."
 msgstr "RFC 2833 电话事件使用的 RTP 载荷类型。"
@@ -1344,7 +1383,7 @@ msgid "Local port the media gateway listens on."
 msgstr "媒体网关本地监听的端口。"
 
 msgid "Authentication method"
-msgstr "授权方式"
+msgstr "认证方式"
 
 msgid "MD5"
 msgstr "MD5"
@@ -1817,11 +1856,14 @@ msgstr "关闭时不写任何 VLAN 子接口与拨号接口，网络页原有的
 msgid "Internet mode"
 msgstr "上网方式"
 
-msgid "Bridged hands the operator VLAN to your own router. Dialled lets the ONT terminate the PPPoE session and route for the LAN."
-msgstr "桥接把运营商 VLAN 直接交给你的路由器；系统拨号则由光猫终结 PPPoE 会话并为 LAN 做路由。"
+msgid "Bridged hands the operator VLAN to your own router. DHCP takes whatever address the operator hands out. PPPoE lets the ONT terminate the session and route for the LAN."
+msgstr "桥接把运营商 VLAN 直接交给你的路由器；DHCP 直接取用运营商下发的地址；PPPoE 则由光猫终结会话并为 LAN 做路由。"
 
 msgid "Bridged (a downstream router dials)"
 msgstr "桥接（下游路由器拨号）"
+
+msgid "DHCP client (the operator hands out an address)"
+msgstr "DHCP 客户端（地址由运营商下发）"
 
 msgid "Dialled by the ONT (PPPoE)"
 msgstr "系统拨号（光猫 PPPoE 拨号）"
@@ -1854,11 +1896,17 @@ msgstr "运营商用 IPoE 而非 PPPoE 时打开。否则只有 0x8863 与 0x886
 msgid "IP protocol version"
 msgstr "IP 协议版本"
 
-msgid "IPv4/IPv6"
+msgid "Dual stack over PPPoE takes IPv6 from the session itself; over DHCP it adds a DHCPv6 client asking for a prefix."
+msgstr "PPPoE 下的双栈由会话自身协商出 IPv6；DHCP 下的双栈则额外增加一个 DHCPv6 客户端去请求前缀。"
+
+msgid "IPv4 only"
+msgstr "仅 IPv4"
+
+msgid "IPv4/IPv6 dual stack"
 msgstr "IPv4/IPv6 双栈"
 
-msgid "Anything but IPv4 also writes wan6 as a DHCPv6 client on the dialled session."
-msgstr "只要不是纯 IPv4，就会额外写 wan6，在已拨通的会话上跑 DHCPv6 客户端。"
+msgid "IPv6 only (no longer offered)"
+msgstr "仅 IPv6（已不再提供）"
 
 msgid "PPPoE user name"
 msgstr "PPPoE 用户名"
@@ -1880,12 +1928,6 @@ msgstr "生成的设备"
 
 msgid "What internet-apply builds. Both are 15 characters or shorter, which is what netifd and the kernel accept."
 msgstr "由 internet-apply 生成。两个名字都不超过 15 个字符，这是 netifd 与内核能接受的上限。"
-
-msgid "Hardware offload"
-msgstr "硬件卸载"
-
-msgid "Turns on netfilter flow offloading and hardware offloading, which is the only path to the Airoha PPE on this platform: airoha_eth takes the flows from nftables and the NPU forwards them. The firewall settings made by hand are restored when the switch is turned off."
-msgstr "打开 netfilter 流卸载与硬件卸载，这是本平台通往 Airoha PPE 的唯一通道：airoha_eth 从 nftables 接过流表，NPU 负责转发。关闭该开关会恢复此前手工设置的防火墙值。"
 
 msgid "Voice network"
 msgstr "语音业务网络"
