@@ -400,22 +400,36 @@ UCI schema（`/etc/config/internet`，同时是该标签页的可见条件）：
 | Option | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `0` | 关闭时不写任何 LAN/VLAN 改动，并把原 `wan`/`wan6` 放回原位 |
-| `mode` | `bridge` | `bridge` 桥接 / `pppoe` 系统拨号 |
+| `mode` | `bridge` | `bridge` 桥接 / `dhcp` DHCP 客户端 / `pppoe` 系统拨号 **（三种）** |
 | `uplink` | `pon0` | 承载运营商 VLAN 的设备 |
 | `vlan` | 空（必填） | 上网业务 VLAN，例如 466 |
 | `ports` | list | 桥接模式下加入上网网桥的 LAN 口（多选） |
 | `ipoe` | `0` | 桥接模式下额外放行原生 IPv4/IPv6（ARP/IP/IPv6） |
-| `ip_version` | `ipv4` | 系统拨号：`ipv4` / `ipv6` / `ipv4_ipv6`（非纯 IPv4 会额外写 `wan6`） |
-| `username` / `password` | 空 | PPPoE 凭据 |
+| `ip_version` | `ipv4` | `ipv4` IPv4 only / `ipv4_ipv6` 双栈。**`dhcp` 与 `pppoe` 都提供这两档**，取值相同、来源不同；旧配置的 `ipv6` 仍被接受但不再提供 |
+| `username` / `password` | 空 | PPPoE 凭据（`pppoe` 必填用户名） |
 | `mtu` | `1492` | PPPoE 接口 MTU |
-| `offload` | `1` | 写 `firewall.defaults.flow_offloading{,_hw}` |
+| `offload` | `1` | **本页不再显示开关**（硬件卸载迁到独立页面）。`internet-apply` 仍然读这个 option，所以既有配置的行为不变 |
 
-#### 两种拓扑
+#### 三种拓扑
 
-| 模式 | 拓扑 | 副作用 |
+| 模式 | 拓扑 | IPv6 从哪来 |
 | --- | --- | --- |
-| `bridge` | `pon0.<vlan>`（`ct-wanup`）+ 选中 LAN 口 → `br-wanup` | 选中端口**移出 br-lan**；`network.wan` 改成指向 `br-wanup` 的无地址接口 |
-| `pppoe` | `pon0.<vlan>`（`ct-wanup`）→ `network.wan`（proto `pppoe`），IPv6 时额外 `wan6`（`@wan` + `dhcpv6`） | 原 `wan`/`wan6` 被改名收起 |
+| `bridge` | `pon0.<vlan>`（`ct-wanup`）+ 选中 LAN 口 → `br-wanup` | 不涉及：网桥只转帧，地址由下游路由器拿 |
+| `dhcp` | `pon0.<vlan>`（`ct-wanup`）→ `network.wan`（proto `dhcp`） | 双栈时**另写一个真实的 `wan6`**（`@wan` + `dhcpv6`，`reqprefix auto`） |
+| `pppoe` | `pon0.<vlan>`（`ct-wanup`）→ `network.wan`（proto `pppoe`） | **会话自己协商**，netifd 在 ppp 设备上起虚拟 `wan_6`；**不写 `network.wan6`** |
+
+> ⚠️ **`wan_6` 与 `wan6` 是两个不同的东西，别混。** `wan_6`（下划线）是 netifd 在 `option ipv6 'auto'`
+> 时**为 PPPoE 接口自动生成**的虚拟接口——它没有 UCI section，随会话一起生灭，proto 由 netifd 决定。
+> `wan6` 是我们（或用户）在 `/etc/config/network` 里写死的 DHCPv6 客户端接口。
+> 所以 PPPoE 分支的正确做法是 `ipv6='auto'` + `delegate='1'`，**而不是**写一个 `network.wan6`：
+> 后者会在同一条 PPPoE 会话上再挂一个 DHCPv6 客户端。
+
+> ⚠️ **切到 PPPoE 时必须把现有的 `wan6` 停掉。** `write_network_config()` 在 `pppoe` 分支调
+> `park_wan6()`：把仍存在的 `wan6` 置 `auto=0` + `disabled=1`，并把它原来的 `auto` 记进
+> `luci_wanup_prev_auto`；离开 PPPoE 时 `unpark_wan6()` 原样还回去。
+> **停泊而不是删除**——删掉的 `wan6` 恢复不出来，而 stock `wan6` 本来就是靠 rename 收起的，
+> 这套动作与 `take_over_stock()` / `restore_stock()` 是同一种"可逆"思路。
+> 因此**前端不需要**在保存时 `uci.remove('network','wan6')`：后端已经覆盖，前端再删一次只是重复。
 
 > ⚠️ **两种模式都写在 `network.wan` 上，而不是新建一个 `luci_wanup` 接口。** fw4 的 zone 按接口名引用成员，
 > 如果新建名字而把 stock `wan` 收起，zone 里的 `network 'wan'` 就悬空了，每次 reload 都会报 "Zone 'wan' has no device(s)"。
@@ -674,14 +688,14 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | --- | --- |
 | `htdocs/.../view/onu/onu.css` | 新增：指标网格、指标瓦片、读数/单位、键值列表（含 `--split` / `--numeric`）、常显分组、折叠分组与条目数徽标、状态圆点、分组标题 |
 | `htdocs/.../view/onu/status.js` | 重构为卡片 + 指标网格 + 状态点；线路详情改为常显键值列表，计数改为分组键值列表并折叠，保留轮询与展开态 |
-| `htdocs/.../view/onu/hardware.js` | 板级身份与校准数据合并为一张「校准数据」卡片：身份字段按存储目标分组（每组一个「写入板级身份」），末尾一个「板级身份文件」分组承载唯一的「上传并写入」，无目标选择器，且 `airoha-pon-data list` 失败时仍按身份目标名降级提供；写入身份改为按目标生效；ONU 身份仍按 EPON/GPON 分流 |
+| `htdocs/.../view/onu/hardware.js` | 底部由一张「校准数据」卡拆成两块：**「板载身份」**（身份字段按存储目标分组、逐个就地改写）+ **最下面「PON board data」**（移植自上游 `config.js`：目标存储 + 「下载备份」/「上传并写入」，目标多于一个时才出下拉）；两块**永远渲染**、缺数据时写原因；`loadIdentity()` 的每个 field read 各自 `.catch()`，单个字段读失败不再让整块消失；两个合成 section 用不同实例名（`board` / `image`）且 `anonymous = true`；ONU 身份仍按 EPON/GPON 分流 |
 | `htdocs/.../view/onu/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
 | `htdocs/.../view/onu/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转 |
-| `htdocs/.../view/onu/internet.js` | 新增：上网业务页（order 35，插在认证配置与 IPTV 之间）。单张 `form.Map('internet')` + `NamedSection('config')`，**不分 tab**，用 `depends()` 切换；字段：启用、上网方式（桥接 / 系统拨号）、上联设备、VLAN、LAN 口（`MultiValue`，校验至少选 1 且与 IPTV 机顶盒口互斥）、IPoE、IP 版本、PPPoE 用户名 / 密码、MTU、硬件卸载、`derivedDevices()` 只读派生设备行 |
+| `htdocs/.../view/onu/internet.js` | 新增：上网业务页（order 35，插在认证配置与 IPTV 之间）。单张 `form.Map('internet')` + `NamedSection('config')`，**不分 tab**，用 `depends()` 切换；字段：启用、上网方式（**桥接 / DHCP / 系统拨号三种**）、上联设备、VLAN、LAN 口（`MultiValue`，校验至少选 1 且与 IPTV 机顶盒口互斥）、IPoE、IP 版本（**IPv4 only / 双栈，DHCP 与 PPPoE 都显示**）、PPPoE 用户名 / 密码、MTU、`derivedDevices()` 只读派生设备行。**硬件卸载开关已移出本页** |
 | `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置 六个 section，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`） |
 | `root/etc/config/voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段，两个 `line` 段（双 FXS 口）与八个 `codec` 段，同时作为该标签页的可见条件 |
 | `root/etc/config/internet` | 新增：上网业务页的唯一数据源与标签页可见条件（`depends.uci.internet`）；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
-| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。两种模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起（保留原 option）而不是删除；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；系统拨号写 PPPoE 与可选 `wan6`，并额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
+| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起（保留原 option）而不是删除；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；卸载打开时额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
 | `root/etc/init.d/internet` | 新增：`START=18`（早于 network/firewall，与 sibling `iptv` 同构），procd 服务 + `procd_add_reload_trigger "internet"` |
 | `root/usr/share/luci/menu.d/luci-app-onu.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页本次新增 `admin/onu/internet`，order **35**（认证配置 30 与 IPTV 40 之间），`depends.uci.internet` |
 | `root/usr/share/rpcd/acl.d/luci-app-onu.json` | 并入原 `luci-app-iptv` 的 uci iptv/network 与 network.device 权限；本次再把 uci `internet` 加入 read/write 列表 |

@@ -15,11 +15,24 @@
 #           else that would leave through the uplink, which keeps local ARP,
 #           management and IPv6 traffic out of the operator VLAN.
 #
+#   dhcp    The operator hands the address out on the internet VLAN, nothing
+#           is dialled. Dual stack keeps the DHCPv6-PD client this page has
+#           always written: on a plain DHCP uplink there is no session for
+#           netifd to derive IPv6 from, so wan6 stays a real interface here.
+#
 #   pppoe   The ONT dials itself. The stock network.wan / network.wan6 are
 #           renamed aside rather than deleted, so switching the page off puts
 #           the original sections back unchanged. The leftovers have to be
 #           silenced too: a stock wan6 usually rides on @wan and would solicit
 #           DHCPv6 straight into the operator VLAN.
+#
+# IPv6 in dialled mode comes from the session itself: netifd raises its own
+# virtual wan_6 on top of the ppp interface when the interface carries
+# ipv6 'auto'. Writing a network.wan6 of our own put a second DHCPv6 client on
+# the same session, so it is gone. Cleaning up after the switch back to
+# IPv4-only needs no frontend help: drop_owned_iface() removes the wan6 older
+# versions of this script created (it is marked luci_wanup) and
+# restore_stock() puts the original one back.
 #
 # Why the uplink gets an interface of its own in dial mode: fw4 collects the
 # flowtable devices per firewall zone (fw4.uc builds related_physdevs from
@@ -176,19 +189,29 @@ validate_config() {
 	[ -e "/sys/class/net/$UPLINK" ] || fail "Uplink device $UPLINK was not found"
 	validate_vlan "$VLAN" || fail "The internet VLAN must be between 1 and 4094"
 
-	if [ "$MODE" = 'bridge' ]; then
-		[ -n "$PORTS" ] || fail "Pick at least one LAN port for the internet bridge"
+	case "$MODE" in
+		bridge)
+			[ -n "$PORTS" ] || fail "Pick at least one LAN port for the internet bridge"
 
-		for port in $PORTS; do
-			validate_ifname "$port" || fail "Invalid LAN port name $port"
-			[ -e "/sys/class/net/$port" ] || fail "LAN port $port was not found"
-			[ "$port" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
-			[ "$port" != "$IPTV_PORT" ] ||
-				fail "LAN port $port is dedicated to the IPTV set-top box; free it on the IPTV page first"
-		done
-	else
-		[ -n "$USERNAME" ] || fail "The PPPoE user name is required"
-	fi
+			for port in $PORTS; do
+				validate_ifname "$port" || fail "Invalid LAN port name $port"
+				[ -e "/sys/class/net/$port" ] || fail "LAN port $port was not found"
+				[ "$port" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
+				[ "$port" != "$IPTV_PORT" ] ||
+					fail "LAN port $port is dedicated to the IPTV set-top box; free it on the IPTV page first"
+			done
+			;;
+		pppoe)
+			[ -n "$USERNAME" ] || fail "The PPPoE user name is required"
+			;;
+		dhcp)
+			# Nothing is dialled, so there is nothing to check here beyond the
+			# uplink and the VLAN, which the caller already did.
+			;;
+		*)
+			fail "Unknown internet mode $MODE"
+			;;
+	esac
 }
 
 # Bridging every LAN port leaves br-lan without a wire, so the ONT stays
@@ -399,6 +422,50 @@ restore_stock() {
 }
 
 #
+# A PPPoE session negotiates IPv6 on its own: netifd raises a virtual wan_6
+# above the ppp device and runs DHCPv6 there. That is not wan6 - wan_6 has no
+# UCI section at all, netifd creates and removes it with the session. A real
+# wan6 interface next to it would put a second DHCPv6 client on the same
+# session, which is exactly what this page used to do.
+#
+# So the PPPoE branch takes whatever wan6 exists out of the way. It is parked
+# rather than deleted: the previous auto setting is remembered and the
+# interface comes back when the mode stops being PPPoE.
+#
+park_wan6() {
+	local prev
+
+	uci -q get network.wan6 >/dev/null || return 0
+	[ "$(uci -q get network.wan6.luci_wanup_parked)" = '1' ] && return 0
+
+	prev="$(uci -q get network.wan6.auto)"
+	[ -n "$prev" ] && uci set network.wan6.luci_wanup_prev_auto="$prev"
+
+	uci set network.wan6.luci_wanup_parked='1'
+	uci set network.wan6.auto='0'
+	uci set network.wan6.disabled='1'
+}
+
+unpark_wan6() {
+	local prev
+
+	uci -q get network.wan6 >/dev/null || return 0
+	[ "$(uci -q get network.wan6.luci_wanup_parked)" = '1' ] || return 0
+
+	prev="$(uci -q get network.wan6.luci_wanup_prev_auto)"
+
+	uci -q delete network.wan6.luci_wanup_parked
+	uci -q delete network.wan6.luci_wanup_prev_auto
+	uci -q delete network.wan6.disabled
+
+	if [ -n "$prev" ]; then
+		uci set network.wan6.auto="$prev"
+	else
+		uci -q delete network.wan6.auto
+	fi
+}
+
+#
 # Firewall zones
 #
 list_zones() {
@@ -568,21 +635,39 @@ write_uplink_device_interface() {
 	uci set "network.$UPLINK_IFACE.luci_wanup"='1'
 }
 
+# IPv6 is wanted for everything but plain IPv4. "dual" is what the page writes
+# from now on; ipv4_ipv6 is what older configurations carry and is still
+# accepted so an update does not silently turn a running dual stack off.
+want_ipv6() {
+	case "$IP_VERSION" in
+		ipv6|ipv4_ipv6|dual) return 0 ;;
+	esac
+
+	return 1
+}
+
+# The DHCPv6 client of this page. It is only written where there is no session
+# to derive IPv6 from: on a DHCP uplink. Every section it writes is marked
+# luci_wanup, so drop_owned_iface() takes it away again on the next run.
+write_dhcpv6_client() {
+	uci set network.wan6='interface'
+	uci set network.wan6.device='@wan'
+	uci set network.wan6.proto='dhcpv6'
+	uci set network.wan6.reqaddress='try'
+	uci set network.wan6.reqprefix='auto'
+	uci set network.wan6.sourcefilter='0'
+	uci set network.wan6.auto='1'
+	uci set network.wan6.delegate='0'
+	uci set network.wan6.luci_wanup='1'
+}
+
 write_pppoe_network() {
-	local ipv6='0'
 	local peerdns='1'
 
-	case "$IP_VERSION" in
-		ipv6)
-			ipv6='1'
-			# IPv6 only: the session still negotiates IPCP, but the IPv4 side
-			# must not install a route or a resolver of its own.
-			peerdns='0'
-			;;
-		ipv4_ipv6)
-			ipv6='1'
-			;;
-	esac
+	# IPv6 only is no longer offered by the page, but an older configuration may
+	# still carry it: the session negotiates IPCP either way, so the IPv4 side
+	# must not install a resolver of its own.
+	[ "$IP_VERSION" = 'ipv6' ] && peerdns='0'
 
 	write_common_uplink
 
@@ -591,25 +676,43 @@ write_pppoe_network() {
 	uci set network.wan.proto='pppoe'
 	uci set network.wan.username="$USERNAME"
 	uci set network.wan.password="$PASSWORD"
-	uci set network.wan.ipv6="$ipv6"
 	uci set network.wan.mtu="$MTU"
 	uci set network.wan.peerdns="$peerdns"
+	uci set network.wan.auto='1'
+	uci set network.wan.luci_wanup='1'
+
+	if want_ipv6; then
+		# The session negotiates IPv6 itself: netifd raises its virtual wan_6
+		# on the ppp interface and runs DHCPv6 there. No network.wan6 of our
+		# own - that only put a second DHCPv6 client on the same session.
+		# Delegation has to stay on, otherwise the prefix never reaches the LAN.
+		# The virtual wan_6 shares the parent device, so the zone still matches
+		# its traffic without a wan6 section of our own.
+		uci set network.wan.ipv6='auto'
+		uci set network.wan.delegate='1'
+	else
+		uci set network.wan.ipv6='0'
+		uci set network.wan.delegate='0'
+	fi
+
+	[ "$OFFLOAD" -eq 1 ] && write_uplink_device_interface
+}
+
+write_dhcp_network() {
+	write_common_uplink
+
+	uci set network.wan='interface'
+	uci set network.wan.device="$VLAN_DEV"
+	uci set network.wan.proto='dhcp'
 	uci set network.wan.auto='1'
 	uci set network.wan.delegate='0'
 	uci set network.wan.luci_wanup='1'
 
-	if [ "$ipv6" = '1' ]; then
-		# DHCPv6 over the dialled session, the way the stock wan6 does it.
-		uci set network.wan6='interface'
-		uci set network.wan6.device='@wan'
-		uci set network.wan6.proto='dhcpv6'
-		uci set network.wan6.reqaddress='try'
-		uci set network.wan6.reqprefix='auto'
-		uci set network.wan6.sourcefilter='0'
-		uci set network.wan6.auto='1'
-		uci set network.wan6.delegate='0'
-		uci set network.wan6.luci_wanup='1'
-	fi
+	# There is no session to derive IPv6 from here, so the client above stays a
+	# real interface and the DHCP interface carries IPv4 only.
+	uci set network.wan.ipv6='0'
+
+	want_ipv6 && write_dhcpv6_client
 
 	[ "$OFFLOAD" -eq 1 ] && write_uplink_device_interface
 }
@@ -618,6 +721,11 @@ write_network_config() {
 	drop_owned_iface wan
 	drop_owned_iface wan6
 	remove_managed_network
+
+	# Undo what a previous PPPoE run did before anything is written, so a
+	# parked wan6 is back in one piece by the time this run needs it.
+	unpark_wan6
+
 	remove_from_zones "$UPLINK_IFACE"
 
 	if [ "$ENABLED" -ne 1 ]; then
@@ -631,12 +739,22 @@ write_network_config() {
 	take_over_stock wan "$STOCK_WAN"
 	take_over_stock wan6 "$STOCK_WAN6"
 
-	if [ "$MODE" = 'bridge' ]; then
-		detach_ports
-		write_bridge_network
-	else
-		write_pppoe_network
-	fi
+	case "$MODE" in
+		bridge)
+			detach_ports
+			write_bridge_network
+			;;
+		pppoe)
+			# IPv6 comes from the session here, so no wan6 may stay behind.
+			# take_over_stock() above already moved the original aside; this
+			# parks whatever is still there, e.g. a wan6 added by hand later.
+			park_wan6
+			write_pppoe_network
+			;;
+		dhcp)
+			write_dhcp_network
+			;;
+	esac
 
 	uci commit network || fail "Cannot save network configuration"
 }

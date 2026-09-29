@@ -86,6 +86,21 @@ function validatePorts(sectionId, value) {
 }
 
 /*
+ * Mirror of want_ipv6() in internet-apply. It has to agree with the script,
+ * otherwise this page and the config it writes drift apart.
+ */
+function wantsIPv6() {
+	switch (uci.get('internet', 'config', 'ip_version')) {
+	case 'ipv6':
+	case 'ipv4_ipv6':
+	case 'dual':
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * What the apply script builds from the current settings. Layer two devices are
  * not invented by the user, they are derived - showing them keeps this page and
  * internet-apply readable against each other.
@@ -97,10 +112,19 @@ function derivedDevices() {
 	if (uci.get('internet', 'config', 'enabled') !== '1')
 		return '-';
 
-	if (uci.get('internet', 'config', 'mode') === 'pppoe')
+	switch (uci.get('internet', 'config', 'mode')) {
+	case 'pppoe':
 		return '%s.%s (%s) -> pppoe-wan'.format(uplink, vlan || '?', VLAN_DEVICE);
 
-	return '%s.%s (%s) + LAN ports -> %s'.format(uplink, vlan || '?', VLAN_DEVICE, BRIDGE_DEVICE);
+	case 'dhcp':
+		/* Only the dual-stack case gets a second interface: that is the one
+		 * place a real DHCPv6 client is written. */
+		return '%s.%s (%s) -> wan%s'.format(uplink, vlan || '?', VLAN_DEVICE,
+			wantsIPv6() ? ' + wan6' : '');
+
+	default:
+		return '%s.%s (%s) + LAN ports -> %s'.format(uplink, vlan || '?', VLAN_DEVICE, BRIDGE_DEVICE);
+	}
 }
 
 return view.extend({
@@ -142,10 +166,11 @@ return view.extend({
 		o.description = _('With the service off, no VLAN subinterface and no dialling interface is written, and the stock WAN interfaces of the network page are put back.');
 
 		o = s.option(form.ListValue, 'mode', _('Internet mode'),
-			_('Bridged hands the operator VLAN to your own router. Dialled lets the ONT terminate the PPPoE session and route for the LAN.'));
+			_('Bridged hands the operator VLAN to your own router. DHCP takes whatever address the operator hands out. PPPoE lets the ONT terminate the session and route for the LAN.'));
 		o.default = 'bridge';
 		o.rmempty = false;
 		o.value('bridge', _('Bridged (a downstream router dials)'));
+		o.value('dhcp', _('DHCP client (the operator hands out an address)'));
 		o.value('pppoe', _('Dialled by the ONT (PPPoE)'));
 		o.depends('enabled', '1');
 
@@ -171,19 +196,44 @@ return view.extend({
 
 		current = selectedPorts();
 
-		o = s.option(form.MultiValue, 'ports', _('LAN ports'),
-			_('The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind.'));
-		lanPorts.forEach(function(name) {
-			o.value(name);
-		});
-		current.forEach(function(name) {
-			if (lanPorts.indexOf(name) < 0)
+		/*
+		 * form.MultiValue hands its choices to ui.Dropdown, whose render()
+		 * runs Object.keys() on them. Registering no choice at all is fatal:
+		 * form.js transformChoices() returns null when nothing was added,
+		 * and the dropdown's own guard - typeof(choices) != 'object' - does
+		 * not stop null, because typeof null is 'object'. Without devices
+		 * named lan[0-9]+, which is every booting board before netifd has
+		 * them and every stripped rootfs, the whole page would go down with
+		 * "TypeError: Cannot convert undefined or null to object".
+		 *
+		 * The IPTV page gets away with it because form.ListValue renders
+		 * through ui.Select, which normalises null to {}. Nothing can be
+		 * picked here in that state either, so say so instead of rendering
+		 * an empty picker.
+		 */
+		if (lanPorts.length || current.length) {
+			o = s.option(form.MultiValue, 'ports', _('LAN ports'),
+				_('The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind.'));
+			lanPorts.forEach(function(name) {
 				o.value(name);
-		});
-		o.rmempty = false;
-		o.display_size = lanPorts.length || 3;
-		o.validate = validatePorts;
-		o.depends({ enabled: '1', mode: 'bridge' });
+			});
+			current.forEach(function(name) {
+				if (lanPorts.indexOf(name) < 0)
+					o.value(name);
+			});
+			o.rmempty = false;
+			o.display_size = lanPorts.length || 3;
+			o.validate = validatePorts;
+			o.depends({ enabled: '1', mode: 'bridge' });
+		}
+		else {
+			o = s.option(form.DummyValue, '_ports', _('LAN ports'),
+				_('The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind.'));
+			o.cfgvalue = function() {
+				return _('No LAN port devices are available to bridge.');
+			};
+			o.depends({ enabled: '1', mode: 'bridge' });
+		}
 
 		o = s.option(form.Flag, 'ipoe', _('Also carry native IPv4/IPv6'),
 			_('Turn this on when the operator serves IPoE instead of PPPoE, otherwise only the PPPoE EtherTypes 0x8863 and 0x8864 are let through towards the uplink.'));
@@ -191,14 +241,41 @@ return view.extend({
 		o.rmempty = false;
 		o.depends({ enabled: '1', mode: 'bridge' });
 
-		o = s.option(form.ListValue, 'ip_version', _('IP protocol version'));
+		/*
+		 * One picker for both dialled modes, because both really do offer the
+		 * same two things. Where they differ is only where IPv6 comes from:
+		 *
+		 *   PPPoE: the session negotiates it. netifd raises its own virtual
+		 *          wan_6 on the ppp interface and runs DHCPv6 there. Writing a
+		 *          network.wan6 of our own used to put a *second* DHCPv6 client
+		 *          on the same session, which is why internet-apply no longer
+		 *          does it. Switching back to IPv4 only drops whatever wan6 is
+		 *          left over - no help from this page is needed for that.
+		 *
+		 *   DHCP : there is no session to derive anything from, so the page
+		 *          keeps the DHCPv6 client as a real wan6 interface.
+		 *
+		 * Two depends() calls are an OR, not an AND: one object means "all of
+		 * these keys match", two calls mean "either of them".
+		 */
+		o = s.option(form.ListValue, 'ip_version', _('IP protocol version'),
+			_('Dual stack over PPPoE takes IPv6 from the session itself; over DHCP it adds a DHCPv6 client asking for a prefix.'));
 		o.default = 'ipv4';
 		o.rmempty = false;
-		o.value('ipv4', _('IPv4'));
-		o.value('ipv6', _('IPv6'));
-		o.value('ipv4_ipv6', _('IPv4/IPv6'));
-		o.description = _('Anything but IPv4 also writes wan6 as a DHCPv6 client on the dialled session.');
+		o.value('ipv4', _('IPv4 only'));
+		o.value('ipv4_ipv6', _('IPv4/IPv6 dual stack'));
+
+		/*
+		 * IPv6 only is no longer offered, but a configuration written by an
+		 * older build may still carry it. Keep its entry so the picker never
+		 * renders a value it does not know, which would silently fall back to
+		 * the first choice and turn the running stack off on the next save.
+		 */
+		if (uci.get('internet', 'config', 'ip_version') === 'ipv6')
+			o.value('ipv6', _('IPv6 only (no longer offered)'));
+
 		o.depends({ enabled: '1', mode: 'pppoe' });
+		o.depends({ enabled: '1', mode: 'dhcp' });
 
 		o = s.option(form.Value, 'username', _('PPPoE user name'),
 			_('User name assigned by the operator.'));
@@ -222,10 +299,12 @@ return view.extend({
 		o.cfgvalue = derivedDevices;
 		o.depends('enabled', '1');
 
-		o = s.option(form.Flag, 'offload', _('Hardware offload'),
-			_('Turns on netfilter flow offloading and hardware offloading, which is the only path to the Airoha PPE on this platform: airoha_eth takes the flows from nftables and the NPU forwards them. The firewall settings made by hand are restored when the switch is turned off.'));
-		o.default = '1';
-		o.rmempty = false;
+		/*
+		 * Hardware offload used to be a switch on this page. It moved to its
+		 * own page, so there is nothing here any more: internet-apply still
+		 * honours internet.config.offload, which is what lets an existing
+		 * configuration keep running unchanged until that page lands.
+		 */
 
 		return m.render();
 	}
