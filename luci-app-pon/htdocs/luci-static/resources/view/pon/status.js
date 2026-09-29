@@ -612,17 +612,22 @@ function renderLine(item) {
 				split: true }
 		];
 	} else {
+		/*
+		 * The ONU state is the one protocol state that stays in the grid: it
+		 * answers whether the ONU reached the OLT at all. The GTC/XGTC state
+		 * is only the frame synchronization underneath it, so it belongs with
+		 * the other line details, right after PHY ready — where it sat before
+		 * the card rework, and where EPON keeps its PCS synchronization.
+		 */
 		tiles.push(
-			metricTile(mode.shown === 'gpon' ? _('GTC state') : _('XGTC state'),
-				displaySync(line.xgtc_sync), syncSeverity(line.xgtc_sync)),
-			/* The ONU state matters more than the assigned ONU-ID, which is
-			   only a number and sits with the other line details. */
 			metricTile(_('ONU state'), displayOnuState(registration.onu_state),
 				onuStateSeverity(registration.onu_state))
 		);
 		rows = rows.concat([
 			listRow(_('PHY ready'), displayBoolean(line.phy_ready),
 				booleanSeverity(line.phy_ready)),
+			listRow(mode.shown === 'gpon' ? _('GTC state') : _('XGTC state'),
+				displaySync(line.xgtc_sync), syncSeverity(line.xgtc_sync)),
 			listRow(_('ONU-ID'), registration.onu_id_valid === true ?
 				E('var', {}, String(registration.onu_id)) : _('Not assigned')),
 			listRow(_('Kernel data path configured'),
