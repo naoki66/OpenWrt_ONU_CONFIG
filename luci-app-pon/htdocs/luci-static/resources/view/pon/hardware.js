@@ -213,6 +213,17 @@ function mergeTargets(identity, storages) {
 	});
 }
 
+/*
+ * pon-board-identity resolves its target through board.json's pon_data as
+ * well, so a target it reports is always a valid airoha-pon-data target too.
+ * That keeps the file upload available when airoha-pon-data list fails.
+ */
+function firstIdentityTarget(identity) {
+	var names = Object.keys((identity && identity.layout && identity.layout.targets) || {});
+
+	return names.length ? { id: names[0], label: names[0] } : null;
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -387,26 +398,29 @@ return view.extend({
 		});
 
 		/*
-		 * One calibration image, one target: the image replaces the whole
-		 * target, so it is picked explicitly instead of getting a button per
-		 * target next to the identity fields.
+		 * The file uploaded here is the board identity file: the whole image
+		 * of the storage target, which carries the identity fields and the
+		 * calibration data side by side. There is no calibration-only target,
+		 * so there is exactly one file to write and one button to write it
+		 * with — and no target picker, because pon_data declares a single
+		 * partition.
 		 */
-		/*
-		 * A board carries a single board data partition, so the image always
-		 * goes to the one target that pon_data declares — no target picker.
-		 */
-		if (storages.length)
+		var uploadTarget = storages.length ? storages[0] : firstIdentityTarget(identity);
+
+		if (uploadTarget)
 			blocks.push(E('div', {}, [
-				E('h4', { 'class': 'pon-subhead' }, _('Calibration image')),
+				E('h4', { 'class': 'pon-subhead' }, _('Board identity file')),
+				E('div', { 'class': 'cbi-section-descr' },
+					_('Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin.')),
 				E('div', { 'class': 'cbi-page-actions' }, [
 					/* The button id travels instead of the node: the handler
 					   looks it up when the upload actually starts. */
 					E('button', {
 						'class': 'cbi-button cbi-button-action',
-						'id': 'pon-calibration-upload',
+						'id': 'pon-identity-upload',
 						'disabled': self.readonly || null,
-						'click': ui.createHandlerFn(self, 'handleCalibrationUpload',
-							storages[0], 'pon-calibration-upload')
+						'click': ui.createHandlerFn(self, 'handleIdentityUpload',
+							uploadTarget, 'pon-identity-upload')
 					}, [ _('Upload and write') ])
 				])
 			]));
@@ -417,12 +431,13 @@ return view.extend({
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, _('Calibration data')),
 			E('div', { 'class': 'cbi-section-descr' },
-				_('The identity fields and the calibration image are the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; a calibration image replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.')),
+				_('The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.')),
 			blocks
 		]);
 	},
 
-	handleCalibrationUpload: function(target, buttonId) {
+	/* Writes a complete board identity file to one storage target. */
+	handleIdentityUpload: function(target, buttonId) {
 		var self = this;
 		var button = document.getElementById(buttonId);
 
@@ -443,7 +458,7 @@ return view.extend({
 				throw new Error(result.stderr || result.stdout || _('Write failed.'));
 
 			var message = [
-				_('Calibration data written to %s and verified. Reboot the device to apply it.')
+				_('Board identity file written to %s and verified. Reboot the device to apply it.')
 					.format(target.label)
 			];
 
@@ -453,7 +468,7 @@ return view.extend({
 			ui.addNotification(null, E('p', message), 'info');
 		}).catch(function(error) {
 			ui.addNotification(null, E('p', [
-				_('Writing calibration data failed: %s').format(error.message)
+				_('Writing the board identity file failed: %s').format(error.message)
 			]), 'danger');
 		}).finally(function() {
 			if (button) {

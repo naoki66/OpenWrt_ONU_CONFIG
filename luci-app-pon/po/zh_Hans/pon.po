@@ -199,20 +199,23 @@ msgstr "硬件版本"
 msgid "Calibration data"
 msgstr "校准数据"
 
-msgid "Calibration image"
-msgstr "校准镜像"
+msgid "Board identity file"
+msgstr "板级身份文件"
 
-msgid "The identity fields and the calibration image are the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; a calibration image replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin."
-msgstr "身份字段与校准镜像是同一个存储目标上的同一份 Flash 镜像，都要重启后生效。身份字段就地改写，校准镜像则整体替换该目标。原镜像另存为 /tmp/pon-board-*.bin。"
+msgid "The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin."
+msgstr "身份字段与校准数据是同一个存储目标上同一份 Flash 镜像的两种视图，都要重启后生效。身份字段就地改写，板级身份文件则整体替换该目标。原镜像另存为 /tmp/pon-board-*.bin。"
+
+msgid "Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin."
+msgstr "上传存储目标的完整镜像并整体替换，身份字段与校准数据一并覆盖。原镜像另存为 /tmp/pon-board-data.*.bin。"
 
 msgid "Upload and write"
 msgstr "上传并写入"
 
-msgid "Calibration data written to %s and verified. Reboot the device to apply it."
-msgstr "校准数据已写入 %s 并通过读回校验，请重启设备使其生效。"
+msgid "Board identity file written to %s and verified. Reboot the device to apply it."
+msgstr "板级身份文件已写入 %s 并通过读回校验，请重启设备使其生效。"
 
-msgid "Writing calibration data failed: %s"
-msgstr "写入校准数据失败：%s"
+msgid "Writing the board identity file failed: %s"
+msgstr "写入板级身份文件失败：%s"
 
 msgid "Unable to list storage."
 msgstr "无法读取存储列表。"
