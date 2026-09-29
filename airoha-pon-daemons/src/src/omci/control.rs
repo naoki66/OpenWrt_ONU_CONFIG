@@ -37,6 +37,11 @@ struct Event {
 struct Inner {
     interface: String,
     loid_configured: bool,
+    /// Which credential the operator issues. Reported so the page can tell a
+    /// stored LOID that is in use from one that is deliberately unused.
+    auth_mode: &'static str,
+    /// Whether the CTC LOID Authentication ME is offered to the OLT at all.
+    ctc_loid_advertised: bool,
     rx_messages: u64,
     tx_messages: u64,
     parse_errors: u64,
@@ -56,11 +61,18 @@ pub struct StatusHub {
 }
 
 impl StatusHub {
-    pub fn new(interface: &str, loid_configured: bool) -> Self {
+    pub fn new(
+        interface: &str,
+        loid_configured: bool,
+        auth_mode: &'static str,
+        ctc_loid_advertised: bool,
+    ) -> Self {
         let hub = Self {
             shared: Arc::new(Mutex::new(Inner {
                 interface: interface.to_owned(),
                 loid_configured,
+                auth_mode,
+                ctc_loid_advertised,
                 rx_messages: 0,
                 tx_messages: 0,
                 parse_errors: 0,
@@ -306,6 +318,7 @@ fn status_json(inner: &Inner) -> String {
         concat!(
             "{{\"protocol_version\":{},\"interface\":{},",
             "\"channel_available\":{},\"loid_configured\":{},",
+            "\"auth_mode\":{},\"ctc_loid_advertised\":{},",
             "\"authentication_status\":{},\"authentication_meaning\":{},",
             "\"olt_vendor_id\":{},\"olt_equipment_id\":{},\"olt_version\":{},",
             "\"rx_messages\":{},\"tx_messages\":{},\"parse_errors\":{},",
@@ -325,6 +338,8 @@ fn status_json(inner: &Inner) -> String {
         json_string(&inner.interface),
         carrier_json,
         inner.loid_configured,
+        json_string(inner.auth_mode),
+        inner.ctc_loid_advertised,
         authentication_status,
         json_string(inner.authentication_meaning),
         json_string(&inner.provisioning.olt_vendor_id),

@@ -16,7 +16,7 @@ mod provisioning;
 mod schema;
 mod security;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::io;
 use std::path::Path;
 
@@ -73,6 +73,9 @@ pub fn run_agent(
     control_socket: &Path,
 ) -> io::Result<()> {
     let loid_configured = !identity.loid.is_empty();
+    let loid_auth = identity.auth_mode;
+    /* Whether the OLT gets to see the ME it writes the LOID result into. */
+    let ctc_loid_advertised = identity.advertise_ctc_loid_auth();
     let omcc_version = identity.omcc_version;
     let disable_enhanced_security = identity.disable_enhanced_security;
     let mut backend = DataPathBackend::for_omci_interface(interface, identity.alloc_id_timeout)?;
@@ -81,7 +84,12 @@ pub fn run_agent(
     }
     let mut mib = Mib::from_identity(&identity);
     let socket = PacketSocket::open(interface)?;
-    let status = StatusHub::new(interface, loid_configured);
+    let status = StatusHub::new(
+        interface,
+        loid_configured,
+        loid_auth.name(),
+        ctc_loid_advertised,
+    );
     let initial_provisioning = mib.provisioning_snapshot();
     backend.reconcile(&initial_provisioning);
     status.record_provisioning(
@@ -92,12 +100,16 @@ pub fn run_agent(
     let _control_server = start_server(control_socket, status.clone())?;
     let mut receive_buffer = [0u8; RECEIVE_BUFFER_LEN];
     let mut cache = VecDeque::<CachedResponse>::with_capacity(RESPONSE_CACHE_SIZE);
+    /* Actions of the CTC LOID request we already reported as unavailable. */
+    let mut unreachable_loid_requests = BTreeSet::<u8>::new();
 
     println!(
-        "OMCI agent started: interface={} control_socket={} loid_configured={} omcc_version=0x{:02x} disable_enhanced_security={}",
+        "OMCI agent started: interface={} control_socket={} loid_configured={} auth_mode={} ctc_loid_advertised={} omcc_version=0x{:02x} disable_enhanced_security={}",
         interface,
         control_socket.display(),
         loid_configured,
+        loid_auth.name(),
+        ctc_loid_advertised,
         omcc_version,
         disable_enhanced_security
     );
@@ -157,8 +169,32 @@ pub fn run_agent(
             let meaning = ctc_authentication_status_name(authentication_status);
             status.record_authentication_status(authentication_status, meaning);
             println!(
-                "OMCI CTC LOID authentication result: status={} meaning={} loid_configured={}",
-                authentication_status, meaning, loid_configured
+                "OMCI CTC LOID authentication result: status={} meaning={} loid_configured={} loid={} bytes loid_password={} bytes",
+                authentication_status,
+                meaning,
+                loid_configured,
+                identity.loid.len(),
+                identity.loid_password.len()
+            );
+        }
+
+        /*
+         * A request for the ME that was deliberately left out says the OLT still
+         * wants LOID authentication and will not fall back to the registration
+         * ID on its own. One line per action is enough to see it in the log
+         * without flooding it on every retransmission.
+         */
+        if request.class_id == CLASS_CTC_LOID_AUTH
+            && !ctc_loid_advertised
+            && unreachable_loid_requests.insert(request.action)
+        {
+            println!(
+                "OMCI CTC LOID authentication requested but not advertised: action=0x{:02x} attribute_mask=0x{:04x} auth_mode={} loid={} bytes loid_password={} bytes",
+                request.action,
+                request.attribute_mask,
+                loid_auth.name(),
+                identity.loid.len(),
+                identity.loid_password.len()
             );
         }
 

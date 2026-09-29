@@ -375,12 +375,20 @@ impl Mib {
                 .read_only(12, vec![0]),
         );
 
-        let ctc_auth = ManagedEntity::default()
-            .read_only(1, fixed_width(&identity.operator_id, 4))
-            .read_only(2, fixed_width(&identity.loid, 24))
-            .read_only(3, fixed_width(&identity.loid_password, 12))
-            .read_write(4, vec![0]);
-        mib.insert(CLASS_CTC_LOID_AUTH, 0, ctc_auth);
+        /*
+         * Only offer CTC LOID authentication when there is a LOID to look up.
+         * An all-zero LOID cannot resolve on any OLT: it answers status 2,
+         * loid-not-found, and deactivates a line that would otherwise have been
+         * accepted on its registration ID.
+         */
+        if identity.advertise_ctc_loid_auth() {
+            let ctc_auth = ManagedEntity::default()
+                .read_only(1, fixed_width(&identity.operator_id, 4))
+                .read_only(2, fixed_width(&identity.loid, 24))
+                .read_only(3, fixed_width(&identity.loid_password, 12))
+                .read_write(4, vec![0]);
+            mib.insert(CLASS_CTC_LOID_AUTH, 0, ctc_auth);
+        }
 
         if !identity.disable_enhanced_security {
             /* Class 332 negotiates cryptographic capabilities and key length for each O5 epoch. */
@@ -1623,6 +1631,7 @@ fn collect_multicast_acl_vlan_id(row: &[u8], output: &mut BTreeSet<u16>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::config::AuthMode;
 
     fn empty_mib() -> Mib {
         Mib {
@@ -1638,6 +1647,55 @@ mod tests {
             attribute_value_changes: Vec::new(),
             enhanced_security: true,
         }
+    }
+
+    fn auth_mode_mib(loid: &[u8], mode: AuthMode) -> Mib {
+        let mut identity = IdentityConfig::default();
+        identity.loid = loid.to_vec();
+        identity.loid_password = b"secret".to_vec();
+        identity.auth_mode = mode;
+        Mib::from_identity(&identity)
+    }
+
+    #[test]
+    fn ctc_loid_authentication_is_offered_only_to_a_loid_operator() {
+        // An OLT that authenticates the registration ID must not find the ME at
+        // all, and neither must it find one carrying an empty LOID that only
+        // earns a loid-not-found.
+        for mib in [
+            auth_mode_mib(b"", AuthMode::Loid),
+            auth_mode_mib(b"", AuthMode::Password),
+            auth_mode_mib(b"stale-user", AuthMode::Password),
+        ] {
+            assert!(!mib
+                .entities
+                .contains_key(&(CLASS_CTC_LOID_AUTH, 0)));
+        }
+
+        let mib = auth_mode_mib(b"operator-user", AuthMode::Loid);
+        let entity = &mib.entities[&(CLASS_CTC_LOID_AUTH, 0)];
+        assert_eq!(entity.attributes[&1].value.len(), 4);
+        assert_eq!(entity.attributes[&2].value, fixed_width(b"operator-user", 24));
+        assert_eq!(entity.attributes[&3].value, fixed_width(b"secret", 12));
+    }
+
+    #[test]
+    fn an_unoffered_loid_authentication_is_invisible_to_the_olt() {
+        let mut mib = auth_mode_mib(b"", AuthMode::Password);
+        let content = [0u8];
+        let get = Request {
+            encoding: super::super::protocol::Encoding::Baseline,
+            tci: 1,
+            message_type: 0x48,
+            action: ACTION_GET,
+            class_id: CLASS_CTC_LOID_AUTH,
+            entity_id: 0,
+            attribute_mask: 0xc000,
+            payload: &content,
+            content: &content,
+        };
+
+        assert_eq!(mib.dispatch(&get).result(), Some(RESULT_UNKNOWN_ME));
     }
 
     #[test]
