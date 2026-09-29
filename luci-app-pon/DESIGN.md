@@ -258,18 +258,27 @@ SIP 段的字段在 H.248 机器上由 CGI 分支掉、抓不到页面，因此�
 
 ### IPTV 页
 
-一张卡片：`form.Map('iptv')` → 单个 `NamedSection('config')`，标题「IPTV」，卡内五个 tab：
+一张卡片：`form.Map('iptv')` → 单个 `NamedSection('config')`，**section 不带标题**（页面标题已经
+是「IPTV」），卡内四个 tab：
 
 | Tab | 字段 |
 | --- | --- |
-| IPTV bridge | PON interfaces（只读）、启用、透传方式、IPTV LAN 口 / Trunk 端口、要透传的 VLAN、上联设备、业务 VLAN |
+| IPTV bridge | PON interfaces（只读）、启用、透传方式、IPTV LAN 口 / Trunk 端口、要透传的 VLAN、上联设备、**业务 VLAN、组播 VLAN、IGMP 上行 VLAN** |
 | IPv4 | 启用 IGMP snooping、启用 IGMP proxy、启用组播查询器 |
 | IPv6 | 启用 MLD snooping、启用 MLD proxy |
-| 组播 VLAN | 组播 VLAN、上游连接（IGMP 上行 VLAN） |
-| 组播转单播 | 把组播中继为 HTTP 单播、HTTP 端口、中继地址、上游设备（只读）、频道列表与快速切台（跳转按钮） |
+| 组播转单播 | 把组播中继为 HTTP 单播、HTTP 端口、中继地址、**中继 VLAN（仅单线复用）**、上游设备（只读，由中继 VLAN / 组播 VLAN / 代理状态推导）、中继程序设置（rtp2httpd / udpxy / msd_lite 三个跳转按钮） |
 
 用 `s.tab()` + `s.taboption()` 分组，而不是拆成多张卡片：运营商光猫的 IGMP 面板就是
 「IPv4 / IPv6 / 组播VLAN」三个小分组挤在一个页面里，tab 既还原了这个结构，又保持「一页一卡片」。
+
+> **组播 VLAN 不单独成 tab，紧跟业务 VLAN。** 它与业务 VLAN 是一对：留空就表示"组播也走业务
+> VLAN"（校验器还会拒绝两者填成同一个值）。拆成独立 tab 会把这个"非此即彼"的关系藏起来，
+> 上游 `luci-app-iptv` 也是把 `multicast_vlan` / `igmp_vlan` 平铺在 `service_vlan` 后面的。
+
+> ⚠️ **页面标题不能重复出现。** `form.Map` 的标题已经是「IPTV」，section 再写一个「IPTV」就是
+> 页面上一个「IPTV」加卡片一个「IPTV」，读起来像两个不同的东西。LuCI 只在 `title != null && != ''`
+> 时才输出 `<h3>`（`form.js` renderContents），所以 section 不传标题是安全的、不会留下空的标题块；
+> 原本挂在 section 上的说明要合并进 Map 的说明，不要删掉内容。
 注意一旦定义了 tab，就必须用 `taboption()`，`option()` 添加的字段不会被渲染。
 
 `depends()` 的语义是这里最容易踩的坑：**一次传对象 = 与**（`o.depends({ enabled: '1', mode: 'trunk' })`），
@@ -314,12 +323,44 @@ Trunk 端口不需要移出 `br-lan`：内核 `vlan_do_receive()` 会先把带�
 #### 组播转单播（rtp2httpd）
 
 本页**只写** rtp2httpd 的三个字段：`disabled`、`upstream_interface`、`port`。
-频道列表、FCC（快速切台）、工作线程等参数留在 rtp2httpd 自己的页面，本页只放一个跳转按钮，
-避免两处写同一个文件互相覆盖。
+频道列表、FCC（快速切台）、工作线程等参数留在各自程序的页面，本页只放跳转按钮，避免两处写同一个文件
+互相覆盖。「中继程序设置」一行同时给出 **rtp2httpd / udpxy / msd_lite** 三个跳转：
+rtp2httpd 是本页驱动的那个，udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的页面、
+**不由此处配置**（且只有装了对应软件包时跳转才可用）。
 
 `upstream_interface` 必须是**能加入组播组的三层接口**，也就是网桥本身（`br-iptv` 或 `br-iptv-<vid>`），
 **绝不能是网桥的成员端口**：作为 bridge slave 的端口收上来的帧不会交给本机协议栈，绑上去收不到组播。
 所以中继要生效，网桥必须带 IP（`unicast_addr`），否则没有可用于 join 的源地址。
+
+> **「上游设备」是推导出来的，不是让用户选的**——页面上它是只读的一行。`iptv-apply` 按 VLAN 配置
+> 创建网桥，中继只能绑到已经存在的那个网桥上。
+> ⚠️ 但**推导逻辑必须和 `resolve_unicast()` 逐分支对齐**，否则页面显示的与实际写入的不是同一个接口：
+> 单线复用模式 → `br-iptv-<unicast_vlan ?? multicast ?? service>`；**组播代理激活时** → 代理的上联口
+> （`ct-iptv-igmp` 或 `ct-iptv-mc`，因为该 VLAN 已从 `br-iptv` 里被拿出去终结了）；
+> 其余 → `br-iptv`。早期版本漏了代理分支，代理开启时页面显示 `br-iptv`、脚本却写 `ct-iptv-mc`。
+
+#### 中继 VLAN（`unicast_vlan`，可选）
+
+单线复用是**唯一存在多个网桥**的模式：一个 VLAN 一个 `br-iptv-<vid>`。所以只有在这个模式下
+"让中继听在另一个 VLAN 上"才是有意义的需求——例如机顶盒业务走 43、组播走 40，但希望中继听在 41 上
+（41 上有可用的 IPTV 地址、或者专门给中继用）。
+
+| 层 | 行为 |
+| --- | --- |
+| `/etc/config/iptv` | 新增 `option unicast_vlan ''`，留空即沿用原回落 |
+| `iptv-apply` `resolve_unicast_vlan()` | 非空时：非 trunk 模式 → 警告并忽略；不是 1–4094 → `fail`；**不在 `TRUNK_VLAN_LIST` 里 → `fail`** |
+| `iptv-apply` `resolve_unicast()` | trunk 分支改为 `unicast_vlan ?? multicast_vlan ?? service_vlan` |
+| UI | `unicast_vlan` 字段 `depends({ enabled:'1', unicast:'1', mode:'trunk' })`；`trunkVlanList()` 镜像 `resolve_trunk_vlans()`，校验器拒绝不在列表里的值 |
+
+> ⚠️ **必须校验 VLAN 确实在 `TRUNK_VLAN_LIST` 里，不能只校验取值范围。** 没有透传就没有
+> `br-iptv-<vid>`，中继绑到一个不存在的网桥上一个包都收不到，而且这种失败是静默的——
+> `rtp2httpd` 照常起来，只是没流。`fail` 而不是 `warn`：宁可应用失败，不要留下一个看起来正常的坏配置。
+>
+> ⚠️ **非 trunk 模式要 warn 后忽略、不能 fail。** 值本身是合法的，只是当前模式用不上；切回
+> 单线复用时它还要生效。fail 会让用户被迫先清空才能保存别的改动。
+>
+> ⚠️ **只在 UI 加下拉而脚本不认，页面就会说谎**——选了 A 实际写 B，比没有这个选项更糟。
+> schema、脚本、UI 三处必须同一次改动落地。
 
 中继有**自己的 firewall zone**（`iptv_relay`，只含 `UNICAST_IFACE`）：firewall4 会丢弃没有 zone 的
 接口上的入站流量，不给它 zone 的话 ONU 根本收不到自己 join 的组播。这个 zone 与代理的 `iptv` zone 分开，
@@ -369,12 +410,12 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `htdocs/.../view/pon/status.js` | 重构为卡片 + 指标网格 + 状态点；线路详情改为常显键值列表，计数改为分组键值列表并折叠，保留轮询与展开态 |
 | `htdocs/.../view/pon/hardware.js` | 板级身份与校准数据合并为一张「校准数据」卡片：身份字段按存储目标分组（每组一个「写入板级身份」），末尾一个「板级身份文件」分组承载唯一的「上传并写入」，无目标选择器，且 `airoha-pon-data list` 失败时仍按身份目标名降级提供；写入身份改为按目标生效；ONU 身份仍按 EPON/GPON 分流 |
 | `htdocs/.../view/pon/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
-| `htdocs/.../view/pon/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；五个 tab（bridge / IPv4 / IPv6 / 组播 VLAN / 组播转单播），新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段 |
+| `htdocs/.../view/pon/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转 |
 | `htdocs/.../view/pon/voice.js` | 新增：语音配置页（语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置 六个 section，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`） |
 | `root/etc/config/voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段，两个 `line` 段（双 FXS 口）与八个 `codec` 段，同时作为该标签页的可见条件 |
 | `root/usr/share/luci/menu.d/luci-app-pon.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页顺序改为状态 / 硬件身份 / 认证配置 / IPTV / 语音配置 / 网络诊断 |
 | `root/usr/share/rpcd/acl.d/luci-app-pon.json` | 并入原 `luci-app-iptv` 的 uci iptv/network 与 network.device 权限 |
-| `root/etc/config/iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入；新增 `mode` / `trunk_port` / `trunk_vlans` / `unicast` / `unicast_port` / `unicast_addr`，`iptv-apply` 重写为按模式推导拓扑并写 `/etc/config/rtp2httpd` |
+| `root/etc/config/iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入；新增 `mode` / `trunk_port` / `trunk_vlans` / `unicast` / `unicast_port` / `unicast_addr` / `unicast_vlan`，`iptv-apply` 重写为按模式推导拓扑，新增 `resolve_unicast_vlan()` 校验中继 VLAN 在 `TRUNK_VLAN_LIST` 内，并写 `/etc/config/rtp2httpd` |
 | `Makefile` | 新增 `+firewall4 +kmod-nft-bridge +omcproxy` 依赖，`PKG_RELEASE` 6 |
 | `po/zh_Hans/pon.po` | 新增与更新译文，并入原 `iptv.po`；补齐单线复用与组播转单播的 27 条译文 |
 | `luci-app-iptv/` | 整包删除 |

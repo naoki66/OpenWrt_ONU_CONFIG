@@ -22,8 +22,8 @@ msgstr "当前 GEM-ID"
 msgid "Applied"
 msgstr "已应用"
 
-msgid "Carries DHCP, authentication and video on demand."
-msgstr "承载 DHCP、鉴权和点播业务。"
+msgid "Carries DHCP, authentication and video on demand and, when no separate multicast VLAN is set, multicast traffic."
+msgstr "承载 DHCP、鉴权与点播业务；未单独设置组播 VLAN 时组播流量也走这条。"
 
 msgid "Enable"
 msgstr "启用"
@@ -1068,9 +1068,6 @@ msgstr "IPTV 业务中 IGMP 与 IPv4 组播流量的处理方式。"
 msgid "How MLD and the IPv6 multicast traffic of the IPTV service are handled."
 msgstr "IPTV 业务中 MLD 与 IPv6 组播流量的处理方式。"
 
-msgid "Which operator VLAN carries multicast downstream and which connection carries the membership reports upstream."
-msgstr "运营商用哪条 VLAN 下发组播、成员报告又从哪条连接上行。"
-
 msgid "Enable IGMP snooping"
 msgstr "启用 IGMP snooping"
 
@@ -1482,17 +1479,11 @@ msgstr "PON 配置"
 msgid "Use an IPv4 address with a prefix length, for example 10.190.0.2/24."
 msgstr "请填写带前缀长度的 IPv4 地址，例如 10.190.0.2/24。"
 
-msgid "Open rtp2httpd settings"
-msgstr "打开 rtp2httpd 设置"
+msgid "The IPTV VLANs are carried by the PON uplink and handed over to a set-top box, to a downstream router or to a multicast-to-unicast relay."
+msgstr "IPTV VLAN 由 PON 上行承载，并透传给机顶盒、下挂路由器，或交给组播转单播中继。"
 
-msgid "Carry the operator IPTV VLANs to a set-top box, to a downstream router or to a multicast-to-unicast relay."
-msgstr "把运营商的 IPTV VLAN 透传给机顶盒、下挂路由器，或交给组播转单播中继。"
-
-msgid "The IPTV VLANs are carried by the PON uplink and handed over to the selected port."
-msgstr "IPTV VLAN 由 PON 上行承载，并从所选端口透传出去。"
-
-msgid "Where the operator VLANs are handed over."
-msgstr "运营商 VLAN 的透传出口。"
+msgid "Where the operator VLANs are handed over and which VLANs are carried."
+msgstr "运营商 VLAN 从哪个端口透传出去，以及透传哪些 VLAN。"
 
 msgid "Multicast to unicast"
 msgstr "组播转单播"
@@ -1551,14 +1542,14 @@ msgstr "可选。运营商 IPTV 网络内的地址，ONU 自行加入组播组�
 msgid "Upstream device"
 msgstr "上游设备"
 
-msgid "The bridge carrying the multicast VLAN. The relay listens on the bridge, never on one of its member ports."
-msgstr "承载组播 VLAN 的网桥。中继监听的是网桥本身，而不是它的某个成员端口。"
+msgid "The bridge the relay listens on. It is the bridge of the relay VLAN in single cable mode, otherwise the bridge carrying the multicast VLAN, or the proxy uplink when the proxy terminates it. The relay listens on the bridge, never on one of its member ports."
+msgstr "中继监听的网桥。单线复用模式下是中继 VLAN 对应的网桥；其它模式下是承载组播 VLAN 的网桥，代理终结该 VLAN 时则为代理的上联口。中继监听的是网桥本身，而不是它的某个成员端口。"
 
-msgid "Playlist and FCC settings"
-msgstr "频道列表与快速切台"
+msgid "Relay settings"
+msgstr "中继程序设置"
 
-msgid "Channels, fast channel change and worker tuning stay on the rtp2httpd page."
-msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。"
+msgid "Channels, fast channel change and worker tuning stay on the rtp2httpd page. udpxy and msd_lite are alternative relays with their own pages; they are not configured here and their shortcuts only work when the matching package is installed."
+msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的页面：它们不由此处配置，且只有安装了对应软件包时跳转才可用。"
 
 msgid "Fax negotiation mode"
 msgstr "传真协商模式"
@@ -1736,3 +1727,12 @@ msgstr "电话号码"
 
 msgid "Number presented to the called party."
 msgstr "呈现给被叫方的号码。"
+
+msgid "Relay VLAN"
+msgstr "中继 VLAN"
+
+msgid "Optional. Single cable mode only: which of the handed-over VLANs the relay listens on. Leave empty to follow the multicast VLAN, or the service VLAN when no separate multicast VLAN is set."
+msgstr "可选。仅单线复用模式可用：指定中继监听已透传 VLAN 中的哪一个。留空时跟随组播 VLAN；未配置独立组播 VLAN 时则跟随业务 VLAN。"
+
+msgid "Hand this VLAN over on the trunk first: only the handed-over VLANs get a bridge for the relay to listen on."
+msgstr "请先在 trunk 上透传该 VLAN：只有已透传的 VLAN 才会生成网桥供中继监听。"
