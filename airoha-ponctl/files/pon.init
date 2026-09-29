@@ -4,6 +4,89 @@
 START=18
 USE_PROCD=1
 
+. /usr/share/libubox/jshn.sh
+
+OMCI_REGISTRATION=''
+OMCI_REGISTRATION_LINE=''
+
+# The serial number identifies the unit to the OLT, so the board identity it is
+# burned from is the authority. The UCI value stays as a per-line override for
+# the cases where the registration must differ from the burned one, and that
+# override wins whenever it is set.
+board_identity_target() {
+	local keys key
+
+	json_load "$(cat /etc/board.json 2>/dev/null)" || return 0
+
+	# pon_data declares a single partition, so the identity layout has exactly
+	# one target to read the burned serial from. Both are asked, because a board
+	# may expose one and not the other. pon_data is looked up from the top level,
+	# so the identity cursor must be unwound first.
+	if json_select identity >/dev/null 2>&1; then
+		if json_select targets >/dev/null 2>&1; then
+			json_get_keys keys
+			for key in $keys; do
+				echo "$key"
+				return 0
+			done
+			json_select ..
+		fi
+		json_select ..
+	fi
+
+	if json_select pon_data >/dev/null 2>&1; then
+		json_get_keys keys
+		for key in $keys; do
+			echo "$key"
+			return 0
+		done
+	fi
+
+	return 0
+}
+
+board_serial() {
+	local target
+
+	target="$(board_identity_target)"
+	[ -n "$target" ] || return 0
+
+	# A board without a burned PON serial, or without the reader at all, yields
+	# nothing and the caller falls back as before.
+	/usr/libexec/pon-board-identity read "$target" pon_sn 2>/dev/null || return 0
+}
+
+# The registration ID is an authentication credential, so it lives with the LOID
+# it competes with. Configurations written before the move keep it next to the
+# line, which is why both places are read.
+find_omci_registration() {
+	local line value
+
+	config_get line "$1" line
+	[ "$line" = "$OMCI_REGISTRATION_LINE" ] || return 0
+	config_get value "$1" registration_id
+	[ -n "$value" ] || return 0
+
+	OMCI_REGISTRATION="$value"
+}
+
+registration_id_for_line() {
+	local section="$1" value
+
+	OMCI_REGISTRATION=''
+	OMCI_REGISTRATION_LINE="$section"
+	config_foreach find_omci_registration omci
+
+	if [ -n "$OMCI_REGISTRATION" ]; then
+		echo "$OMCI_REGISTRATION"
+		return 0
+	fi
+
+	config_get value "$section" registration_id
+	[ -n "$value" ] && echo "$value"
+	return 0
+}
+
 apply_line() {
 	local section="$1"
 	local device mode serial registration
@@ -11,12 +94,16 @@ apply_line() {
 	config_get device "$section" device
 	config_get mode "$section" mode
 	config_get serial "$section" serial_number
-	config_get registration "$section" registration_id
+	registration="$(registration_id_for_line "$section")"
 
 	[ -n "$device" ] || {
 		echo "xpon section '$section' has no device" >&2
 		return 1
 	}
+
+	# An unset override is not a missing serial: the value burned into the board
+	# identity is the one this unit is registered under.
+	[ -n "$serial" ] || serial="$(board_serial)"
 	[ -n "$serial" ] || serial=default
 	[ -n "$registration" ] || registration=default
 

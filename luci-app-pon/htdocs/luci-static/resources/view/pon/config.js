@@ -30,17 +30,6 @@ function asciiLength(minimum, maximum) {
 	};
 }
 
-function validateSerialNumber(sectionId, value) {
-	if (value == null || value === '')
-		return true;
-
-	if (/^[0-9a-fA-F]{16}$/.test(value) ||
-	    /^[A-Za-z0-9]{4}[0-9a-fA-F]{8}$/.test(value))
-		return true;
-
-	return _('Use 16 hexadecimal digits or VEND followed by 8 hexadecimal digits.');
-}
-
 function isEponMode(mode) {
 	return (mode || '').indexOf('epon-') === 0;
 }
@@ -75,23 +64,6 @@ return view.extend({
 		o.value('epon-10g-1g', _('10G-EPON 10G/1G'));
 		o.value('epon-10g-10g', _('10G-EPON 10G/10G'));
 
-		o = s.option(form.Value, 'serial_number', _('Serial number (SN)'));
-		o.placeholder = _('Board serial number');
-		o.rmempty = true;
-		o.validate = validateSerialNumber;
-		o.depends('mode', '');
-		o.depends('mode', 'xgpon');
-		o.depends('mode', 'xgspon');
-
-		o = s.option(form.Value, 'registration_id', _('Registration-ID'));
-		o.password = true;
-		o.rmempty = true;
-		o.depends('mode', '');
-		o.depends('mode', 'xgpon');
-		o.depends('mode', 'xgspon');
-		o.validate = asciiLength(1, 36);
-		o.description = _('Optional; sent as all zeros when empty.');
-
 	s = m.section(form.TypedSection, 'omci', _('OMCI settings'),
 		_('The ONU identity reported over OMCI is configured on the hardware identity page.'));
 	s.anonymous = false;
@@ -108,14 +80,53 @@ return view.extend({
 	o = s.taboption('authentication', form.DummyValue, 'device', _('OMCI interface'));
 	o.default = '-';
 
+	o = s.taboption('authentication', form.ListValue, 'auth_mode', _('Authentication mode'),
+		_('LOID authentication presents the LOID, with its password when the OLT asks for one. Password authentication presents the registration ID instead and offers no LOID at all, which is what an operator issuing a password expects.'));
+	o.default = 'loid';
+	o.rmempty = false;
+	/*
+	 * The status page uses the same words for the LOID authentication *result*;
+	 * the context keeps these two translations apart.
+	 */
+	o.value('loid', _('LOID authentication', 'PON authentication mode'));
+	o.value('password', _('Password authentication', 'PON authentication mode'));
+
+	/*
+	 * Visible for LOID authentication and for configurations written before the
+	 * mode existed: two depends calls are an OR, so hiding them would strand the
+	 * LOID of an installation that never learned the option.
+	 */
 	o = s.taboption('authentication', form.Value, 'loid', _('LOID'));
 	o.rmempty = true;
+	o.depends('auth_mode', 'loid');
+	o.depends('auth_mode', '');
 	o.validate = asciiLength(1, 24);
 
-	o = s.taboption('authentication', form.Value, 'loid_password', _('LOID password'));
+	o = s.taboption('authentication', form.Value, 'loid_password', _('LOID password'),
+		_('Leave empty for pure LOID authentication; set it only when the OLT asks for a password next to the LOID.'));
 	o.password = true;
 	o.rmempty = true;
+	o.depends('auth_mode', 'loid');
+	o.depends('auth_mode', '');
 	o.validate = asciiLength(1, 12);
+
+	/*
+	 * The registration ID is an authentication credential, so it belongs with the
+	 * LOID it competes with rather than next to the line's serial number. The
+	 * value still stored on the line is shown until it is saved here.
+	 */
+	o = s.taboption('authentication', form.Value, 'registration_id', _('Registration-ID'));
+	o.password = true;
+	o.rmempty = true;
+	o.depends('auth_mode', 'password');
+	o.validate = asciiLength(1, 36);
+	o.cfgvalue = function(sectionId) {
+		var line = uci.get('pon', sectionId, 'line');
+
+		return uci.get('pon', sectionId, 'registration_id') ||
+			uci.get('pon', line, 'registration_id') || '';
+	};
+	o.description = _('Optional; sent as all zeros when empty.');
 
 	o = s.taboption('compatibility', form.ListValue, 'omcc_version', _('OMCC version'));
 	o.value('0xb0', '0xb0');

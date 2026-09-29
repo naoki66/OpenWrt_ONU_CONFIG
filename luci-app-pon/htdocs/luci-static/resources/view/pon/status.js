@@ -297,6 +297,53 @@ function authenticationSeverity(value) {
 	}
 }
 
+/*
+ * A LOID that is not configured is not a fault. An operator that authenticates
+ * by password issues no LOID at all, and a LOID present in the configuration
+ * while password authentication is selected is simply unused. Only a line that
+ * announces LOID authentication and then has nothing to present is a problem,
+ * and the daemon reports that separately as ctc_loid_advertised.
+ *
+ * The agent resolves the mode to exactly one of the two names, including for a
+ * configuration written before the option existed, so anything else is a value
+ * this page does not understand rather than a third mode.
+ */
+function authModeName(mode) {
+	switch (mode) {
+	/* The same words head the authentication-result tile, in a different sense. */
+	case 'loid': return _('LOID authentication', 'PON authentication mode');
+	case 'password': return _('Password authentication', 'PON authentication mode');
+	default: return null;
+	}
+}
+
+function displayCredential(values) {
+	if (values.auth_mode === 'password')
+		return values.loid_configured ?
+			_('LOID stored but not used') : _('Registration-ID');
+
+	if (values.auth_mode === 'loid')
+		return values.loid_configured ? _('Configured') : _('Not configured');
+
+	/* An agent too old to report the mode: say what is known, nothing more. */
+	return displayBoolean(values.loid_configured);
+}
+
+function credentialSeverity(values) {
+	/* Password authentication needs no LOID, however the config reads. */
+	if (values.auth_mode === 'password')
+		return values.ctc_loid_advertised ? 'pending' : '';
+
+	/*
+	 * The OLT was told there is a LOID to look up, so an empty one genuinely
+	 * cannot be answered.
+	 */
+	if (values.ctc_loid_advertised)
+		return values.loid_configured ? 'ok' : 'error';
+
+	return values.loid_configured ? 'ok' : '';
+}
+
 function backendSeverity(value) {
 	switch (value) {
 	case 'applied': return 'ok';
@@ -702,8 +749,10 @@ function renderOmci(item) {
 			metricTile(_('Active GEM-ID'), values.active_gem_id)
 		]),
 		detailFold(_('Protocol details'), [ { title: null, rows: [
-			listRow(_('LOID configured locally'), displayBoolean(values.loid_configured),
-				booleanSeverity(values.loid_configured)),
+			listRow(_('Authentication mode'),
+				authModeName(values.auth_mode) || _('Not reported')),
+			listRow(_('LOID configured locally'), displayCredential(values),
+				credentialSeverity(values)),
 			listRow(_('OLT vendor ID'), values.olt_vendor_id),
 			listRow(_('OLT equipment ID'), values.olt_equipment_id),
 			listRow(_('OLT version'), values.olt_version),
@@ -755,8 +804,12 @@ function renderOam(item) {
 			_('IEEE 802.3ah + CTC') : _('IEEE 802.3ah')),
 		listRow(_('CTC version'), values.ctc_version == null ?
 			_('Not negotiated') : '0x' + Number(values.ctc_version).toString(16)),
-		listRow(_('LOID configured locally'), displayBoolean(values.loid_configured),
-			booleanSeverity(values.loid_configured)),
+	/*
+	 * EPON OAM always authenticates by LOID, so there is no mode to consult
+	 * here; an unset LOID is simply unconfigured, not a failure.
+	 */
+	listRow(_('LOID configured locally'), displayBoolean(values.loid_configured),
+		values.loid_configured ? 'ok' : ''),
 		listRow(_('CTC VLAN mode'), displayVlanMode(values.vlan_mode)),
 		listRow(_('CTC VLAN IDs'), displayVlanIds(values)),
 		listRow(_('Received OAM messages'), values.rx_messages),

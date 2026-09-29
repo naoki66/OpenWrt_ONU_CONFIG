@@ -305,6 +305,12 @@ msgstr "尚未认证"
 msgid "Not reported"
 msgstr "OLT 尚未上报"
 
+msgid "LOID stored but not used"
+msgstr "已保存 LOID，但当前不使用"
+
+msgid "Configured"
+msgstr "已配置"
+
 msgid "ONU"
 msgstr "ONU"
 
@@ -478,6 +484,23 @@ msgstr "光前端温度"
 
 msgid "Registration-ID"
 msgstr "Registration-ID"
+
+msgid "Authentication mode"
+msgstr "认证方式"
+
+msgid "LOID authentication presents the LOID, with its password when the OLT asks for one. Password authentication presents the registration ID instead and offers no LOID at all, which is what an operator issuing a password expects."
+msgstr "LOID 认证向 OLT 上报 LOID，并在 OLT 要求时附带 LOID 密码。Password 认证改为上报 Registration-ID，且完全不上报 LOID——运营商发放的是 Password 时应选此项。"
+
+msgctxt "PON authentication mode"
+msgid "LOID authentication"
+msgstr "LOID 认证"
+
+msgctxt "PON authentication mode"
+msgid "Password authentication"
+msgstr "Password 认证"
+
+msgid "Leave empty for pure LOID authentication; set it only when the OLT asks for a password next to the LOID."
+msgstr "留空即为纯 LOID 认证；仅在 OLT 要求除 LOID 外另提供密码时填写。"
 
 msgid "Rejected"
 msgstr "认证失败"
