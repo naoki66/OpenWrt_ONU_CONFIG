@@ -19,7 +19,7 @@
 		}
 	},
 	"admin/onu/hardware": {
-		"title": "Hardware ID",
+		"title": "Hardware",
 		"order": 20,
 		"action": {
 			"type": "view",

@@ -188,9 +188,14 @@ OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列�
 
 | 区块 | 数据来源 | 说明 |
 | --- | --- | --- |
-| 校准数据（含板级身份） | `pon-board-identity` + `airoha-pon-data`（Flash） | **一个 section**：身份字段按存储目标分组 + 末尾「板级身份文件」分组（**「下载备份」与「上传并写入」两个动作**） |
+| 板载身份 | `pon-board-identity`（Flash） | 身份字段按存储目标分组，**逐个就地改写** |
+| PON board data（**最下面一块**） | `airoha-pon-data`（Flash） | 整份镜像的两个方向：**「下载备份」**与**「上传并写入」**；目标多于一个时才出现目标下拉 |
 | ONU 身份 — OMCI | UCI `pon.omci` + UCI `pon.xpon`（序列号） | 仅当线路为 **GPON / XG-PON / XGS-PON** 时显示 |
 | ONU 身份 — EPON OAM | UCI `pon.oam` | 仅当线路为 **EPON / 10G-EPON** 时显示 |
+
+> ⚠️ 底部两块**顺序固定**：先「板载身份」（改字段），再「PON board data」（整份替换）。
+> 上游 `config.js` 的 "PON board data" 卡片就是后者，本页把它并到硬件身份页的**最下面**，
+> 与身份字段上下相邻——两者写的是同一份镜像，分开两页会让人以为是两个不相干的东西。
 
 #### ⚠️ 页面里的东西必须挂在 form map 上，不能自己在 `m.render()` 外面拼 DOM
 
@@ -203,23 +208,28 @@ LuCI 的 `form.js` 在 `renderTabContainers()` 里只为 **section 内注册的 
   只是 map 的兄弟节点，既不进任何 `data-tab` 容器，也不会被标签逻辑显示。
 
 > ⚠️ **本页原先就是这个坑**：板级身份卡片是手写的 `E('div', { class: 'cbi-section' })`，
-> 被 `cards.concat([ map ])` 放在 map 外面，于是整张「校准数据」卡在任何情况下都不显示，
+> 被 `cards.concat([ map ])` 放在 map 外面，于是整张卡在任何情况下都不显示，
 > 而被误判成"上传入口丢失"。修法是**把卡片改成 form section**（`m.section(...)` +
 > `s.option(...)`），让所有内容都进入 map。上游 `pbs05/openwrt-pon-userspace` 的
-> `config.js` 里那段 "PON board data" 也是同样的写法，所以同样不显示——不能照抄。
+> `config.js` 里那段 "PON board data" 同样是手写卡片拼在 map 后面——**照抄它的写法不行，
+> 要照抄的是它的操作**（目标存储 + 上传并写入），那部分收进本页最下面的 section。
 
-**板级身份与校准数据本来就是同一个东西**，所以合成一个 section「校准数据」：两者都通过
+**板级身份与板级数据本来就是同一个东西的两面**，所以放在相邻的两个 section：两者都通过
 `board.json` 的 `pon_data` 定位存储目标，`pon-board-identity write` 是读出镜像后
 **按 offset 就地改写字段**再写回，`airoha-pon-data write` 则是**整份镜像替换**。
 
-一台设备只有**一个** `pon_data` 目标（DSD 分区），因此页面上：
+一台设备通常只有**一个** `pon_data` 目标（DSD 分区），因此页面上：
 
-- **不做目标选择器**——下拉永远只有一项，是噪音；分区名与容量由 `airoha-pon-data list`
-  的 label 显示在身份分组的标题上，上传的文件就写它；
+- **目标下拉只在真的有多个目标时才建**——单目标时下拉永远只有一项，是噪音；分区名与容量
+  由 `airoha-pon-data list` 的 label 直接显示成一行文字；
 - 也不存在"只能写校准、没有身份字段"的目标，所以身份字段只在 `identity.targets` 声明了
   字段时出现；`airoha-pon-data list` 失败时仍会退到 `pon-board-identity` 报告的目标；
-- 全页**只有一个**「上传并写入」，放在「**板级身份文件**」分组里——它是整份替换，
+- 全页**只有一个**「上传并写入」，在最下面的「PON board data」里——它是整份替换，
   与"改几个字段"不是一个量级的操作。
+
+> ⚠️ **两个 section 的合成实例名必须不同**（`board` 与 `image`）。`TypedSection` 的
+> `renderContents()` 用 `cbi-<config>-<sid>` 给实例节点编号，两个 section 同用 `board`
+> 会产出两个同 id 的节点；同时要 `s.anonymous = true`，否则实例名会被打印成第二个 `<h3>`。
 
 > ⚠️ **这个上传入口的措辞必须是「板级身份文件」，不能叫「校准镜像」。** 上传的就是 DSD 分区的
 > 整份镜像，身份字段与校准数据都在里面；设备并不存在一个"只能写校准"的目标。早期版本把它标成
@@ -248,10 +258,19 @@ LuCI 的 `form.js` 在 `renderTabContainers()` 里只为 **section 内注册的 
 `pon-board-identity write` 写板级字段，最后 `apply`。板级写入放在 UCI 之后，
 这样板级失败时不会留下"UCI 已改、镜像没动"的静默不一致。
 
-降级仍然是各自独立：`pon-board-identity list` 失败 → 只剩存储目标与上传按钮；
-`airoha-pon-data list` 失败 → **上传与备份按钮仍然保留**（`pon-board-identity` 的目标名同样来自
-`pon_data`，可以直接当 `airoha-pon-data write` / `read` 的目标用）；两者都失败 → 整个 section 隐藏，
-不影响下面的 ONU 身份区块。
+降级仍然是各自独立：`pon-board-identity list` 失败 → 板载身份只剩一行说明，PON board data
+照旧；`airoha-pon-data list` 失败 → **上传与备份按钮仍然保留**（`pon-board-identity` 的目标名同样来自
+`pon_data`，可以直接当 `airoha-pon-data write` / `read` 的目标用）；两者都失败 → **两块都还在，
+只是各自写明原因**，不影响下面的 ONU 身份区块。
+
+> ⚠️ **卡片"消失"会被读成"功能被删了"**，所以底部两块**永远渲染**，缺数据时用一行
+> `DummyValue` 说明缺的是什么（`identity` 没声明 / `pon_data` 没声明 / 读失败），
+> 而不是 `if (!…) return` 把整块砍掉。
+>
+> ⚠️ **`loadIdentity()` 里每个字段的 read 必须各自 `.catch()`。** 原来的写法把所有 field 的
+> read 串成一条 `sequence`，**任何一个字段读失败就会 reject 整条链**，`loadIdentity()`
+> 落到外层 `.catch()` 返回 `null` —— 于是"一个字段读不出来"表现成"整块板载身份不存在"，
+> PON 序列号与板载 MAC 全部消失。现在失败的字段记成 `null`（渲染成空输入框），布局照旧。
 
 两个 ONU 身份区块都由 `s.filter` 按 `xpon.mode` 生效（与状态页同一套 `isEponMode()` 判据），
 并在区块内显示「PON 线路」和「线路模式」两个只读字段，避免多线路设备上认错区块。
@@ -266,7 +285,7 @@ EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本�
 | 字段 | 来源 | 可编辑 | 说明 |
 | --- | --- | --- | --- |
 | 序列号（SN） | UCI `pon.xpon.serial_number` | 是 | 覆盖板级烧录值；留空则按烧录值注册 |
-| 板级序列号（SN） | `pon-board-identity read <target> pon_sn` | 否（在「校准数据」里改） | 烧录在 Flash 里的值 |
+| 板级序列号（SN） | `pon-board-identity read <target> pon_sn` | 否（在「板载身份」里改） | 烧录在 Flash 里的值 |
 
 两者并排是为了**一眼看出不匹配**——注册失败时这是第一个要查的点。可编辑的那个仍写回
 `pon.xpon.serial_number`（由 `pon.init` 下发给内核 `xpon/serial_number`），没有换存储位置，
@@ -277,8 +296,8 @@ EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本�
 回落 `default`，行为与从前一致。
 
 原 configuration 页的两个「ONU identity」标签页已移除，改为在该分区留下指向硬件身份页的说明。
-原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页，改名为「校准数据」
-（它就是写进 Flash 的板级身份文件，与身份字段同类；config 页只留一行指向说明）。
+原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页**最下面一块**（名字沿用
+"PON board data"：它就是写进 Flash 的板级身份文件，与身份字段同类；config 页只留一行指向说明）。
 
 ### 认证方式：LOID 与 Password 是二选一，不是"LOID 是否配置"
 

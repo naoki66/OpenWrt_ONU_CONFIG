@@ -17,6 +17,13 @@ var STYLESHEET = 'view/onu/onu.css';
  */
 var BACKUP = '/tmp/pon-board-backup.bin';
 
+/*
+ * pon_data declares a single partition on every board seen so far, so the
+ * picker is only built when there really is more than one target. The handlers
+ * look it up by id instead of holding the node: a re-render replaces it.
+ */
+var TARGET_SELECT_ID = 'pon-board-data-target';
+
 function downloadBackup(targetId) {
 	return fs.read_direct(BACKUP, 'blob').then(function(blob) {
 		var url = window.URL.createObjectURL(blob);
@@ -281,6 +288,13 @@ function runIdentity(args) {
 	});
 }
 
+/*
+ * One unreadable field must not make the whole board identity disappear: the
+ * fields live in the same flash image and are read one by one, so a single
+ * failure used to reject the whole sequence and leave the page with no
+ * identity section at all. Each read is settled on its own and a field that
+ * cannot be read is reported as null, which renders as an empty input.
+ */
 function loadIdentity() {
 	return runIdentity([ 'list' ]).then(function(output) {
 		var layout = JSON.parse(output);
@@ -293,6 +307,8 @@ function loadIdentity() {
 				sequence = sequence.then(function() {
 					return runIdentity([ 'read', target, field ]).then(function(value) {
 						data[target][field] = value;
+					}).catch(function() {
+						data[target][field] = null;
 					});
 				});
 			});
@@ -412,7 +428,7 @@ return view.extend({
 		 * once here at the hardware-identity level instead of duplicating it in
 		 * both ONU identity blocks.
 		 */
-		s = m.section(form.TypedSection, 'xpon', _('PON line'),
+		s = m.section(form.TypedSection, 'xpon', _('PON Mode'),
 			_('Line mode and registration identity take effect after the PON interface restarts.'));
 		s.anonymous = true;
 		s.addremove = false;
@@ -472,7 +488,7 @@ return view.extend({
 
 			return serial || _('Not set');
 		};
-		o.description = _('Read from the board identity image. Edit it under Calibration data below.');
+		o.description = _('Read from the board identity image. Edit it under Board identity below.');
 
 		o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
 		o.rmempty = true;
@@ -543,12 +559,12 @@ return view.extend({
 	o.rawhtml = true;
 	o.default = _('The above information should match the equipment nameplate.');
 		/*
-		 * The board flash half of the page. It is built as a form section rather
-		 * than as a hand-made card: a form map renders its own children into the
+		 * The board flash half of the page. It is built as form sections rather
+		 * than as hand-made cards: a form map renders its own children into the
 		 * tab containers it creates, so anything assembled outside render() ends
 		 * up beside the tabs instead of inside them and is never shown.
 		 */
-		this.renderBoardData(m, identity, storages);
+		this.renderBoardBlocks(m, identity, storages);
 
 		return m.render().then(function(node) {
 			toggleModeSections(node, modeOption);
@@ -557,7 +573,18 @@ return view.extend({
 		});
 	},
 
-	renderBoardData: function(m, identity, storages) {
+	/*
+	 * The board flash half of the page is two blocks, in the order the two
+	 * operations grow: the identity fields patched in place first, the whole
+	 * image last. Both are form sections of the same map so they end up inside
+	 * the map instead of beside it.
+	 */
+	renderBoardBlocks: function(m, identity, storages) {
+		this.renderBoardIdentity(m, identity, storages);
+		this.renderPonBoardData(m, identity, storages);
+	},
+
+	renderBoardIdentity: function(m, identity, storages) {
 		var self = this;
 		var targets = mergeTargets(identity, storages);
 		var withFields = targets.filter(function(target) {
@@ -565,19 +592,19 @@ return view.extend({
 		});
 		var s, o;
 
-		if (!withFields.length && !storages.length)
-			return;
-
-		s = m.section(form.TypedSection, 'pon_identity', _('Calibration data'),
-			_('The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin.'));
-		s.anonymous = false;
+		s = m.section(form.TypedSection, 'pon_identity', _('Board identity'),
+			_('The identity fields burned into the flash image of a storage target, patched in place one field at a time. They take effect after a reboot; the image as a whole is handled by PON board data below.'));
 		s.addremove = false;
 
 		/*
 		 * The fields live in the board image, not in UCI, so the section is only
 		 * a container: it is backed by a single synthetic instance whose options
-		 * read and write the storages through pon-board-identity.
+		 * read and write the storages through pon-board-identity. It is
+		 * anonymous so the synthetic name is not printed as a second heading,
+		 * and the two blocks use different instance names to keep the DOM ids
+		 * unique.
 		 */
+		s.anonymous = true;
 		s.cfgsections = function() {
 			return [ 'board' ];
 		};
@@ -591,6 +618,24 @@ return view.extend({
 		};
 
 		this.identityEntries = [];
+
+		/*
+		 * Say why the fields are missing instead of dropping the block: a card
+		 * that vanishes reads as "the feature is gone", while a card that
+		 * explains itself still tells the user where to look. This is what a
+		 * board with an unreadable field or without an identity declaration
+		 * hits.
+		 */
+		if (!withFields.length) {
+			o = s.option(form.DummyValue, '_identity_missing', _('Board identity fields'));
+			o.cfgvalue = function() {
+				return identity === null
+					? _('No board identity layout is available: /etc/board.json declares no identity targets, or pon-board-identity cannot be run.')
+					: _('This board declares no writable identity fields.');
+			};
+
+			return;
+		}
 
 		withFields.forEach(function(target) {
 			Object.keys(target.fields).forEach(function(field) {
@@ -617,6 +662,25 @@ return view.extend({
 				});
 			});
 		});
+	},
+
+	/*
+	 * The last block of the page, and the one that came from upstream's
+	 * configuration page: the board data image as a whole. Backing it up and
+	 * writing it are two directions of the same image, so they stay next to
+	 * each other instead of living on two pages.
+	 */
+	renderPonBoardData: function(m, identity, storages) {
+		var self = this;
+		var s, o;
+
+		s = m.section(form.TypedSection, 'pon_board_data', _('PON board data'),
+			_('The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot.'));
+		s.addremove = false;
+		s.anonymous = true;
+		s.cfgsections = function() {
+			return [ 'image' ];
+		};
 
 		o = s.option(form.DummyValue, '_file_action', _('Board identity file'));
 		o.rawhtml = true;
@@ -629,17 +693,29 @@ return view.extend({
 	 * The file downloaded or uploaded here is the board identity file: the
 	 * whole image of the storage target, which carries the identity fields and
 	 * the calibration data side by side. There is no calibration-only target,
-	 * so there is exactly one image to back up and one to write — and no
-	 * target picker, because pon_data declares a single partition.
+	 * so there is exactly one image to back up and one to write per target.
+	 * pon_data normally declares a single partition, so the target picker only
+	 * appears when the board really offers more than one.
 	 */
 	renderFileActions: function(storages, identity) {
 		var self = this;
-		var target = storages.length ? storages[0] : firstIdentityTarget(identity);
+		var options = storages.length ? storages : [];
+		var fallback = firstIdentityTarget(identity);
 
-		if (!target)
-			return E('span', {}, _('No storage target is available.'));
+		if (!options.length && fallback)
+			options = [ fallback ];
+
+		if (!options.length)
+			return E('div', { 'class': 'cbi-section-descr' },
+				_('No storage target is available: /etc/board.json declares no pon_data target, so there is no image to back up or write.'));
 
 		return E('div', {}, [
+			options.length > 1
+				? E('select', { 'class': 'cbi-input-select', 'id': TARGET_SELECT_ID },
+					options.map(function(target, index) {
+						return E('option', { 'value': String(index) }, target.label);
+					}))
+				: E('span', {}, options[0].label),
 			E('div', { 'class': 'cbi-section-descr' },
 				_('Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one; identity fields and calibration data are included either way. Writing keeps the previous image as /tmp/pon-board-data.*.bin, and both take effect after a reboot.')),
 			E('div', { 'class': 'cbi-page-actions' }, [
@@ -651,7 +727,7 @@ return view.extend({
 					'class': 'cbi-button cbi-button-action',
 					'id': 'pon-identity-backup',
 					'click': ui.createHandlerFn(self, 'handleIdentityBackup',
-						target, 'pon-identity-backup')
+						options, 'pon-identity-backup')
 				}, [ _('Download backup') ]),
 				/* The button id travels instead of the node: the handler
 				   looks it up when the upload actually starts. */
@@ -660,15 +736,36 @@ return view.extend({
 					'id': 'pon-identity-upload',
 					'disabled': self.readonly || null,
 					'click': ui.createHandlerFn(self, 'handleIdentityUpload',
-						target, 'pon-identity-upload')
+						options, 'pon-identity-upload')
 				}, [ _('Upload and write') ])
 			])
 		]);
 	},
 
+	/*
+	 * The target is looked up when the button is clicked, not when the block is
+	 * rendered: a re-render replaces the picker node, and a handler holding the
+	 * old one would keep writing the target that was selected before.
+	 */
+	selectedTarget: function(options) {
+		var select = document.getElementById(TARGET_SELECT_ID);
+		var index = select ? Number(select.value) : 0;
+
+		return options[index] || options[0] || null;
+	},
+
 	/* Reads the current image of one storage target and downloads it. */
-	handleIdentityBackup: function(target, buttonId) {
+	handleIdentityBackup: function(options, buttonId) {
 		var button = document.getElementById(buttonId);
+		var target = this.selectedTarget(options || []);
+
+		if (!target) {
+			ui.addNotification(null, E('p', [
+				_('No storage target is available.')
+			]), 'danger');
+
+			return Promise.resolve();
+		}
 
 		if (button) {
 			button.disabled = true;
@@ -702,9 +799,18 @@ return view.extend({
 	},
 
 /* Writes a complete board identity file to one storage target. */
-handleIdentityUpload: function(target, buttonId) {
+handleIdentityUpload: function(options, buttonId) {
 	var self = this;
 	var button = document.getElementById(buttonId);
+	var target = this.selectedTarget(options || []);
+
+	if (!target) {
+		ui.addNotification(null, E('p', [
+			_('No storage target is available.')
+		]), 'danger');
+
+		return Promise.resolve();
+	}
 
 	/*
 	 * The image is the whole target: writing it replaces the identity fields
