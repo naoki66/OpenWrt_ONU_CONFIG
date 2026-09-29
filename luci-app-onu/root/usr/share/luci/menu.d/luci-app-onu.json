@@ -1,0 +1,88 @@
+{
+	"admin/onu": {
+		"title": "ONU",
+		"order": 20,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-onu" ],
+			"uci": { "pon": true }
+		}
+	},
+	"admin/onu/status": {
+		"title": "Status",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "onu/status"
+		}
+	},
+	"admin/onu/hardware": {
+		"title": "Hardware ID",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "onu/hardware"
+		},
+		"depends": {
+			"acl": [ "luci-app-onu" ],
+			"uci": { "pon": true }
+		}
+	},
+	"admin/onu/config": {
+		"title": "Authentication",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "onu/config"
+		}
+	},
+	"admin/onu/internet": {
+		"title": "Internet",
+		"order": 35,
+		"action": {
+			"type": "view",
+			"path": "onu/internet"
+		},
+		"depends": {
+			"acl": [ "luci-app-onu" ],
+			"uci": { "internet": true }
+		}
+	},
+	"admin/onu/iptv": {
+		"title": "IPTV",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "onu/iptv"
+		},
+		"depends": {
+			"acl": [ "luci-app-onu" ],
+			"uci": { "iptv": true }
+		}
+	},
+	"admin/onu/voice": {
+		"title": "Voice",
+		"order": 45,
+		"action": {
+			"type": "view",
+			"path": "onu/voice"
+		},
+		"depends": {
+			"acl": [ "luci-app-onu" ],
+			"uci": { "voice": true }
+		}
+	},
+	"admin/onu/diagnostics": {
+		"title": "Diagnostics",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "onu/diagnostics"
+		},
+		"depends": {
+			"fs": { "/usr/libexec/airoha-pon-debug": "executable" }
+		}
+	}
+}

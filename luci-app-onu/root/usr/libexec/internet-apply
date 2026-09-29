@@ -1,0 +1,700 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# internet-apply - turn /etc/config/internet into network, firewall and
+# nftables configuration.
+#
+# Two topologies, always written to network.wan so that whatever zone already
+# references "wan" keeps resolving:
+#
+#   bridge  The selected LAN ports and <uplink>.<vlan> form br-wanup, a bridge
+#           of its own. It never joins br-lan, so the ONT management plane
+#           stays on the ports left behind. Only the frames a downstream router
+#           needs are let through towards the uplink: /etc/internet.nft matches
+#           EtherType 0x8863 / 0x8864 in the bridge family and drops everything
+#           else that would leave through the uplink, which keeps local ARP,
+#           management and IPv6 traffic out of the operator VLAN.
+#
+#   pppoe   The ONT dials itself. The stock network.wan / network.wan6 are
+#           renamed aside rather than deleted, so switching the page off puts
+#           the original sections back unchanged. The leftovers have to be
+#           silenced too: a stock wan6 usually rides on @wan and would solicit
+#           DHCPv6 straight into the operator VLAN.
+#
+# Why the uplink gets an interface of its own in dial mode: fw4 collects the
+# flowtable devices per firewall zone (fw4.uc builds related_physdevs from
+# zone.network, not from zone.device), and only real devices belong in a
+# flowtable - it resolves the topology below VLAN and PPPoE interfaces itself.
+# Referencing pon0 from a zone is what puts pon0 into the generated flowtable.
+#
+# Hardware offload: airoha_eth registers ndo_setup_tc and accepts
+# TC_SETUP_CLSFLOWER / TC_SETUP_FT, so an accepted flow becomes a PPE entry
+# readable from /sys/kernel/debug/ppe/entries. Nothing in this script talks to
+# the NPU directly; see DESIGN.md for what can and cannot reach the PPE.
+
+. /lib/functions.sh
+
+ACTION="${1:-reload}"
+NFT_FILE="/etc/internet.nft"
+OFFLOAD_BACKUP="/etc/internet.offload.orig"
+
+# Names of the derived devices and of the network sections this page owns.
+VLAN_DEV='ct-wanup'
+BRIDGE_DEV='br-wanup'
+UPLINK_IFACE='luci_wanup_uplink'
+STOCK_WAN='luci_wanup_stock_wan'
+STOCK_WAN6='luci_wanup_stock_wan6'
+
+fail() {
+	logger -t internet "$*"
+	echo "internet: $*" >&2
+	exit 1
+}
+
+warn() {
+	logger -t internet "$*"
+}
+
+validate_ifname() {
+	local name="$1"
+
+	[ -n "$name" ] || return 1
+	[ "${#name}" -le 15 ] || return 1
+
+	case "$name" in
+		*[!A-Za-z0-9_.:-]*) return 1 ;;
+	esac
+
+	return 0
+}
+
+validate_vlan() {
+	local vid="$1"
+
+	case "$vid" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+
+	[ "$vid" -ge 1 ] && [ "$vid" -le 4094 ]
+}
+
+load_internet_config() {
+	config_load internet
+	config_get_bool ENABLED config enabled 0
+	config_get MODE config mode bridge
+	config_get UPLINK config uplink pon0
+	config_get VLAN config vlan
+	config_get PORTS config ports
+	config_get_bool IPOE config ipoe 0
+	config_get_bool OFFLOAD config offload 1
+	config_get IP_VERSION config ip_version ipv4
+	config_get USERNAME config username
+	config_get PASSWORD config password
+	config_get MTU config mtu 1492
+}
+
+# The IPTV page owns one LAN port of its own in set-top box mode; a port cannot
+# sit in two bridges, so applying would silently break whichever page lost.
+load_iptv_port() {
+	IPTV_PORT="$(uci -q get iptv.config.lan_port)"
+	[ "$(uci -q get iptv.config.enabled)" = '1' ] || IPTV_PORT=''
+	[ "$(uci -q get iptv.config.mode)" = 'trunk' ] && IPTV_PORT=''
+}
+
+port_selected() {
+	local port
+
+	for port in $PORTS; do
+		[ "$port" = "$1" ] && return 0
+	done
+
+	return 1
+}
+
+find_br_lan() {
+	local section="$1"
+	local name
+
+	config_get name "$section" name
+	[ "$name" = "br-lan" ] && BR_LAN_SECTION="$section"
+}
+
+detach_from_device() {
+	local section="$1"
+	local ports port
+
+	config_get ports "$section" ports
+	for port in $ports; do
+		port_selected "$port" || continue
+		uci -q del_list "network.$section.ports=$port"
+	done
+}
+
+detach_from_interface() {
+	local section="$1"
+	local device ifnames ifname
+
+	case "$section" in
+		luci_wanup*|luci_iptv*) return ;;
+	esac
+
+	config_get device "$section" device
+	port_selected "$device" && uci -q delete "network.$section.device"
+
+	config_get ifnames "$section" ifname
+	for ifname in $ifnames; do
+		port_selected "$ifname" || continue
+		uci -q del_list "network.$section.ifname=$ifname" ||
+			uci -q delete "network.$section.ifname"
+	done
+}
+
+detach_from_bridge_vlan() {
+	local section="$1"
+	local ports token base
+
+	config_get ports "$section" ports
+	for token in $ports; do
+		base="${token%%:*}"
+		port_selected "$base" || continue
+		uci -q del_list "network.$section.ports=$token"
+	done
+}
+
+# A dedicated WAN port needs exclusive netifd ownership: leaving it in br-lan
+# would make the two bridges race for the same port.
+detach_ports() {
+	config_foreach detach_from_device device
+	config_foreach detach_from_interface interface
+	config_foreach detach_from_bridge_vlan bridge-vlan
+}
+
+validate_config() {
+	[ "$ENABLED" -eq 1 ] || return 0
+
+	validate_ifname "$UPLINK" || fail "Invalid uplink device name"
+	[ -e "/sys/class/net/$UPLINK" ] || fail "Uplink device $UPLINK was not found"
+	validate_vlan "$VLAN" || fail "The internet VLAN must be between 1 and 4094"
+
+	if [ "$MODE" = 'bridge' ]; then
+		[ -n "$PORTS" ] || fail "Pick at least one LAN port for the internet bridge"
+
+		for port in $PORTS; do
+			validate_ifname "$port" || fail "Invalid LAN port name $port"
+			[ -e "/sys/class/net/$port" ] || fail "LAN port $port was not found"
+			[ "$port" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
+			[ "$port" != "$IPTV_PORT" ] ||
+				fail "LAN port $port is dedicated to the IPTV set-top box; free it on the IPTV page first"
+		done
+	else
+		[ -n "$USERNAME" ] || fail "The PPPoE user name is required"
+	fi
+}
+
+# Bridging every LAN port leaves br-lan without a wire, so the ONT stays
+# reachable over the radios attached to it only.
+warn_on_empty_br_lan() {
+	[ "$MODE" = 'bridge' ] || return 0
+	[ -n "$PORTS" ] || return 0
+
+	local ports port remaining=''
+
+	[ -n "$BR_LAN_SECTION" ] && config_get ports "$BR_LAN_SECTION" ports
+
+	for port in $ports; do
+		port_selected "$port" && continue
+		remaining="${remaining:+$remaining }$port"
+	done
+
+	[ -n "$remaining" ] ||
+		warn "No LAN port is left in br-lan; the ONT stays reachable over its radio(s) only"
+}
+
+#
+# Flow offloading
+#
+# Nothing else on this platform reaches the PPE: airoha_eth is the only
+# offloading driver and it is driven by the netfilter flowtable. The previous
+# values are remembered so switching the page off restores them.
+#
+offload_backup() {
+	[ -f "$OFFLOAD_BACKUP" ] || {
+		echo "flow_offloading=$(uci -q get firewall.defaults.flow_offloading)" >"$OFFLOAD_BACKUP"
+		echo "flow_offloading_hw=$(uci -q get firewall.defaults.flow_offloading_hw)" >>"$OFFLOAD_BACKUP"
+	}
+}
+
+offload_restore() {
+	[ -f "$OFFLOAD_BACKUP" ] || return 0
+
+	while IFS='=' read -r key value; do
+		[ -n "$key" ] || continue
+		if [ -n "$value" ]; then
+			uci set "firewall.defaults.$key"="$value"
+		else
+			uci -q delete "firewall.defaults.$key"
+		fi
+	done <"$OFFLOAD_BACKUP"
+
+	rm -f "$OFFLOAD_BACKUP"
+}
+
+write_offload_defaults() {
+	if [ "$OFFLOAD" -eq 1 ]; then
+		offload_backup
+		uci set firewall.defaults.flow_offloading='1'
+		uci set firewall.defaults.flow_offloading_hw='1'
+	else
+		offload_restore
+	fi
+
+	uci commit firewall || fail "Cannot save firewall configuration"
+}
+
+#
+# nftables: EtherType based split inside the internet bridge
+#
+# These rules only ever see what the CPU forwards: slow path and first packet.
+#
+write_nft_rules() {
+	local tmp port
+
+	tmp="$(mktemp /etc/internet.nft.XXXXXX)" || fail "Cannot create nftables staging file"
+
+	if [ "$ENABLED" -ne 1 ] || [ "$MODE" != 'bridge' ]; then
+		cat >"$tmp" <<'EOF'
+# No internet bridge: the page is off or the ONT dials itself.
+EOF
+	else
+		cat >"$tmp" <<EOF
+# Flush the table so repeated firewall reloads use the current rules.
+table bridge wanup
+flush table bridge wanup
+
+table bridge wanup {
+	chain wanup_forward {
+EOF
+		for port in $PORTS; do
+			cat >>"$tmp" <<EOF
+		# Session of the router plugged into $port.
+		iifname "$port" oifname "$VLAN_DEV" ether type { 0x8863, 0x8864 } \
+			counter accept comment "pppoe-to-uplink-$port"
+		iifname "$VLAN_DEV" oifname "$port" ether type { 0x8863, 0x8864 } \
+			counter accept comment "pppoe-from-uplink-$port"
+EOF
+		done
+
+		if [ "$IPOE" -eq 1 ]; then
+			for port in $PORTS; do
+				cat >>"$tmp" <<EOF
+		# IPoE operators carry native IPv4/IPv6 instead of a PPPoE session.
+		iifname "$port" oifname "$VLAN_DEV" ether type { arp, ip, ip6 } \
+			counter accept comment "ipoe-to-uplink-$port"
+		iifname "$VLAN_DEV" oifname "$port" ether type { arp, ip, ip6 } \
+			counter accept comment "ipoe-from-uplink-$port"
+EOF
+			done
+		fi
+
+		cat >>"$tmp" <<EOF
+		# Everything else is local: it must not reach the operator VLAN.
+		iifname "$VLAN_DEV" counter drop comment "drop-non-pppoe-from-uplink"
+		oifname "$VLAN_DEV" counter drop comment "drop-non-pppoe-to-uplink"
+		counter accept comment "allow-traffic-between-lan-ports"
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+
+		# The bridge hook sees every bridge; this match scopes the filter.
+		meta ibrname "$BRIDGE_DEV" jump wanup_forward
+	}
+}
+EOF
+	fi
+
+	if ! nft -c -f "$tmp" >/dev/null 2>&1; then
+		rm -f "$tmp"
+		fail "Generated nftables rules failed validation"
+	fi
+
+	chmod 0644 "$tmp"
+	mv -f "$tmp" "$NFT_FILE"
+}
+
+#
+# Managed sections. Every section this page writes is either prefixed or marked
+# with luci_wanup, which makes removing them one sweep. The stock interfaces are
+# renamed aside, never rewritten, so their original state survives.
+#
+remove_managed_network() {
+	local section
+
+	for section in $(uci -q show network 2>/dev/null | \
+		sed -n 's/^network\.\(luci_wanup[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		case "$section" in
+			"$STOCK_WAN"|"$STOCK_WAN6") continue ;;
+		esac
+		uci -q delete "network.$section"
+	done
+}
+
+remove_managed_firewall() {
+	local section
+
+	for section in $(uci -q show firewall 2>/dev/null | \
+		sed -n 's/^firewall\.\(luci_wanup[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		uci -q delete "firewall.$section"
+	done
+}
+
+drop_owned_iface() {
+	local section="$1"
+
+	uci -q get "network.$section" >/dev/null || return 0
+	[ "$(uci -q get "network.$section.luci_wanup")" = '1' ] || return 0
+
+	uci -q delete "network.$section"
+}
+
+take_over_stock() {
+	local section="$1"
+	local stock="$2"
+	local prev
+
+	uci -q get "network.$section" >/dev/null || return 0
+	[ "$(uci -q get "network.$section.luci_wanup")" = '1' ] && return 0
+	uci -q get "network.$stock" >/dev/null && return 0
+
+	uci rename "network.$section=$stock" ||
+		fail "Cannot set the existing $section interface aside"
+
+	prev="$(uci -q get "network.$stock.auto")"
+	[ -n "$prev" ] && uci set "network.$stock.luci_wanup_prev_auto"="$prev"
+
+	uci set "network.$stock.auto"='0'
+	uci set "network.$stock.disabled"='1'
+}
+
+restore_stock() {
+	local section="$1"
+	local stock="$2"
+	local prev
+
+	uci -q get "network.$stock" >/dev/null || return 0
+	uci -q get "network.$section" >/dev/null && return 0
+
+	prev="$(uci -q get "network.$stock.luci_wanup_prev_auto")"
+	uci -q delete "network.$stock.luci_wanup_prev_auto"
+	uci -q delete "network.$stock.disabled"
+
+	if [ -n "$prev" ]; then
+		uci set "network.$stock.auto"="$prev"
+	else
+		uci -q delete "network.$stock.auto"
+	fi
+
+	uci rename "network.$stock=$section" ||
+		warn "Cannot restore the original $section interface"
+}
+
+#
+# Firewall zones
+#
+list_zones() {
+	uci -q show firewall 2>/dev/null |
+		sed -n 's/^firewall\.\([A-Za-z0-9_]*\)=zone$/\1/p'
+}
+
+zone_holding() {
+	local zone current
+
+	for zone in $(list_zones); do
+		for current in $(uci -q get "firewall.$zone.network"); do
+			if [ "$current" = "$1" ]; then
+				printf '%s' "$zone"
+				return 0
+			fi
+		done
+	done
+
+	return 0
+}
+
+ensure_in_zone() {
+	local zone="$1"
+	local net="$2"
+	local current
+
+	for current in $(uci -q get "firewall.$zone.network"); do
+		[ "$current" = "$net" ] && return 0
+	done
+
+	uci add_list "firewall.$zone.network"="$net"
+}
+
+remove_from_zones() {
+	local zone current net
+
+	for zone in $(list_zones); do
+		for current in $(uci -q get "firewall.$zone.network"); do
+			for net in "$@"; do
+				[ "$current" = "$net" ] &&
+					uci -q del_list "firewall.$zone.network"="$net"
+			done
+		done
+	done
+}
+
+# A zone referencing an interface that does not exist makes fw4 complain on
+# every reload, so the reference follows the interface.
+drop_dead_zone_references() {
+	local net refs='' zone current
+
+	for net in wan wan6 "$UPLINK_IFACE"; do
+		uci -q get "network.$net" >/dev/null && continue
+		refs="${refs:+$refs }$net"
+	done
+
+	[ -n "$refs" ] || return 0
+
+	remove_from_zones $refs
+}
+
+# Whatever zone carries the stock wan already has the forwarding and the
+# masquerading a WAN needs; only invent one when the firmware ships none.
+resolve_wan_zone() {
+	local zone
+
+	WAN_ZONE="$(zone_holding wan)"
+
+	if [ -z "$WAN_ZONE" ]; then
+		for zone in $(list_zones); do
+			[ "$(uci -q get "firewall.$zone.name")" = 'wan' ] && WAN_ZONE="$zone"
+		done
+	fi
+
+	MANAGED_WAN_ZONE=0
+	[ -n "$WAN_ZONE" ] && return 0
+
+	WAN_ZONE='luci_wanup_wan'
+	MANAGED_WAN_ZONE=1
+
+	uci set firewall.luci_wanup_wan='zone'
+	uci set firewall.luci_wanup_wan.name='wanup'
+	uci set firewall.luci_wanup_wan.input='REJECT'
+	uci set firewall.luci_wanup_wan.output='ACCEPT'
+	uci set firewall.luci_wanup_wan.forward='REJECT'
+	uci set firewall.luci_wanup_wan.masq='1'
+	uci set firewall.luci_wanup_wan.mtu_fix='1'
+}
+
+ensure_lan_forwarding() {
+	local zone
+
+	[ "$MANAGED_WAN_ZONE" -eq 1 ] || return 0
+
+	zone="$(zone_holding lan)"
+	[ -n "$zone" ] || return 0
+
+	uci set firewall.luci_wanup_forwarding='forwarding'
+	uci set firewall.luci_wanup_forwarding.src="$(uci -q get "firewall.$zone.name")"
+	uci set firewall.luci_wanup_forwarding.dest='wanup'
+}
+
+#
+# Topology
+#
+write_common_uplink() {
+	uci set network.luci_wanup_vlan='device'
+	uci set network.luci_wanup_vlan.type='8021q'
+	uci set network.luci_wanup_vlan.ifname="$UPLINK"
+	uci set network.luci_wanup_vlan.vid="$VLAN"
+	uci set network.luci_wanup_vlan.name="$VLAN_DEV"
+}
+
+write_bridge_network() {
+	write_common_uplink
+
+	uci set network.luci_wanup_bridge='device'
+	uci set network.luci_wanup_bridge.type='bridge'
+	uci set network.luci_wanup_bridge.name="$BRIDGE_DEV"
+	uci set network.luci_wanup_bridge.stp='0'
+	uci set network.luci_wanup_bridge.igmp_snooping='0'
+	uci set network.luci_wanup_bridge.multicast_querier='0'
+	uci add_list network.luci_wanup_bridge.ports="$VLAN_DEV"
+
+	for port in $PORTS; do
+		uci add_list network.luci_wanup_bridge.ports="$port"
+	done
+
+	# The zone already references "wan", so the bridge takes its place instead
+	# of leaving a dangling reference behind. No address: the bridge only
+	# switches frames, the management plane stays on br-lan.
+	uci set network.wan='interface'
+	uci set network.wan.device="$BRIDGE_DEV"
+	uci set network.wan.proto='none'
+	uci set network.wan.delegate='0'
+	uci set network.wan.auto='1'
+	uci set network.wan.luci_wanup='1'
+}
+
+uplink_claimed() {
+	local section device
+
+	for section in $(uci -q show network 2>/dev/null | \
+		sed -n 's/^network\.\([A-Za-z0-9_]*\)=interface$/\1/p'); do
+		device="$(uci -q get "network.$section.device")"
+		[ "$device" = "$UPLINK" ] && return 0
+	done
+
+	return 1
+}
+
+# In dial mode nothing else references the physical uplink, yet the flowtable
+# needs it: fw4 only learns devices through zone membership, and the flowtable
+# wants the real device rather than pppoe-wan or $VLAN_DEV.
+write_uplink_device_interface() {
+	if uplink_claimed; then
+		warn "$UPLINK is already claimed by another interface; put that interface in a zone so the flowtable picks up the uplink"
+		return 0
+	fi
+
+	uci set "network.$UPLINK_IFACE"='interface'
+	uci set "network.$UPLINK_IFACE.device"="$UPLINK"
+	uci set "network.$UPLINK_IFACE.proto"='none'
+	uci set "network.$UPLINK_IFACE.delegate"='0'
+	uci set "network.$UPLINK_IFACE.auto"='1'
+	uci set "network.$UPLINK_IFACE.luci_wanup"='1'
+}
+
+write_pppoe_network() {
+	local ipv6='0'
+	local peerdns='1'
+
+	case "$IP_VERSION" in
+		ipv6)
+			ipv6='1'
+			# IPv6 only: the session still negotiates IPCP, but the IPv4 side
+			# must not install a route or a resolver of its own.
+			peerdns='0'
+			;;
+		ipv4_ipv6)
+			ipv6='1'
+			;;
+	esac
+
+	write_common_uplink
+
+	uci set network.wan='interface'
+	uci set network.wan.device="$VLAN_DEV"
+	uci set network.wan.proto='pppoe'
+	uci set network.wan.username="$USERNAME"
+	uci set network.wan.password="$PASSWORD"
+	uci set network.wan.ipv6="$ipv6"
+	uci set network.wan.mtu="$MTU"
+	uci set network.wan.peerdns="$peerdns"
+	uci set network.wan.auto='1'
+	uci set network.wan.delegate='0'
+	uci set network.wan.luci_wanup='1'
+
+	if [ "$ipv6" = '1' ]; then
+		# DHCPv6 over the dialled session, the way the stock wan6 does it.
+		uci set network.wan6='interface'
+		uci set network.wan6.device='@wan'
+		uci set network.wan6.proto='dhcpv6'
+		uci set network.wan6.reqaddress='try'
+		uci set network.wan6.reqprefix='auto'
+		uci set network.wan6.sourcefilter='0'
+		uci set network.wan6.auto='1'
+		uci set network.wan6.delegate='0'
+		uci set network.wan6.luci_wanup='1'
+	fi
+
+	[ "$OFFLOAD" -eq 1 ] && write_uplink_device_interface
+}
+
+write_network_config() {
+	drop_owned_iface wan
+	drop_owned_iface wan6
+	remove_managed_network
+	remove_from_zones "$UPLINK_IFACE"
+
+	if [ "$ENABLED" -ne 1 ]; then
+		restore_stock wan "$STOCK_WAN"
+		restore_stock wan6 "$STOCK_WAN6"
+		uci commit network || fail "Cannot save network configuration"
+
+		return 0
+	fi
+
+	take_over_stock wan "$STOCK_WAN"
+	take_over_stock wan6 "$STOCK_WAN6"
+
+	if [ "$MODE" = 'bridge' ]; then
+		detach_ports
+		write_bridge_network
+	else
+		write_pppoe_network
+	fi
+
+	uci commit network || fail "Cannot save network configuration"
+}
+
+write_firewall_config() {
+	remove_managed_firewall
+
+	if [ "$ENABLED" -eq 1 ]; then
+		resolve_wan_zone
+		ensure_in_zone "$WAN_ZONE" wan
+		uci -q get network.wan6 >/dev/null && ensure_in_zone "$WAN_ZONE" wan6
+		uci -q get "network.$UPLINK_IFACE" >/dev/null &&
+			ensure_in_zone "$WAN_ZONE" "$UPLINK_IFACE"
+		ensure_lan_forwarding
+	fi
+
+	# The interface that went away takes its zone reference with it, so the
+	# stock zone survives here even though it no longer owns network.wan.
+	drop_dead_zone_references
+
+	uci set firewall.luci_wanup='include'
+	uci set firewall.luci_wanup.type='nftables'
+	uci set firewall.luci_wanup.position='ruleset-append'
+	uci set firewall.luci_wanup.path="$NFT_FILE"
+	uci set firewall.luci_wanup.enabled="$ENABLED"
+
+	uci commit firewall || fail "Cannot save firewall configuration"
+}
+
+reload_runtime() {
+	[ "$ACTION" = 'boot' ] && return 0
+
+	if [ "$ENABLED" -eq 1 ]; then
+		# The bridge has to be filtered from its first forwarded frame.
+		/etc/init.d/firewall reload || fail "firewall4 reload failed"
+		ubus call network reload >/dev/null || fail "netifd reload failed"
+	else
+		ubus call network reload >/dev/null || fail "netifd reload failed"
+		if nft list table bridge wanup >/dev/null 2>&1; then
+			nft delete table bridge wanup || fail "Cannot delete internet filter table"
+		fi
+		/etc/init.d/firewall reload || fail "firewall4 reload failed"
+	fi
+}
+
+load_internet_config
+load_iptv_port
+config_load network
+BR_LAN_SECTION=''
+config_foreach find_br_lan device
+
+validate_config
+warn_on_empty_br_lan
+write_nft_rules
+write_network_config
+write_firewall_config
+write_offload_defaults
+reload_runtime
+
+logger -t internet "Internet configuration applied (mode=$MODE)"
+exit 0

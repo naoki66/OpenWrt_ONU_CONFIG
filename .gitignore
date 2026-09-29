@@ -1,5 +1,5 @@
 **/target/
-/luci-app-pon/src/identity-image
+/luci-app-onu/src/identity-image
 
 # WorkBuddy workspace data (memory, notes) - not part of the tree
 /.workbuddy/

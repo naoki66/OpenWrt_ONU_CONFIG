@@ -1,0 +1,1966 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-onu\n"
+"PO-Revision-Date: 2026-08-22 12:00+0800\n"
+"Last-Translator: Ziyou Xu <xuziyougm@gmail.com>\n"
+"Language: zh_Hans\n"
+"Language-Team: Chinese (Simplified)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Accepted"
+msgstr "认证通过"
+
+msgid "Active Alloc-ID"
+msgstr "当前 Alloc-ID"
+
+msgid "Active GEM-ID"
+msgstr "当前 GEM-ID"
+
+msgid "Applied"
+msgstr "已应用"
+
+msgid "Carries DHCP, authentication and video on demand and, when no separate multicast VLAN is set, multicast traffic."
+msgstr "承载 DHCP、鉴权与点播业务；未单独设置组播 VLAN 时组播流量也走这条。"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Grant access to PON configuration, board identity, calibration data, the internet service, the IPTV bridge and voice"
+msgstr "允许访问 PON 配置、校准分区、校准数据、上网业务、IPTV 网桥与语音"
+
+msgid "IGMP upstream VLAN"
+msgstr "上游连接（IGMP 上行 VLAN）"
+
+msgid "IPTV"
+msgstr "IPTV"
+
+msgid "IPTV LAN port"
+msgstr "IPTV LAN 口"
+
+msgid "IPTV bridge"
+msgstr "IPTV 网桥"
+
+msgid "Leave the multicast VLAN empty when both services use the same VLAN."
+msgstr "两种业务共用同一 VLAN 时，请将组播 VLAN 留空。"
+
+msgid "Multicast VLAN"
+msgstr "组播 VLAN"
+
+msgid "Network device carrying the operator VLANs, normally pon0."
+msgstr "承载运营商 VLAN 的网络设备，通常为 pon0。"
+
+msgid "Optional. In separate multicast VLAN mode, IPv4 multicast flows downstream and IGMP is allowed upstream."
+msgstr "可选。使用独立组播 VLAN 时，IPv4 组播向机顶盒下行，并允许 IGMP 请求上行。"
+
+msgid "Optional. The upstream connection of the operator ONT UI: the VLAN carrying the membership reports towards the OLT. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured."
+msgstr "可选。相当于运营商光猫界面里的「上游连接」，即成员报告上行到 OLT 所走的 VLAN。留空时使用组播 VLAN；未设置独立组播 VLAN 时使用业务 VLAN。"
+
+msgid "PON interfaces"
+msgstr "PON 接口"
+
+msgid "PON line stopped"
+msgstr "PON 线路已停止"
+
+msgid "Authentication"
+msgstr "认证"
+
+msgid "Debug mode"
+msgstr "调试模式"
+
+msgid "Debug mode continuously keeps recent raw PON, OMCI and OAM packets in RAM. The setting remains enabled after reboot."
+msgstr "调试模式会在内存中持续保留最近的 PON、OMCI 和 OAM 原始包，重启后仍然生效。"
+
+msgid "Diagnostic operations"
+msgstr "诊断操作"
+
+msgid "Diagnostics"
+msgstr "网络诊断"
+
+msgid "Download diagnostic package"
+msgstr "下载诊断包"
+
+msgid "Debug data is kept in RAM and limited to 20 MB. Applying the setting starts or stops collection."
+msgstr "调试数据保存在内存中，最多占用 20 MB；应用设置后开始或停止收集。"
+
+msgid "Enabling starts packet capture before a full PON restart. Disabling stops capture."
+msgstr "开启时先启动抓包，再完整重启 PON；关闭时停止抓包。"
+
+msgid "PON diagnostics"
+msgstr "PON 诊断"
+
+msgid "PON restart completed."
+msgstr "PON 已重启。"
+
+msgid "PON restart failed."
+msgstr "PON 重启失败。"
+
+msgid "Restart PON line"
+msgstr "重启 PON 线路"
+
+msgid "Same as multicast traffic"
+msgstr "与组播流量相同"
+
+msgid "Service VLAN"
+msgstr "业务 VLAN"
+
+msgid "The package contains raw packet captures, PON state, system logs and network configuration."
+msgstr "诊断包包含原始抓包、PON 状态、系统日志和网络配置。"
+
+msgid "Standard: IEEE 802.3ah. China Telecom Enhanced: IEEE 802.3ah + CTC."
+msgstr "标准认证：IEEE 802.3ah，电信增加认证：IEEE 802.3ah + CTC 。"
+
+msgid "The PON line and OMCI/OAM interfaces will be stopped and restarted. Continue?"
+msgstr "PON 线路和 OMCI/OAM 接口将被停止并重新启动。是否继续？"
+
+msgid "The selected port is dedicated to the set-top box."
+msgstr "所选端口将专用于机顶盒。"
+
+msgid "Unable to create diagnostic package: %s"
+msgstr "无法生成诊断包：%s"
+
+msgid "Unable to restart PON: %s"
+msgstr "无法重启 PON：%s"
+
+msgid "Board serial number"
+msgstr "板载序列号"
+
+msgid "Board identity operation failed."
+msgstr "校准分区操作失败。"
+
+msgid "Board identity written. Reboot the device to use the new values."
+msgstr "校准分区已写入，重启后使用新值。"
+
+msgid "Board identity write failed: %s"
+msgstr "校准分区写入失败：%s"
+
+msgid "No board identity field was changed."
+msgstr "没有修改任何校准分区字段。"
+
+msgid "Uplink device"
+msgstr "上联设备"
+
+msgid "Use a Linux network device name containing at most 15 characters."
+msgstr "请输入不超过 15 个字符的 Linux 网络设备名称。"
+
+msgid "Write board identity"
+msgstr "写入校准分区"
+
+msgid "Storage target: %s"
+msgstr "存储目标：%s"
+
+msgid "Enter a MAC address such as 00:11:22:33:44:55."
+msgstr "请输入 MAC 地址，例如 00:11:22:33:44:55。"
+
+msgid "Registration changes take effect on the next PON activation or interface restart."
+msgstr "注册参数在下次 PON 激活或接口重启时生效。"
+
+msgid "Authentication configuration"
+msgstr "认证配置"
+
+msgid "Data path error"
+msgstr "数据通路错误"
+
+msgid "Data path state"
+msgstr "数据通路状态"
+
+msgid "Downstream PLOAMd received"
+msgstr "MAC 接收 PLOAMd"
+
+msgid "Equipment ID"
+msgstr "设备型号"
+
+msgid "Firmware version"
+msgstr "固件版本"
+
+msgid "Error"
+msgstr "错误"
+
+msgid "Existing kernel mapping"
+msgstr "内核已有映射"
+
+msgid "Failed to apply mapping"
+msgstr "应用映射失败"
+
+msgid "Failed to clear mapping"
+msgstr "清除映射失败"
+
+msgid "GEM Interworking TP entries"
+msgstr "GEM Interworking TP 条目"
+
+msgid "GEM Port Network CTP entries"
+msgstr "GEM Port Network CTP 条目"
+
+msgid "Grant access to PON identity configuration"
+msgstr "允许访问 PON 身份配置"
+
+msgid "Hardware version"
+msgstr "硬件版本"
+
+msgid "Calibration data"
+msgstr "校准数据"
+
+msgid "Board identity file"
+msgstr "校准分区文件"
+
+msgid "The identity fields and the calibration data are two views of the same flash image of a storage target, and both take effect after a reboot. Identity fields are patched in place; the board identity file replaces the whole target. The previous image is kept as /tmp/pon-board-*.bin."
+msgstr "身份字段与校准数据是同一个存储目标上同一份 Flash 镜像的两种视图，都要重启后生效。身份字段就地改写，校准分区文件则整体替换该目标。原镜像另存为 /tmp/pon-board-*.bin。"
+
+msgid "Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin."
+msgstr "上传存储目标的完整镜像并整体替换，身份字段与校准数据一并覆盖。原镜像另存为 /tmp/pon-board-data.*.bin。"
+
+msgid "Upload and write"
+msgstr "上传并写入"
+
+msgid "Board identity file written to %s and verified. Reboot the device to apply it."
+msgstr "校准分区文件已写入 %s 并通过读回校验，请重启设备使其生效。"
+
+msgid "Writing the board identity file failed: %s"
+msgstr "写入校准分区文件失败：%s"
+
+msgid "Unable to list storage."
+msgstr "无法读取存储列表。"
+
+msgid "Write failed."
+msgstr "写入失败。"
+
+msgid "Download backup"
+msgstr "下载备份"
+
+msgid "Backup failed."
+msgstr "备份失败。"
+
+msgid "Board identity file backed up from %s."
+msgstr "已从 %s 备份校准分区文件。"
+
+msgid "Backing up the board identity file failed: %s"
+msgstr "备份校准分区文件失败：%s"
+
+msgid "Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one; identity fields and calibration data are included either way. Writing keeps the previous image as /tmp/pon-board-data.*.bin, and both take effect after a reboot."
+msgstr "下载存储目标的完整镜像作为备份，或用上传的镜像整体替换；两种方式都包含身份字段与校准数据。写入时原镜像另存为 /tmp/pon-board-data.*.bin，两者都要重启后生效。"
+
+msgid "Writing replaces the whole image of %s, identity fields and calibration data included. Continue?"
+msgstr "写入将整体替换 %s 的镜像，身份字段与校准数据一并覆盖。是否继续？"
+
+msgid "Invalid OMCI status response"
+msgstr "OMCI 状态响应格式无效"
+
+msgid "Kernel data path configured"
+msgstr "内核数据通路已配置"
+
+msgid "LOID"
+msgstr "LOID"
+
+msgid "LOID authentication"
+msgstr "LOID 认证结果"
+
+msgid "LOID does not exist"
+msgstr "LOID 不存在"
+
+msgid "LOID exists, but the password is incorrect"
+msgstr "LOID 存在，但密码错误"
+
+msgid "LOID is already authenticated by another ONU"
+msgstr "该 LOID 已被其他 ONU 认证"
+
+msgid "Reserved authentication status"
+msgstr "保留的认证状态"
+
+msgid "LOID configured"
+msgstr "已配置 LOID"
+
+msgid "LOID password"
+msgstr "LOID 密码"
+
+msgid "Line mode"
+msgstr "线路模式"
+
+msgid "Driver default"
+msgstr "驱动默认值"
+
+msgid "GPON"
+msgstr "GPON"
+
+msgid "XG-PON"
+msgstr "XG-PON"
+
+msgid "XGS-PON"
+msgstr "XGS-PON"
+
+msgid "EPON 1G/1G"
+msgstr "EPON 1G/1G"
+
+msgid "10G-EPON 10G/1G"
+msgstr "10G-EPON 10G/1G"
+
+msgid "10G-EPON 10G/10G"
+msgstr "10G-EPON 10G/10G"
+
+msgid "Line state"
+msgstr "线路状态"
+
+msgid "Multiple data paths require packet classification"
+msgstr "多条数据通路需要报文分类支持"
+
+msgctxt "PON status boolean"
+msgid "No"
+msgstr "否"
+
+msgid "No PON instances are configured."
+msgstr "没有配置 PON 实例。"
+
+msgid "No device configured"
+msgstr "未配置设备"
+
+msgid "None"
+msgstr "无"
+
+msgid "Not assigned"
+msgstr "未分配"
+
+msgid "Not authenticated"
+msgstr "尚未认证"
+
+msgid "Not reported"
+msgstr "OLT 尚未上报"
+
+msgid "LOID stored but not used"
+msgstr "已保存 LOID，但当前不使用"
+
+msgid "Configured"
+msgstr "已配置"
+
+msgid "ONU"
+msgstr "ONU"
+
+msgid "OMCI VLAN IDs"
+msgstr "OMCI VLAN ID"
+
+msgid "Any VLAN (transparent)"
+msgstr "任意 VLAN（透明传输）"
+
+msgid "OMCI VLAN rules"
+msgstr "OMCI VLAN 规则数"
+
+msgid "OMCI channel online"
+msgstr "OMCI 通道在线"
+
+msgid "OMCI instance: %s (%s)"
+msgstr "OMCI 实例：%s（%s）"
+
+msgid "OMCI interface"
+msgstr "OMCI 接口"
+
+msgid "OMCI parse errors"
+msgstr "OMCI 解析错误"
+
+msgid "OMCI settings"
+msgstr "OMCI 设置"
+
+msgid "ONU identity — OMCI"
+msgstr "ONU 身份 — OMCI"
+
+msgid "ONU identity — EPON OAM"
+msgstr "ONU 身份 — EPON OAM"
+
+msgid "Reported to the OLT over OMCI when the line runs in GPON, XG-PON or XGS-PON mode."
+msgstr "线路为 GPON、XG-PON 或 XGS-PON 模式时，通过 OMCI 上报给 OLT。"
+
+msgid "Reported to the OLT over EPON OAM when the line runs in EPON or 10G-EPON mode."
+msgstr "线路为 EPON 或 10G-EPON 模式时，通过 OAM 上报给 OLT。"
+
+msgid "The ONU identity reported over OMCI is configured on the hardware identity page."
+msgstr "通过 OMCI 上报的 ONU 身份在「硬件身份」页面配置。"
+
+msgid "The ONU identity reported over OAM is configured on the hardware identity page."
+msgstr "通过 OAM 上报的 ONU 身份在「硬件身份」页面配置。"
+
+msgid "Board identity and calibration data stored in flash, and the ONU identity reported to the OLT."
+msgstr "保存在 Flash 中的校准分区与校准数据，以及上报给 OLT 的 ONU 身份。"
+
+msgid "Line details"
+msgstr "线路详情"
+
+msgid "Protocol details"
+msgstr "协议详情"
+
+msgid "Link events"
+msgstr "链路事件"
+
+msgid "Frame counters"
+msgstr "帧计数"
+
+msgid "Registration handshake"
+msgstr "注册过程"
+
+msgid "Optical frontend"
+msgstr "光模块"
+
+msgid "Not configured"
+msgstr "未配置"
+
+msgid "Interface %s"
+msgstr "接口 %s"
+
+msgid "OMCI"
+msgstr "OMCI"
+
+msgid "EPON OAM"
+msgstr "EPON OAM"
+
+msgid "ONU state"
+msgstr "ONU 状态"
+
+msgid "ONU-ID"
+msgstr "ONU-ID"
+
+msgid "Only printable ASCII characters are allowed."
+msgstr "只能使用可打印 ASCII 字符。"
+
+msgid "Operator ID"
+msgstr "运营商 ID"
+
+msgid "Operator-specific result"
+msgstr "运营商自定义结果"
+
+msgid "Optional; sent as all zeros when empty."
+msgstr "可选；留空时按全零上报。"
+
+msgid "Optical signal detected"
+msgstr "已检测到光信号"
+
+msgid "PHY ready"
+msgstr "PHY 就绪"
+
+msgid "PON interface"
+msgstr "PON 接口"
+
+msgid "PON line: %s (%s)"
+msgstr "PON 线路：%s（%s）"
+
+msgid "PON status"
+msgstr "PON 状态"
+
+msgid "QDMA TX packets submitted"
+msgstr "QDMA 已提交发送报文"
+
+msgid "QDMA TX packets completed"
+msgstr "QDMA 已完成发送报文"
+
+msgid "QDMA TX packets dropped"
+msgstr "QDMA 发送丢包"
+
+msgid "QDMA TX mapping misses"
+msgstr "QDMA 发送映射缺失"
+
+msgid "QDMA RX packets delivered"
+msgstr "QDMA 已交付接收报文"
+
+msgid "QDMA RX descriptors dropped"
+msgstr "QDMA 接收描述符丢弃"
+
+msgid "Applied data path entries"
+msgstr "已应用数据路径条目"
+
+msgid "Applied data paths"
+msgstr "已应用数据路径"
+
+msgid "PON data path diagnostics"
+msgstr "PON 数据路径诊断"
+
+msgid "Current registration lifetime"
+msgstr "当前注册持续时间"
+
+msgid "Previous registration lifetime"
+msgstr "上次注册持续时间"
+
+msgid "Last Register status"
+msgstr "最近 Register 状态"
+
+msgid "Last MAC error LLID status"
+msgstr "最近 MAC 异常时 LLID 状态"
+
+msgid "Last MAC error sync time"
+msgstr "最近 MAC 异常时同步时间"
+
+msgid "Last MAC error TX timing"
+msgstr "最近 MAC 异常时发送时序"
+
+msgid "Last MAC error TX MPCP counters"
+msgstr "最近 MAC 异常时发送 MPCP 计数"
+
+msgid "Received OMCI messages"
+msgstr "OMCI 接收报文"
+
+msgid "Receive optical power"
+msgstr "接收光功率"
+
+msgid "Transmit optical power"
+msgstr "发射光功率"
+
+msgid "Optical frontend temperature"
+msgstr "光前端温度"
+
+msgid "Registration-ID"
+msgstr "Registration-ID"
+
+msgid "Authentication mode"
+msgstr "认证方式"
+
+msgid "LOID auth: LOID + optional password. Password auth: registration ID only, no LOID."
+msgstr "LOID 认证：LOID + 可选密码；密码认证：仅注册 ID，无 LOID。"
+
+msgid "Enter the LOID password provided by your ISP. Leave empty if not required."
+msgstr "输入运营商提供的 LOID和密码。密码可留空。。"
+
+msgctxt "PON authentication mode"
+msgid "LOID authentication"
+msgstr "LOID 认证"
+
+msgctxt "PON authentication mode"
+msgid "Password authentication"
+msgstr "Password 认证"
+
+msgid "Leave empty for pure LOID authentication; set it only when the OLT asks for a password next to the LOID."
+msgstr "留空即为纯 LOID 认证；仅在 OLT 要求除 LOID 外另提供密码时填写。"
+
+msgid "Board serial number (SN)"
+msgstr "板级序列号（SN）"
+
+msgid "Read from the board identity image. Edit it under Calibration data below."
+msgstr "从校准分区镜像读取。可在此页下方「校准数据」中修改。"
+
+msgid "Overrides the serial number burned into the board identity. Leave empty to register under the burned value."
+msgstr "覆盖烧录在校准分区中的序列号。留空则按烧录值注册。"
+
+msgid "Storage target"
+msgstr "存储目标"
+
+msgid "The board image carries the identity fields and the calibration data together; there is no calibration-only target."
+msgstr "板级镜像同时承载身份字段与校准数据，不存在只含校准数据的目标。"
+
+msgid "Rejected"
+msgstr "认证失败"
+
+msgid "Serial number (SN)"
+msgstr "序列号（SN）"
+
+msgid "Software version"
+msgstr "软件版本"
+
+msgid "Service ready"
+msgstr "业务已就绪"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "T-CONT entries"
+msgstr "T-CONT 条目"
+
+msgid "The value must contain between %d and %d bytes."
+msgstr "该值必须为 %d 到 %d 字节。"
+
+msgid "The value must contain exactly %d bytes."
+msgstr "该值必须恰好为 %d 字节。"
+
+msgid "Transmitted OMCI messages"
+msgstr "OMCI 发送报文"
+
+msgid "Unable to read OMCI status"
+msgstr "无法读取 OMCI 状态"
+
+msgid "Unable to read PON status"
+msgstr "无法读取 PON 状态"
+
+msgid "Upstream PLOAMu transmitted"
+msgstr "MAC 发送 PLOAMu"
+
+msgid "Automatic ACK PLOAMu transmitted"
+msgstr "其中自动 ACK PLOAMu"
+
+msgid "Downstream XGTC frames"
+msgstr "MAC 接收 XGTC 帧"
+
+msgid "Downstream XGEM frames"
+msgstr "MAC 接收 XGEM 帧"
+
+msgid "Upstream bursts transmitted"
+msgstr "MAC 发送上行突发"
+
+msgid "Upstream XGEM frames"
+msgstr "MAC 发送 XGEM 帧"
+
+msgid "Upstream burst transmitter ready"
+msgstr "上行突发发送已就绪"
+
+msgid "Use 16 hexadecimal digits or VEND followed by 8 hexadecimal digits."
+msgstr "请输入 16 位十六进制，或四字符 VEND 加八位十六进制序列号。"
+
+msgid "Usually the same as the first four characters of the serial number."
+msgstr "通常与序列号前四个字符相同。"
+
+msgid "Vendor ID"
+msgstr "厂商 ID"
+
+msgid "Voice"
+msgstr "语音"
+
+msgid "Voice services carried by the PON uplink."
+msgstr "由 PON 上联承载的语音业务。"
+
+msgid "Waiting for GEM configuration"
+msgstr "等待 GEM 配置"
+
+msgid "Waiting for PLOAM Alloc-ID assignment"
+msgstr "等待 PLOAM 分配 Alloc-ID"
+
+msgid "PLOAM did not assign the Alloc-IDs in time"
+msgstr "PLOAM 超时未分配 Alloc-ID"
+
+msgid "XG-PON configuration"
+msgstr "XG-PON 配置"
+
+msgid "PON line"
+msgstr "PON 线路"
+
+msgid "XGTC state"
+msgstr "XGTC 状态"
+
+msgctxt "PON status boolean"
+msgid "Yes"
+msgstr "是"
+
+msgid "EPON line: %s (%s)"
+msgstr "EPON 线路：%s（%s）"
+
+msgid "PCS synchronized"
+msgstr "PCS 已同步"
+
+msgid "MPCP state"
+msgstr "MPCP 状态"
+
+msgid "LLID"
+msgstr "LLID"
+
+msgid "LLID data path configured"
+msgstr "LLID 数据通路已配置"
+
+msgid "Discovery Gates received"
+msgstr "收到 Discovery Gate"
+
+msgid "Register Request commands submitted"
+msgstr "已提交 Register Request 命令"
+
+msgid "Register messages received"
+msgstr "收到 Register 报文"
+
+msgid "Register ACKs transmitted"
+msgstr "发送 Register ACK"
+
+msgid "Re-register messages"
+msgstr "Re-register 报文"
+
+msgid "Deregister messages"
+msgstr "Deregister 报文"
+
+msgid "Register NACKs"
+msgstr "Register NACK"
+
+msgid "NACK silent time remaining"
+msgstr "NACK 静默剩余时间"
+
+msgid "MPCP timeouts"
+msgstr "MPCP 超时"
+
+msgid "Received MPCP frames"
+msgstr "接收 MPCP 帧"
+
+msgid "Transmitted MPCP frames"
+msgstr "发送 MPCP 帧"
+
+msgid "Received OAM frames"
+msgstr "接收 OAM 帧"
+
+msgid "MAC error conditions"
+msgstr "MAC 错误条件"
+
+msgid "Last MAC error"
+msgstr "最近一次 MAC 错误"
+
+msgid "Waiting for CTC discovery"
+msgstr "等待 CTC 发现"
+
+msgid "CTC version offered"
+msgstr "已上报 CTC 版本"
+
+msgid "Operational"
+msgstr "运行中"
+
+msgid "Transparent"
+msgstr "透明"
+
+msgid "Tag"
+msgstr "标记"
+
+msgid "Translation"
+msgstr "转换"
+
+msgid "N:1 aggregation"
+msgstr "N:1 聚合"
+
+msgid "Trunk"
+msgstr "Trunk"
+
+msgid "Not requested"
+msgstr "OLT 未请求"
+
+msgid "Pending"
+msgstr "等待结果"
+
+msgid "Unable to read OAM status"
+msgstr "无法读取 OAM 状态"
+
+msgid "Invalid OAM status response"
+msgstr "OAM 状态响应格式无效"
+
+msgid "OAM instance: %s (%s)"
+msgstr "OAM 实例：%s（%s）"
+
+msgid "OAM channel online"
+msgstr "OAM 通道在线"
+
+msgid "OAM profile"
+msgstr "OAM 协议"
+
+msgid "CTC discovery"
+msgstr "CTC 发现"
+
+msgid "CTC version"
+msgstr "CTC 版本"
+
+msgid "Received OAM messages"
+msgstr "OAM 接收报文"
+
+msgid "Transmitted OAM messages"
+msgstr "OAM 发送报文"
+
+msgid "OAM parse errors"
+msgstr "OAM 解析错误"
+
+msgid "Information messages"
+msgstr "Information 报文"
+
+msgid "CTC GET requests"
+msgstr "CTC GET 请求"
+
+msgid "CTC SET requests"
+msgstr "CTC SET 请求"
+
+msgid "CTC unsupported requests"
+msgstr "未实现的 CTC 请求"
+
+msgid "CTC VLAN mode"
+msgstr "CTC VLAN 模式"
+
+msgid "CTC VLAN IDs"
+msgstr "CTC VLAN ID"
+
+msgid "EPON OAM settings"
+msgstr "EPON OAM 设置"
+
+msgid "EPON configuration"
+msgstr "EPON 配置"
+
+msgid "OAM interface"
+msgstr "OAM 接口"
+
+msgid "IEEE 802.3ah + CTC"
+msgstr "IEEE 802.3ah + CTC"
+
+msgid "ONU model"
+msgstr "ONU 型号"
+
+msgid "ONU short model"
+msgstr "ONU 短型号"
+
+msgid "Chipset ID"
+msgstr "芯片 ID"
+
+msgid "Use 16 hexadecimal digits."
+msgstr "请输入 16 位十六进制。"
+
+msgid "Ethernet port count"
+msgstr "以太网口数量"
+
+msgid "Hardware ID"
+msgstr "硬件身份"
+
+msgid "Board MAC address"
+msgstr "板载 MAC 地址"
+
+msgid "PON serial number"
+msgstr "PON 序列号"
+
+msgid "Device serial number"
+msgstr "设备序列号"
+
+msgid "PON MAC address"
+msgstr "PON MAC 地址"
+
+msgid "LAN base MAC address"
+msgstr "LAN 基础 MAC 地址"
+
+msgid "Current line mode"
+msgstr "当前线路模式"
+
+msgid "Configured line mode"
+msgstr "配置线路模式"
+
+msgid "Configuration state"
+msgstr "配置状态"
+
+msgid "Not active"
+msgstr "未运行"
+
+msgid "Not available"
+msgstr "无数据"
+
+msgid "Not set"
+msgstr "未设置"
+
+msgid "No storage target is available."
+msgstr "没有可用的存储目标。"
+
+msgid "Line stopped"
+msgstr "线路已停止"
+
+msgid "Takes effect after interface restart"
+msgstr "接口重启后生效"
+
+msgid "Stopped"
+msgstr "已停止"
+
+msgid "Waiting for optical signal"
+msgstr "等待光信号"
+
+msgid "PMA configured"
+msgstr "PMA 已配置"
+
+msgid "Waiting for line synchronization"
+msgstr "等待线路同步"
+
+msgid "Protocol activation in progress"
+msgstr "正在激活线路协议"
+
+msgid "Waiting for discovery"
+msgstr "等待发现"
+
+msgid "Waiting for Discovery Gate"
+msgstr "等待 Discovery Gate"
+
+msgid "Register Request sent"
+msgstr "已发送 Register Request"
+
+msgid "Register received; ACK pending"
+msgstr "已收到 Register，等待发送 ACK"
+
+msgid "Registered"
+msgstr "已注册"
+
+msgid "Registration denied"
+msgstr "注册被拒绝"
+
+msgid "O1 — Initial"
+msgstr "O1 — 初始状态"
+
+msgid "O2-3 — Serial number"
+msgstr "O2-3 — 序列号状态"
+
+msgid "O4 — Ranging"
+msgstr "O4 — 测距状态"
+
+msgid "O5 — Operation"
+msgstr "O5 — 运行状态"
+
+msgid "O7 — Emergency stop"
+msgstr "O7 — 紧急停止"
+
+msgid "Hunt"
+msgstr "正在搜索同步"
+
+msgid "Pre-sync"
+msgstr "预同步"
+
+msgid "Synchronized"
+msgstr "已同步"
+
+msgid "Re-synchronizing"
+msgstr "正在重新同步"
+
+msgid "Completed"
+msgstr "已完成"
+
+msgid "Waiting for Information PDU"
+msgstr "等待 Information PDU"
+
+msgid "OLT did not request authentication"
+msgstr "OLT 未请求认证"
+
+msgid "Not negotiated"
+msgstr "尚未协商"
+
+msgid "Not provisioned"
+msgstr "尚未下发"
+
+msgid "Read failed"
+msgstr "读取失败"
+
+msgid "Read failed."
+msgstr "读取失败。"
+
+msgid "Line mode and registration identity take effect after the PON interface restarts."
+msgstr "线路模式和注册身份在 PON 接口重启后生效。"
+
+msgid "EPON line counters and diagnostics"
+msgstr "EPON 线路计数与诊断"
+
+msgid "ITU-T PON counters and diagnostics"
+msgstr "ITU-T PON 线路计数与诊断"
+
+msgid "Last start error"
+msgstr "最近启动错误"
+
+msgid "PMA calibration stage"
+msgstr "PMA 校准阶段"
+
+msgid "PMA calibration error"
+msgstr "PMA 校准错误"
+
+msgid "Receiver activation count"
+msgstr "接收启动次数"
+
+msgid "PCS profile"
+msgstr "PCS 配置档"
+
+msgid "PCS synchronization losses"
+msgstr "PCS 失步次数"
+
+msgid "PCS recovery attempts"
+msgstr "PCS 恢复次数"
+
+msgid "Line synchronization losses"
+msgstr "线路失步次数"
+
+msgid "Receiver recovery attempts"
+msgstr "接收恢复次数"
+
+msgid "Full PMA reinitializations"
+msgstr "PMA 完整重初始化次数"
+
+msgid "Downstream transport frames"
+msgstr "下行传输帧"
+
+msgid "Downstream GEM frames"
+msgstr "下行 GEM 帧"
+
+msgid "Upstream GEM frames"
+msgstr "上行 GEM 帧"
+
+msgid "Register Requests transmitted by MAC"
+msgstr "MAC 发送 Register Request"
+
+msgid "Register ACKs transmitted by MAC"
+msgstr "MAC 发送 Register ACK"
+
+msgid "OAM frames transmitted by MAC"
+msgstr "MAC 发送 OAM 帧"
+
+msgid "MPCP frames received by MAC"
+msgstr "MAC 接收 MPCP 帧"
+
+msgid "OAM frames received by MAC"
+msgstr "MAC 接收 OAM 帧"
+
+msgid "Last MAC error bitmap"
+msgstr "最近 MAC 错误位图"
+
+msgid "Calibration A0 valid"
+msgstr "A0 校准有效"
+
+msgid "Calibration A2 valid"
+msgstr "A2 校准有效"
+
+msgid "TX_DISABLE asserted"
+msgstr "TX_DISABLE 已拉高"
+
+msgid "Frontend burst TX"
+msgstr "光前端突发发送"
+
+msgid "LLID0"
+msgstr "LLID0"
+
+msgid "LLID0 data path configured"
+msgstr "LLID0 数据通路已配置"
+
+msgid "GTC state"
+msgstr "GTC 状态"
+
+msgid "OMCI: %s (%s)"
+msgstr "OMCI：%s（%s）"
+
+msgid "OMCI counters"
+msgstr "OMCI 计数"
+
+msgid "LOID configured locally"
+msgstr "本机已配置 LOID"
+
+msgid "EPON OAM: %s (%s)"
+msgstr "EPON OAM：%s（%s）"
+
+msgid "LLID OAM channel online"
+msgstr "LLID OAM 通道在线"
+
+msgid "IEEE OAM discovery"
+msgstr "IEEE OAM 发现"
+
+msgid "IEEE OAM discovery completed"
+msgstr "IEEE OAM 发现已完成"
+
+msgid "Configured OAM profile"
+msgstr "配置的 OAM 协议"
+
+msgid "IEEE 802.3ah"
+msgstr "IEEE 802.3ah"
+
+msgid "EPON OAM counters"
+msgstr "EPON OAM 计数"
+
+msgid "Multicast downstream VLAN IDs"
+msgstr "组播下行 VLAN ID"
+
+msgid "IGMP upstream tag action"
+msgstr "IGMP 上行标签动作"
+
+msgid "IGMP upstream VLAN IDs"
+msgstr "IGMP 上行 VLAN ID"
+
+msgid "OLT broadcast keys"
+msgstr "OLT 广播密钥"
+
+msgid "Key index %s"
+msgstr "密钥索引 %s"
+
+msgid "Enhanced security disabled"
+msgstr "增强安全已禁用"
+
+msgid "Unchanged"
+msgstr "保持原样"
+
+msgid "Add tag"
+msgstr "添加标签"
+
+msgid "Replace TCI"
+msgstr "替换 TCI"
+
+msgid "Replace VID"
+msgstr "替换 VID"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "OLT vendor ID"
+msgstr "OLT 厂商 ID"
+
+msgid "OLT equipment ID"
+msgstr "OLT 设备 ID"
+
+msgid "OLT version"
+msgstr "OLT 版本"
+
+msgid "Not applicable"
+msgstr "不适用"
+
+msgid "Not supported"
+msgstr "设备未提供"
+
+msgid "Device unavailable"
+msgstr "设备不可用"
+
+msgid "Invalid status response"
+msgstr "状态响应格式错误"
+
+msgid "Calibration state"
+msgstr "校准状态"
+
+msgid "Loaded"
+msgstr "已加载"
+
+msgid "Missing"
+msgstr "缺失"
+
+msgid "Invalid format"
+msgstr "格式错误"
+
+msgid "Not required"
+msgstr "无需校准"
+
+msgid "Frontend TX gate enabled"
+msgstr "光前端发射门已启用"
+
+msgid "Compatibility"
+msgstr "兼容性"
+
+msgid "Line mode, registration and authentication settings for the PON interfaces. Calibration data is written on the hardware identity page."
+msgstr "PON 接口的线路模式、注册与认证设置。校准数据在「硬件身份」页面写入。"
+
+msgid "OMCC version"
+msgstr "OMCC 版本"
+
+msgid "If the ONU cannot register with a Huawei OLT, try OMCC version 0x86."
+msgstr "使用华为 OLT 且 ONU 无法注册上线时，建议尝试 OMCC 版本 0x86。"
+
+msgid "Disable enhanced security (Class 332)"
+msgstr "禁用增强安全（Class 332）"
+
+msgid "IPv4"
+msgstr "IPv4"
+
+msgid "IPv6"
+msgstr "IPv6"
+
+msgid "How IGMP and the IPv4 multicast traffic of the IPTV service are handled."
+msgstr "IPTV 业务中 IGMP 与 IPv4 组播流量的处理方式。"
+
+msgid "How MLD and the IPv6 multicast traffic of the IPTV service are handled."
+msgstr "IPTV 业务中 MLD 与 IPv6 组播流量的处理方式。"
+
+msgid "Enable IGMP snooping"
+msgstr "启用 IGMP snooping"
+
+msgid "The bridge learns which port joined a group and stops flooding multicast to the remaining ports."
+msgstr "网桥记录哪个端口加入了组播组，不再把组播泛洪到其余端口。"
+
+msgid "Enable IGMP proxy"
+msgstr "启用 IGMP proxy"
+
+msgid "Enable multicast querier"
+msgstr "启用组播查询器"
+
+msgid "Recommended together with snooping: the bridge sends its own general queries so group memberships do not time out and interrupt the stream."
+msgstr "建议与 snooping 同时开启：网桥自己发送通用查询，避免组成员超时导致组播中断。"
+
+msgid "Enable MLD snooping"
+msgstr "启用 MLD snooping"
+
+msgid "Same kernel switch as IGMP snooping: the Linux bridge enables IGMP and MLD snooping together, so turning on either one turns on both."
+msgstr "与 IGMP snooping 共用同一个内核开关：Linux 网桥同时启用 IGMP 与 MLD 侦听，开启其中任一项即两者都开启。"
+
+msgid "Enable MLD proxy"
+msgstr "启用 MLD proxy"
+
+msgid "The ONU joins the IPv6 groups on behalf of the set-top box. omcproxy proxies IGMP and MLD as one instance, so either switch starts the proxy and both must be off to stop it."
+msgstr "由 ONU 代替机顶盒加入 IPv6 组播组。omcproxy 用同一个实例同时代理 IGMP 与 MLD，因此任一个开关打开即启动代理，两个都关闭才停止。"
+
+msgid "Alloc-ID wait timeout"
+msgstr "Alloc-ID 等待超时"
+
+msgid "Seconds a data path may wait for PLOAM to assign its Alloc-ID before it is reported as failed. The ONU keeps waiting afterwards; 0 disables the timeout."
+msgstr "数据通道等待 PLOAM 分配 Alloc-ID 的秒数，超过后报告失败。之后 ONU 仍会继续等待；0 表示不超时。"
+
+msgid "Voice profile"
+msgstr "语音配置"
+
+msgid "Signalling protocol, DTMF transfer and the tone timers shared by every voice port."
+msgstr "信令协议、DTMF 传输方式与各语音端口共用的定时器。"
+
+msgid "Enable voice service"
+msgstr "启用语音业务"
+
+msgid "Voice protocol"
+msgstr "语音协议"
+
+msgid "The signalling protocol spoken with the softswitch."
+msgstr "与软交换通信所用的信令协议。"
+
+msgid "Softswitch SIP"
+msgstr "软交换 SIP"
+
+msgid "IMS SIP"
+msgstr "IMS SIP"
+
+msgid "DTMF transfer mode"
+msgstr "DTMF 转移模式"
+
+msgid "Transparent (in-band)"
+msgstr "透传"
+
+msgid "RFC 2833"
+msgstr "RFC 2833"
+
+msgid "Payload type value"
+msgstr "PayLoad 类型值"
+
+msgid "RTP payload type announced for RFC 2833 telephony events."
+msgstr "RFC 2833 电话事件使用的 RTP 载荷类型。"
+
+msgid "Calling line identification"
+msgstr "来电显示"
+
+msgid "How the calling number is presented on the FXS port."
+msgstr "FXS 口上主叫号码的显示方式。"
+
+msgid "FSK"
+msgstr "FSK"
+
+msgid "Flash hook minimum (ms)"
+msgstr "拍叉时间间隔最小值(毫秒)"
+
+msgid "Shortest hook flash still recognised as a flash."
+msgstr "仍能被识别为拍叉的最短间隔。"
+
+msgid "Flash hook maximum (ms)"
+msgstr "拍叉时间间隔最大值(毫秒)"
+
+msgid "Longest hook flash still recognised as a flash."
+msgstr "仍能被识别为拍叉的最长间隔。"
+
+msgid "The maximum flash hook interval must be greater than the minimum one."
+msgstr "拍叉时间间隔的最大值必须大于最小值。"
+
+msgid "Hanging reminder tone timer (s)"
+msgstr "催挂音时间(秒)"
+
+msgid "How long the on-hook reminder tone plays before the call is released."
+msgstr "催挂音持续播放多久后释放呼叫。"
+
+msgid "Busy tone timer (s)"
+msgstr "忙音时间(秒)"
+
+msgid "How long the busy tone plays before the call is released."
+msgstr "忙音持续播放多久后释放呼叫。"
+
+msgid "No answer timer (s)"
+msgstr "久叫不应时间(秒)"
+
+msgid "How long an unanswered call rings before it is released."
+msgstr "无应答的呼叫振铃多久后被释放。"
+
+msgid "Codec negotiation rule"
+msgstr "Codec 协商规则"
+
+msgid "Which side wins when both ends offer more than one codec."
+msgstr "两端同时提供多个编码时以哪一端为准。"
+
+msgid "Remote first"
+msgstr "远端优先"
+
+msgid "Local first"
+msgstr "本地优先"
+
+msgid "Fax codec"
+msgstr "传真编码方式"
+
+msgid "Codec used to carry fax calls."
+msgstr "承载传真呼叫所用的编码。"
+
+msgid "T.38"
+msgstr "T.38"
+
+msgid "G.711"
+msgstr "G.711"
+
+msgid "H.248"
+msgstr "H.248"
+
+msgid "Basic settings"
+msgstr "基本配置"
+
+msgid "Resources"
+msgstr "资源"
+
+msgid "Advanced settings"
+msgstr "高级配置"
+
+msgid "Heartbeat"
+msgstr "心跳"
+
+msgid "Message encoding"
+msgstr "协议编码类型"
+
+msgid "Wire format of the H.248 messages."
+msgstr "H.248 报文的编码格式。"
+
+msgid "Text (ABNF)"
+msgstr "文本"
+
+msgid "Binary (ASN.1)"
+msgstr "二进制"
+
+msgid "Primary server address"
+msgstr "主服务器地址"
+
+msgid "Address of the media gateway controller."
+msgstr "媒体网关控制器的地址。"
+
+msgid "Primary server port"
+msgstr "主服务器端口"
+
+msgid "Standby server address"
+msgstr "备用服务器地址"
+
+msgid "Address used when the primary media gateway controller cannot be reached."
+msgstr "主媒体网关控制器不可达时使用的地址。"
+
+msgid "Standby server port"
+msgstr "备用服务器端口"
+
+msgid "MG registration mode"
+msgstr "MG 注册方式"
+
+msgid "Identity the media gateway registers with."
+msgstr "媒体网关注册时使用的身份。"
+
+msgid "IP address"
+msgstr "IP 地址"
+
+msgid "MG domain name"
+msgstr "MG 域名"
+
+msgid "Device name"
+msgstr "设备名"
+
+msgid "Domain name"
+msgstr "域名"
+
+msgid "Domain name registered by the media gateway."
+msgstr "媒体网关注册的域名。"
+
+msgid "MG port"
+msgstr "MG 端口"
+
+msgid "Local port the media gateway listens on."
+msgstr "媒体网关本地监听的端口。"
+
+msgid "Authentication method"
+msgstr "授权方式"
+
+msgid "MD5"
+msgstr "MD5"
+
+msgid "Physical termination prefix"
+msgstr "物理端点前缀"
+
+msgid "Prefix prepended to the physical termination identifier of every port."
+msgstr "附加在每个端口物理端点标识前面的前缀。"
+
+msgid "RTP ephemeral termination prefix"
+msgstr "RTP 临时端点前缀"
+
+msgid "Prefix prepended to the identifier of every ephemeral RTP termination."
+msgstr "附加在每个临时 RTP 端点标识前面的前缀。"
+
+msgid "First ephemeral termination"
+msgstr "起始临时端点"
+
+msgid "Ephemeral termination alignment"
+msgstr "临时端点对齐模式"
+
+msgid "Whether the number of ephemeral terminations is padded to a fixed width."
+msgstr "临时端点编号是否补齐到固定位数。"
+
+msgid "Aligned"
+msgstr "对齐"
+
+msgid "Unaligned"
+msgstr "不对齐"
+
+msgid "Ephemeral termination digit length"
+msgstr "临时端点数字长度"
+
+msgid "Number of ephemeral terminations"
+msgstr "临时终结点数目"
+
+msgid "Ephemeral terminations available for RTP streams."
+msgstr "可用于 RTP 流的临时端点数量。"
+
+msgid "Enable ACK messages"
+msgstr "启用 ACK 消息"
+
+msgid "Acknowledge every H.248 transaction with a dedicated message."
+msgstr "每个 H.248 事务都用单独的报文确认。"
+
+msgid "Transaction long timer (ms)"
+msgstr "事务长定时器(毫秒)"
+
+msgid "How long a transaction waits for its final response."
+msgstr "事务等待最终响应的时长。"
+
+msgid "Pending timer (ms)"
+msgstr "PENDING 定时器(毫秒)"
+
+msgid "How long a transaction may stay pending before it is retried."
+msgstr "事务在重试之前可以保持挂起的时长。"
+
+msgid "Retransmission timer (ms)"
+msgstr "重传定时器(毫秒)"
+
+msgid "Delay before a transaction request is sent again."
+msgstr "事务请求重发之前的等待时长。"
+
+msgid "Transaction retransmission count"
+msgstr "事务重传次数"
+
+msgid "Transaction retransmission interval (s)"
+msgstr "事务重传间隔(秒)"
+
+msgid "Transaction retransmission duration (s)"
+msgstr "事务重传时长(秒)"
+
+msgid "How long a transaction is retransmitted before it is given up."
+msgstr "事务在被放弃之前持续重传的时长。"
+
+msgid "Re-registration period (s)"
+msgstr "重注册周期(秒)"
+
+msgid "Heartbeat mode"
+msgstr "心跳模式"
+
+msgid "How the media gateway detects that the softswitch is still reachable."
+msgstr "媒体网关检测软交换是否可达的方式。"
+
+msgid "Off"
+msgstr "关闭"
+
+msgid "Active"
+msgstr "主动"
+
+msgid "Passive"
+msgstr "被动"
+
+msgid "Heartbeat period (s)"
+msgstr "心跳周期(秒)"
+
+msgid "Heartbeat count"
+msgstr "心跳次数"
+
+msgid "Consecutive missed heartbeats before the registration is refreshed."
+msgstr "连续丢失多少次心跳后重新注册。"
+
+msgid "Digit map"
+msgstr "数图配置"
+
+msgid "Number patterns that end dialling and the timers guarding them."
+msgstr "结束拨号的号码模板以及与之配套的定时器。"
+
+msgid "Enable dial plan"
+msgstr "启用拨号计划"
+
+msgid "Matching mode"
+msgstr "匹配模式"
+
+msgid "Whether dialling ends at the shortest or the longest matching pattern."
+msgstr "拨号在最短匹配还是最长匹配处结束。"
+
+msgid "Longest match"
+msgstr "最大匹配"
+
+msgid "Shortest match"
+msgstr "最小匹配"
+
+msgid "Off-hook without dialling timer (s)"
+msgstr "摘机不拨号时间(秒)"
+
+msgid "How long the port waits after going off-hook before it plays the congestion tone."
+msgstr "摘机后未拨号多久开始播放催挂音。"
+
+msgid "Inter-digit short timer (s)"
+msgstr "拨号短定时器(秒)"
+
+msgid "Used while the dialled digits can still start more than one pattern."
+msgstr "已拨号码仍可能匹配多个模板时使用。"
+
+msgid "Inter-digit long timer (s)"
+msgstr "拨号长定时器(秒)"
+
+msgid "Used once the dialled digits can only complete a long number."
+msgstr "已拨号码只能继续组成长号时使用。"
+
+msgid "Dial plan patterns"
+msgstr "拨号模板"
+
+msgid "Dialled number patterns separated by a vertical bar. Leave empty to let the softswitch decide."
+msgstr "以竖线分隔的拨号模板。留空则由软交换决定。"
+
+msgid "Line settings"
+msgstr "线路设置"
+
+msgid "Line termination ID"
+msgstr "线路终端 ID"
+
+msgid "Termination reported to the softswitch for this port."
+msgstr "该端口上报给软交换的终端标识。"
+
+msgid "Transmit gain (dB)"
+msgstr "呼出增益(dB)"
+
+msgid "Gain applied to the audio sent towards the network."
+msgstr "发往网络方向的音频增益。"
+
+msgid "Receive gain (dB)"
+msgstr "呼入增益(dB)"
+
+msgid "Gain applied to the audio received from the network."
+msgstr "来自网络方向的音频增益。"
+
+msgid "Enable echo cancellation"
+msgstr "开启回声抑制"
+
+msgid "Codecs"
+msgstr "编码设置"
+
+msgid "Codecs offered on a voice port, ordered by priority."
+msgstr "语音端口提供的编码，按优先级排序。"
+
+msgid "Voice port"
+msgstr "语音端口"
+
+msgid "Codec"
+msgstr "编码"
+
+msgid "Packetization period (ms)"
+msgstr "打包时长(毫秒)"
+
+msgid "Audio milliseconds carried by a single RTP packet."
+msgstr "单个 RTP 报文承载的音频毫秒数。"
+
+msgid "Priority"
+msgstr "优先级"
+
+msgid "Lower values are offered first."
+msgstr "数值越小越优先。"
+
+msgid "PON"
+msgstr "PON 配置"
+
+msgid "Use an IPv4 address with a prefix length, for example 10.190.0.2/24."
+msgstr "请填写带前缀长度的 IPv4 地址，例如 10.190.0.2/24。"
+
+msgid "The IPTV VLANs are carried by the PON uplink and handed over to a set-top box, to a downstream router or to a multicast-to-unicast relay."
+msgstr "IPTV VLAN 由 PON 上行承载，并透传给机顶盒、下挂路由器，或交给组播转单播中继。"
+
+msgid "Where the operator VLANs are handed over and which VLANs are carried."
+msgstr "运营商 IPTV 一般需要配置业务 VLAN 和组播 VLAN，这里可以绑定从哪个LAN透传出去，以及透传哪些 VLAN。"
+
+msgid "Multicast to unicast"
+msgstr "组播转单播"
+
+msgid "Optional. Relay the multicast streams as HTTP unicast with rtp2httpd so any device on the network can play them."
+msgstr "可选。用第三方软件把组播流转成 HTTP 单播，网络里的任意设备都能直接播放。"
+
+msgid "In set-top box mode the selected LAN port stays out of br-lan for as long as the bridge is enabled."
+msgstr "机顶盒模式下，只要网桥处于启用状态，所选 LAN 口就保持在 br-lan 之外。"
+
+msgid "Hand-over mode"
+msgstr "透传方式"
+
+msgid "Set-top box on a dedicated port"
+msgstr "机顶盒独占一个端口"
+
+msgid "Single cable: VLANs tagged to one port"
+msgstr "单线复用：VLAN 带标签走同一个口"
+
+msgid "Set-top box mode bridges the VLANs to one port. Single cable mode keeps the port in br-lan and hands every VLAN over tagged, so a downstream router can carry internet and IPTV on one cable."
+msgstr "机顶盒模式把 VLAN 桥接到一个端口；单线复用模式让该端口继续留在 br-lan 内，所有 VLAN 带标签透传，下挂路由器用一根网线即可同时承载上网和 IPTV。"
+
+msgid "Trunk port"
+msgstr "Trunk 端口"
+
+msgid "The port stays a member of br-lan; the VLANs below leave it tagged."
+msgstr "该端口仍留在 br-lan 内，下面的 VLAN 以带标签的方式从这里发出。"
+
+msgid "VLANs to hand over"
+msgstr "要透传的 VLAN"
+
+msgid "One 8021q subinterface pair and one bridge per VLAN. Leave empty to use the service VLAN plus the multicast and IGMP VLANs configured below."
+msgstr "每个 VLAN 生成一对 8021q 子接口和一个独立网桥。留空时使用下面配置的业务 VLAN 以及组播、IGMP VLAN。"
+
+msgid "The ONU joins the groups on behalf of the set-top box instead of bridging the reports. Set-top box mode only: a proxy has to terminate the VLAN, which single cable mode does not do."
+msgstr "由 ONU 代替机顶盒加入组播组，而不是直接透传成员报告。仅机顶盒模式可用：代理必须终结 VLAN，而单线复用模式不做终结。"
+
+msgid "Relay multicast as HTTP unicast"
+msgstr "把组播中继为 HTTP 单播"
+
+msgid "rtp2httpd joins the groups on the ONU and serves the streams over HTTP, so phones and players can watch without IGMP."
+msgstr "rtp2httpd 在 ONU 上加入组播组并以 HTTP 提供码流，手机和播放器无需 IGMP 即可观看。"
+
+msgid "HTTP port"
+msgstr "HTTP 端口"
+
+msgid "Listening port of the relay, also set on the rtp2httpd page."
+msgstr "中继的监听端口，rtp2httpd 页面上使用同一个端口。"
+
+msgid "Relay address"
+msgstr "中继地址"
+
+msgid "Optional. An address in the operator IPTV network, needed for the ONU to join the groups itself. Leave empty to keep the bridge unaddressed."
+msgstr "可选。运营商 IPTV 网络内的地址，ONU 自行加入组播组时需要。留空则网桥不配置地址。"
+
+msgid "Upstream device"
+msgstr "上游设备"
+
+msgid "The bridge the relay listens on. It is the bridge of the relay VLAN in single cable mode, otherwise the bridge carrying the multicast VLAN, or the proxy uplink when the proxy terminates it. The relay listens on the bridge, never on one of its member ports."
+msgstr "中继监听的网桥。单线复用模式下是中继 VLAN 对应的网桥；其它模式下是承载组播 VLAN 的网桥，代理终结该 VLAN 时则为代理的上联口。中继监听的是网桥本身，而不是它的某个成员端口。"
+
+msgid "Relay settings"
+msgstr "中继程序设置"
+
+msgid "Channels, fast channel change and worker tuning stay on the rtp2httpd page. udpxy and msd_lite are alternative relays with their own pages; they are not configured here and their shortcuts only work when the matching package is installed."
+msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的页面：它们不由此处配置，且只有安装了对应软件包时跳转才可用。"
+
+msgid "Fax negotiation mode"
+msgstr "传真协商模式"
+
+msgid "How the fax call is negotiated when the G.711 codec is used."
+msgstr "使用 G.711 编码时传真呼叫的协商方式。"
+
+msgid "T.30 full control"
+msgstr "T.30 全控"
+
+msgid "T.30 auto negotiation"
+msgstr "T.30 自协商"
+
+msgid "Synchronize the phone clock"
+msgstr "同步话机时间"
+
+msgid "Send the gateway time to the connected phone."
+msgstr "把网关时间下发给所连接的话机。"
+
+msgid "Media gateway settings reported to the softswitch."
+msgstr "上报给软交换的媒体网关参数。"
+
+msgid "SIP"
+msgstr "SIP"
+
+msgid "Session Initiation Protocol settings used with the softswitch and IMS SIP voice protocols."
+msgstr "软交换 SIP 与 IMS SIP 语音协议使用的 SIP 参数。"
+
+msgid "Servers"
+msgstr "服务器"
+
+msgid "Standby servers"
+msgstr "备用服务器"
+
+msgid "Proxy server"
+msgstr "代理服务器"
+
+msgid "Address of the SIP proxy, an IP address or a domain name."
+msgstr "SIP 代理服务器地址，可以是 IP 地址或域名。"
+
+msgid "Proxy server port"
+msgstr "代理服务器端口"
+
+msgid "Proxy server transport"
+msgstr "代理服务器承载协议"
+
+msgid "Registrar server"
+msgstr "注册服务器"
+
+msgid "Address of the SIP registrar, an IP address or a domain name."
+msgstr "SIP 注册服务器地址，可以是 IP 地址或域名。"
+
+msgid "Registrar server port"
+msgstr "注册服务器端口"
+
+msgid "Registrar server transport"
+msgstr "注册服务器承载协议"
+
+msgid "Outbound proxy server"
+msgstr "出局代理服务器"
+
+msgid "Address of the outbound proxy. Leave empty to send requests straight to the proxy server."
+msgstr "出向代理服务器地址。留空则把请求直接发给代理服务器。"
+
+msgid "Outbound proxy port"
+msgstr "出局代理端口"
+
+msgid "Home gateway domain"
+msgstr "归属网关域"
+
+msgid "Domain the gateway registers with, an IP address or a domain name."
+msgstr "网关注册时所用的域，可以是 IP 地址或域名。"
+
+msgid "Home gateway domain port"
+msgstr "归属网关域端口"
+
+msgid "Home gateway domain transport"
+msgstr "归属网关域传输协议"
+
+msgid "Standby proxy server"
+msgstr "备用代理服务器"
+
+msgid "Address used when the SIP proxy cannot be reached."
+msgstr "SIP 代理服务器不可达时使用的地址。"
+
+msgid "Standby proxy server port"
+msgstr "备用代理服务器端口"
+
+msgid "Standby proxy server transport"
+msgstr "备用代理服务器承载协议"
+
+msgid "Standby registrar server"
+msgstr "备用注册服务器"
+
+msgid "Address used when the SIP registrar cannot be reached."
+msgstr "SIP 注册服务器不可达时使用的地址。"
+
+msgid "Standby registrar server port"
+msgstr "备用注册服务器端口"
+
+msgid "Standby registrar server transport"
+msgstr "备用注册服务器承载协议"
+
+msgid "Standby outbound proxy server"
+msgstr "备用出局代理服务器"
+
+msgid "Address of the outbound proxy used when the primary one cannot be reached."
+msgstr "主用出向代理不可达时使用的出向代理地址。"
+
+msgid "Standby outbound proxy port"
+msgstr "备用出局代理端口"
+
+msgid "Signalling DSCP"
+msgstr "信令 DSCP"
+
+msgid "DSCP mark of the SIP signalling packets."
+msgstr "SIP 信令报文的 DSCP 标记。"
+
+msgid "Media DSCP"
+msgstr "媒体 DSCP"
+
+msgid "DSCP mark of the voice packets."
+msgstr "语音报文的 DSCP 标记。"
+
+msgid "Registration period (s)"
+msgstr "注册周期(秒)"
+
+msgid "How often the gateway registers again."
+msgstr "网关重新注册的时间间隔。"
+
+msgid "Registration retry period (s)"
+msgstr "注册重试周期(秒)"
+
+msgid "How soon a failed registration is retried."
+msgstr "注册失败后隔多久重试。"
+
+msgid "Session update period (min)"
+msgstr "会话更新周期(分钟)"
+
+msgid "How often an established call refreshes its session."
+msgstr "已建立的呼叫刷新会话的时间间隔。"
+
+msgid "Minimum session update period (min)"
+msgstr "最小会话更新周期(分钟)"
+
+msgid "Shortest session refresh interval accepted from the server."
+msgstr "接受服务器下发的最小会话刷新间隔。"
+
+msgid "Enable heartbeat"
+msgstr "启用心跳"
+
+msgid "Detect whether the server is still reachable while no call is up."
+msgstr "在没有通话时检测服务器是否仍然可达。"
+
+msgid "Heartbeat timeout count"
+msgstr "心跳超时次数"
+
+msgid "Heartbeat timeouts before the registration is refreshed."
+msgstr "触发重新注册前允许的心跳超时次数。"
+
+msgid "Gain, echo cancellation and the identity of every FXS port. The two shipped sections are the two FXS ports of the device; the authentication credentials apply to the SIP voice protocols."
+msgstr "每个 FXS 端口的增益、回声抑制与身份标识。默认的两个配置段对应设备的两个 FXS 端口；鉴权凭据用于 SIP 语音协议。"
+
+msgid "Authentication user name"
+msgstr "鉴权用户名"
+
+msgid "User name the line authenticates with."
+msgstr "该线路用于认证的用户名。"
+
+msgid "Authentication password"
+msgstr "鉴权密码"
+
+msgid "Phone number"
+msgstr "电话号码"
+
+msgid "Number presented to the called party."
+msgstr "呈现给被叫方的号码。"
+
+msgid "Relay VLAN"
+msgstr "中继 VLAN"
+
+msgid "Optional. Single cable mode only: which of the handed-over VLANs the relay listens on. Leave empty to follow the multicast VLAN, or the service VLAN when no separate multicast VLAN is set."
+msgstr "可选。仅单线复用模式可用：指定中继监听已透传 VLAN 中的哪一个。留空时跟随组播 VLAN；未配置独立组播 VLAN 时则跟随业务 VLAN。"
+
+msgid "Hand this VLAN over on the trunk first: only the handed-over VLANs get a bridge for the relay to listen on."
+msgstr "请先在 trunk 上透传该 VLAN：只有已透传的 VLAN 才会生成网桥供中继监听。"
+
+msgid "Internet"
+msgstr "上网"
+
+msgid "The internet service carried by the PON uplink: either handed over as a bridge so a downstream router dials, or dialled by the ONT itself."
+msgstr "由 PON 上联承载的上网业务：可以桥接给下游路由器自行拨号，也可以由光猫自身完成 PPPoE 拨号。"
+
+msgid "With the service off, no VLAN subinterface and no dialling interface is written, and the stock WAN interfaces of the network page are put back."
+msgstr "关闭时不写任何 VLAN 子接口与拨号接口，网络页原有的 WAN 接口会被放回原位。"
+
+msgid "Internet mode"
+msgstr "上网方式"
+
+msgid "Bridged hands the operator VLAN to your own router. Dialled lets the ONT terminate the PPPoE session and route for the LAN."
+msgstr "桥接把运营商 VLAN 直接交给你的路由器；系统拨号则由光猫终结 PPPoE 会话并为 LAN 做路由。"
+
+msgid "Bridged (a downstream router dials)"
+msgstr "桥接（下游路由器拨号）"
+
+msgid "Dialled by the ONT (PPPoE)"
+msgstr "系统拨号（光猫 PPPoE 拨号）"
+
+
+msgid "Internet VLAN"
+msgstr "上网 VLAN"
+
+msgid "The operator VLAN carrying the internet service. It becomes an 8021q subinterface of the uplink, never a member of br-lan."
+msgstr "承载上网业务的运营商 VLAN。它成为上联设备的 8021q 子接口，不会加入 br-lan。"
+
+msgid "LAN ports"
+msgstr "LAN 口"
+
+msgid "The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind."
+msgstr "选中的端口会离开 br-lan 并加入上网网桥，光猫仍可通过剩下的端口管理。"
+
+msgid "Pick at least one LAN port for the internet bridge."
+msgstr "上网网桥至少要选择一个 LAN 口。"
+
+msgid "This port carries the IPTV set-top box bridge; free it on the IPTV page first."
+msgstr "该端口已用于 IPTV 机顶盒网桥，请先在 IPTV 页面释放。"
+
+msgid "Also carry native IPv4/IPv6"
+msgstr "同时透传原生 IPv4/IPv6"
+
+msgid "Turn this on when the operator serves IPoE instead of PPPoE, otherwise only the PPPoE EtherTypes 0x8863 and 0x8864 are let through towards the uplink."
+msgstr "运营商用 IPoE 而非 PPPoE 时打开。否则只有 0x8863 与 0x8864 两种 PPPoE 以太类型允许去往上联口。"
+
+msgid "IP protocol version"
+msgstr "IP 协议版本"
+
+msgid "IPv4/IPv6"
+msgstr "IPv4/IPv6 双栈"
+
+msgid "Anything but IPv4 also writes wan6 as a DHCPv6 client on the dialled session."
+msgstr "只要不是纯 IPv4，就会额外写 wan6，在已拨通的会话上跑 DHCPv6 客户端。"
+
+msgid "PPPoE user name"
+msgstr "PPPoE 用户名"
+
+msgid "User name assigned by the operator."
+msgstr "运营商分配的用户名。"
+
+msgid "PPPoE password"
+msgstr "PPPoE 密码"
+
+msgid "MTU of the PPPoE interface, one PPPoE header below the Ethernet MTU."
+msgstr "PPPoE 接口的 MTU，比以太网 MTU 少一个 PPPoE 头部开销。"
+
+msgid "MTU"
+msgstr "MTU"
+
+msgid "Derived devices"
+msgstr "生成的设备"
+
+msgid "What internet-apply builds. Both are 15 characters or shorter, which is what netifd and the kernel accept."
+msgstr "由 internet-apply 生成。两个名字都不超过 15 个字符，这是 netifd 与内核能接受的上限。"
+
+msgid "Hardware offload"
+msgstr "硬件卸载"
+
+msgid "Turns on netfilter flow offloading and hardware offloading, which is the only path to the Airoha PPE on this platform: airoha_eth takes the flows from nftables and the NPU forwards them. The firewall settings made by hand are restored when the switch is turned off."
+msgstr "打开 netfilter 流卸载与硬件卸载，这是本平台通往 Airoha PPE 的唯一通道：airoha_eth 从 nftables 接过流表，NPU 负责转发。关闭该开关会恢复此前手工设置的防火墙值。"
+
+msgid "Voice network"
+msgstr "语音业务网络"
+
+msgid "The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and stays out of br-lan, so the voice traffic keeps to its own firewall zone."
+msgstr "承载语音业务的 IP 网络。它是 PON 上联的 8021q VLAN，不接入 br-lan，因此语音流量始终留在自己的防火墙区域里。"
+
+msgid "Enable voice network"
+msgstr "启用语音业务网络"
+
+msgid "With the network off, no VLAN subinterface and no voice interface are written and no firewall zone is created."
+msgstr "关闭后不会写入 VLAN 子接口与语音接口，也不会创建防火墙区域。"
+
+msgid "Physical PON device carrying the voice VLAN, normally pon0."
+msgstr "承载语音 VLAN 的物理 PON 设备，通常为 pon0。"
+
+msgid "VLAN ID"
+msgstr "VLAN ID"
+
+msgid "VLAN carrying the voice service. The interface becomes <uplink>.<VLAN ID>."
+msgstr "承载语音业务的 VLAN。接口名会变成 <上联设备>.<VLAN ID>。"
+
+msgid "This VLAN carries the internet service; pick a different one for voice."
+msgstr "该 VLAN 已被上网业务占用，请为语音另选一个。"
+
+msgid "This VLAN carries the IPTV service; pick a different one for voice."
+msgstr "该 VLAN 已被 IPTV 业务占用，请为语音另选一个。"
+
+msgid "IP assignment"
+msgstr "IP 获取方式"
+
+msgid "How the voice interface obtains its address."
+msgstr "语音接口获取地址的方式。"
+
+msgid "Static"
+msgstr "静态"
+
+msgid "Address of the voice interface on the voice VLAN."
+msgstr "语音接口在语音 VLAN 上的地址。"
+
+msgid "Subnet mask"
+msgstr "子网掩码"
+
+msgid "Gateway"
+msgstr "网关"
+
+msgid "Default gateway of the voice VLAN."
+msgstr "语音 VLAN 的默认网关。"
+
+msgid "DNS servers"
+msgstr "DNS 服务器"
+
+msgid "Comma-separated DNS servers used by the voice service."
+msgstr "语音服务使用的 DNS 服务器，多个用逗号分隔。"
+
+msgid "Voice interface"
+msgstr "语音接口"
+
+msgid "The device voice-apply creates. It is never added to br-lan."
+msgstr "由 voice-apply 生成的设备，绝不加入 br-lan。"
+
+msgid "Signalling protocol, DTMF transfer and the tone timers shared by every voice port. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and each FXS port is bound to a SIP account through its entry in the line settings below, with the codec entries defining which codecs it offers and in which order."
+msgstr "各语音端口共用的信令协议、DTMF 传输与各类提示音时长。上方的语音业务网络只负责提供 IP 连通性；注册与呼叫控制由语音服务完成，每个 FXS 端口通过与下方线路设置中的对应条目绑定到 SIP 账号，编码条目则决定它提供哪些编码以及优先级顺序。"
+
+msgid "DHCP"
+msgstr "DHCP"
+
+msgid "H.248 media gateway"
+msgstr "H.248 媒体网关"
+
+msgid "Parameters exchanged with the media gateway controller. This card is hidden automatically when the voice protocol is a SIP flavour."
+msgstr "与媒体网关控制器交换的参数。当语音协议为 SIP 类时，本卡片会自动隐藏。"
+
+msgid "SIP voice protocol"
+msgstr "SIP 语音协议"
+
+msgid "Softswitch and IMS SIP signalling parameters. This card is hidden automatically when the voice protocol is H.248."
+msgstr "软交换与 IMS 的 SIP 信令参数。当语音协议为 H.248 时，本卡片会自动隐藏。"

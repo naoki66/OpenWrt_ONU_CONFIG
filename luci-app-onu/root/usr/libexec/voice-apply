@@ -1,0 +1,282 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# voice-apply - turn the "network" section of /etc/config/voice into network
+# and firewall configuration.
+#
+# The voice service talks SIP over an IP network of its own, handed over by the
+# operator as a VLAN of the PON uplink. The carrier is deliberately modelled on
+# the internet page:
+#
+#   - the VLAN is an 8021q subinterface of the physical PON device
+#     (pon0.<vid>), never a br-lan member. Bridging the voice VLAN into the
+#     LAN would mix the two planes and defeat the isolation the voice zone
+#     exists for;
+#   - the subinterface backs one interface, "voice", which is either a DHCP
+#     client or a statically addressed link for the ONT itself;
+#   - the interface is put in a firewall zone of its own ("voice") with input
+#     and forward dropped and output accepted, so only the traffic the voice
+#     service initiates is let out and nothing from the voice VLAN can reach
+#     the LAN or the management plane.
+#
+# The section is written to the managed names below. Removing the page's
+# configuration is a single sweep over network.voice* and firewall.voice*, so
+# switching the network off leaves no dangling reference behind.
+#
+# The IP connectivity is all this script provides. SIP registration and call
+# control are the voice service's job; the FXS ports are bound to SIP accounts
+# through voice.line and voice.codec, which this script never touches.
+
+. /lib/functions.sh
+
+ACTION="${1:-reload}"
+
+# Names of the network sections this page owns. The firewall zone name is the
+# literal string the firmware expects the operator to recognise as "voice".
+DEV_PREFIX='voice'		# managed network sections are voice*
+ZONE_SECTION='luci_voice_zone'
+ZONE_NAME='voice'
+IFACE='voice'
+
+fail() {
+	logger -t voice "$*"
+	echo "voice: $*" >&2
+	exit 1
+}
+
+warn() {
+	logger -t voice "$*"
+}
+
+validate_ifname() {
+	local name="$1"
+
+	[ -n "$name" ] || return 1
+	[ "${#name}" -le 15 ] || return 1
+
+	case "$name" in
+		*[!A-Za-z0-9_.:-]*) return 1 ;;
+	esac
+
+	return 0
+}
+
+validate_vlan() {
+	local vid="$1"
+
+	case "$vid" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+
+	[ "$vid" -ge 1 ] && [ "$vid" -le 4094 ]
+}
+
+load_voice_network() {
+	config_load voice
+
+	config_get_bool VN_ENABLED network enabled 0
+	config_get VN_UPLINK network uplink pon0
+	config_get VN_VLAN network vlan_id
+	config_get VN_PROTO network proto dhcp
+	config_get VN_IPADDR network ipaddr
+	config_get VN_NETMASK network netmask
+	config_get VN_GATEWAY network gateway
+	config_get VN_DNS network dns
+}
+
+# An interface name has to stay within 15 characters, which the kernel enforces
+# for network devices; <uplink>.<vid> of a sane uplink never breaks it, but a
+# hand-typed uplink could.
+voice_device() {
+	printf '%s.%s' "$VN_UPLINK" "$VN_VLAN"
+}
+
+validate_config() {
+	[ "$VN_ENABLED" -eq 1 ] || return 0
+
+	validate_ifname "$VN_UPLINK" || fail "Invalid uplink device name"
+	[ -e "/sys/class/net/$VN_UPLINK" ] || fail "Uplink device $VN_UPLINK was not found"
+	validate_vlan "$VN_VLAN" || fail "The voice VLAN must be between 1 and 4094"
+
+	validate_ifname "$(voice_device)" ||
+		fail "The derived device name $(voice_device) is not a valid interface name"
+
+	case "$VN_PROTO" in
+		dhcp)
+			;;
+		static)
+			[ -n "$VN_IPADDR" ] || fail "A static voice interface needs an IP address"
+			[ -n "$VN_NETMASK" ] || fail "A static voice interface needs a subnet mask"
+			;;
+		*)
+			fail "Unknown IP assignment protocol $VN_PROTO"
+			;;
+	esac
+}
+
+# Two services must not share a VLAN: they would end up in one firewall zone
+# and defeat the isolation both zones exist for. The same rule is enforced in
+# the UI, this is the backstop for a hand-edited config.
+check_vlan_conflict() {
+	[ "$VN_ENABLED" -eq 1 ] || return 0
+
+	local net_enabled net_vlan iptv_enabled iptv_vlan
+	local iptv_service_vlan iptv_multicast_vlan iptv_igmp_vlan
+
+	config_load internet
+	config_get_bool net_enabled config enabled 0
+	config_get net_vlan config vlan
+	if [ "$net_enabled" -eq 1 ] && [ "$VN_VLAN" = "$net_vlan" ]; then
+		fail "VLAN $VN_VLAN already carries the internet service"
+	fi
+
+	config_load iptv
+	config_get_bool iptv_enabled config enabled 0
+	if [ "$iptv_enabled" -eq 1 ]; then
+		config_get iptv_service_vlan config service_vlan
+		config_get iptv_multicast_vlan config multicast_vlan
+		config_get iptv_igmp_vlan config igmp_vlan
+
+		for iptv_vlan in "$iptv_service_vlan" "$iptv_multicast_vlan" "$iptv_igmp_vlan"; do
+			[ -n "$iptv_vlan" ] || continue
+			[ "$VN_VLAN" = "$iptv_vlan" ] &&
+				fail "VLAN $VN_VLAN already carries the IPTV service"
+		done
+	fi
+}
+
+#
+# Managed sections
+#
+# Everything this page writes lives under network.voice* / firewall.luci_voice*,
+# which makes removing it one sweep and leaves the rest of the configuration
+# untouched.
+#
+remove_managed_network() {
+	local section
+
+	for section in $(uci -q show network 2>/dev/null | \
+		sed -n 's/^network\.\(voice[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		uci -q delete "network.$section"
+	done
+}
+
+remove_managed_firewall() {
+	local section
+
+	for section in $(uci -q show firewall 2>/dev/null | \
+		sed -n 's/^firewall\.\(luci_voice[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		uci -q delete "firewall.$section"
+	done
+}
+
+# The interface must not be a member of any other zone; a device can sit in one
+# zone only and a stale reference would make fw4 refuse the configuration.
+detach_from_zones() {
+	local zone current
+
+	for zone in $(uci -q show firewall 2>/dev/null | \
+		sed -n 's/^firewall\.\([A-Za-z0-9_]*\)=zone$/\1/p'); do
+		[ "$zone" = "$ZONE_SECTION" ] && continue
+		for current in $(uci -q get "firewall.$zone.network"); do
+			[ "$current" = "$IFACE" ] &&
+				uci -q del_list "firewall.$zone.network=$IFACE"
+		done
+	done
+}
+
+#
+# Topology
+#
+write_network_config() {
+	remove_managed_network
+
+	if [ "$VN_ENABLED" -ne 1 ]; then
+		uci commit network || fail "Cannot save network configuration"
+		return 0
+	fi
+
+	local dev
+	dev="$(voice_device)"
+
+	# The 8021q subinterface. "ifname" is the physical PON device, "name" the
+	# device handed to netifd; the two differ on purpose.
+	uci set network.voice_device='device'
+	uci set network.voice_device.type='8021q'
+	uci set network.voice_device.ifname="$VN_UPLINK"
+	uci set network.voice_device.vid="$VN_VLAN"
+	uci set network.voice_device.name="$dev"
+
+	# The interface the voice service binds to. It never joins br-lan.
+	uci set network.$IFACE='interface'
+	uci set network.$IFACE.device="$dev"
+	uci set network.$IFACE.proto="$VN_PROTO"
+	uci set network.$IFACE.auto='1'
+
+	if [ "$VN_PROTO" = 'static' ]; then
+		uci set network.$IFACE.ipaddr="$VN_IPADDR"
+		uci set network.$IFACE.netmask="$VN_NETMASK"
+
+		if [ -n "$VN_GATEWAY" ]; then
+			uci set network.$IFACE.gateway="$VN_GATEWAY"
+		else
+			uci -q delete "network.$IFACE.gateway"
+		fi
+
+		if [ -n "$VN_DNS" ]; then
+			uci set network.$IFACE.dns="$VN_DNS"
+		else
+			uci -q delete "network.$IFACE.dns"
+		fi
+	else
+		uci -q delete "network.$IFACE.ipaddr"
+		uci -q delete "network.$IFACE.netmask"
+		uci -q delete "network.$IFACE.gateway"
+		uci -q delete "network.$IFACE.dns"
+	fi
+
+	uci commit network || fail "Cannot save network configuration"
+}
+
+# The zone is written with the literal name "voice" so the operator recognises
+# it, under a section id of its own to keep the managed sweep exact.
+write_firewall_config() {
+	remove_managed_firewall
+	detach_from_zones
+
+	if [ "$VN_ENABLED" -eq 1 ]; then
+		uci set "firewall.$ZONE_SECTION"='zone'
+		uci set "firewall.$ZONE_SECTION.name"="$ZONE_NAME"
+		uci set "firewall.$ZONE_SECTION.input"='DROP'
+		uci set "firewall.$ZONE_SECTION.output"='ACCEPT'
+		uci set "firewall.$ZONE_SECTION.forward"='DROP'
+		uci -q delete "firewall.$ZONE_SECTION.network"
+		uci add_list "firewall.$ZONE_SECTION.network"="$IFACE"
+	fi
+
+	uci commit firewall || fail "Cannot save firewall configuration"
+}
+
+reload_runtime() {
+	[ "$ACTION" = 'boot' ] && return 0
+
+	# network first, then firewall: the zone has to see the interface when the
+	# firewall builds its ruleset.
+	ubus call network reload >/dev/null || fail "netifd reload failed"
+	/etc/init.d/firewall reload || fail "firewall4 reload failed"
+}
+
+load_voice_network
+validate_config
+check_vlan_conflict
+write_network_config
+write_firewall_config
+reload_runtime
+
+if [ "$VN_ENABLED" -eq 1 ]; then
+	logger -t voice "Voice network applied (vlan=$VN_VLAN, proto=$VN_PROTO, device=$(voice_device))"
+else
+	logger -t voice "Voice network disabled"
+fi
+
+exit 0
