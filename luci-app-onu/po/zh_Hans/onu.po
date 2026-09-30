@@ -1211,8 +1211,8 @@ msgstr "数据通道等待 PLOAM 分配 Alloc-ID 的秒数，超过后报告失�
 msgid "Voice profile"
 msgstr "语音配置"
 
-msgid "Signalling protocol, DTMF transfer and the tone timers shared by every voice port."
-msgstr "信令协议、DTMF 传输方式与各语音端口共用的定时器。"
+msgid "Signalling protocol, DTMF transfer and the tone timers of the FXS port, together with the account it registers with. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and the codec entries below define which codecs the port offers and in which order."
+msgstr "FXS 端口的信令协议、DTMF 传输方式与各类定时器，以及它注册所用的账号。上方的语音业务网络只负责提供 IP 连通性；注册与呼叫控制由语音服务完成，下方的编码条目决定该端口提供哪些编码以及优先级顺序。"
 
 msgid "Enable voice service"
 msgstr "启用语音业务"
@@ -1532,14 +1532,26 @@ msgstr "拨号模板"
 msgid "Dialled number patterns separated by a vertical bar. Leave empty to let the softswitch decide."
 msgstr "以竖线分隔的拨号模板。留空则由软交换决定。"
 
-msgid "Line settings"
-msgstr "线路设置"
+msgid "FXS device"
+msgstr "FXS 设备"
 
-msgid "Line termination ID"
-msgstr "线路终端 ID"
+msgid "The only FXS port of the board. It is fixed by the hardware and cannot be changed."
+msgstr "本机唯一的 FXS 端口，由硬件固定，不可更改。"
 
-msgid "Termination reported to the softswitch for this port."
-msgstr "该端口上报给软交换的终端标识。"
+msgid "PCM channel"
+msgstr "PCM 通道"
+
+msgid "PCM channel the FXS port is wired to."
+msgstr "该 FXS 端口所连接的 PCM 通道。"
+
+msgid "Termination ID"
+msgstr "终端 ID"
+
+msgid "Termination reported to the softswitch for the FXS port."
+msgstr "该 FXS 端口上报给软交换的终端标识。"
+
+msgid "User name the FXS port authenticates with."
+msgstr "该 FXS 端口用于鉴权的用户名。"
 
 msgid "Transmit gain (dB)"
 msgstr "呼出增益(dB)"
@@ -1556,14 +1568,14 @@ msgstr "来自网络方向的音频增益。"
 msgid "Enable echo cancellation"
 msgstr "开启回声抑制"
 
+msgid "Cancel the echo the phone side feeds back into the network."
+msgstr "抑制话机侧回馈到网络方向的回声。"
+
 msgid "Codecs"
 msgstr "编码设置"
 
-msgid "Codecs offered on a voice port, ordered by priority."
-msgstr "语音端口提供的编码，按优先级排序。"
-
-msgid "Voice port"
-msgstr "语音端口"
+msgid "Codecs offered by the FXS port, ordered by priority."
+msgstr "FXS 端口提供的编码，按优先级排序。"
 
 msgid "Codec"
 msgstr "编码"
@@ -1817,14 +1829,8 @@ msgstr "心跳超时次数"
 msgid "Heartbeat timeouts before the registration is refreshed."
 msgstr "触发重新注册前允许的心跳超时次数。"
 
-msgid "Gain, echo cancellation and the identity of every FXS port. The two shipped sections are the two FXS ports of the device; the authentication credentials apply to the SIP voice protocols."
-msgstr "每个 FXS 端口的增益、回声抑制与身份标识。默认的两个配置段对应设备的两个 FXS 端口；鉴权凭据用于 SIP 语音协议。"
-
 msgid "Authentication user name"
 msgstr "鉴权用户名"
-
-msgid "User name the line authenticates with."
-msgstr "该线路用于认证的用户名。"
 
 msgid "Authentication password"
 msgstr "鉴权密码"
@@ -1988,9 +1994,6 @@ msgstr "语音接口"
 
 msgid "The device voice-apply creates. It is never added to br-lan."
 msgstr "由 voice-apply 生成的设备，绝不加入 br-lan。"
-
-msgid "Signalling protocol, DTMF transfer and the tone timers shared by every voice port. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and each FXS port is bound to a SIP account through its entry in the line settings below, with the codec entries defining which codecs it offers and in which order."
-msgstr "各语音端口共用的信令协议、DTMF 传输与各类提示音时长。上方的语音业务网络只负责提供 IP 连通性；注册与呼叫控制由语音服务完成，每个 FXS 端口通过与下方线路设置中的对应条目绑定到 SIP 账号，编码条目则决定它提供哪些编码以及优先级顺序。"
 
 msgid "DHCP"
 msgstr "DHCP"

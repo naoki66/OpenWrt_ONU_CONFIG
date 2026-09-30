@@ -11,6 +11,16 @@ var STYLESHEET = 'view/onu/onu.css';
 var PROTOCOL_OPTION = 'voice.config.protocol';
 
 /*
+ * The board carries a single FXS port, so there is no port to pick and no
+ * line card: the port is identified by these three hardware facts and its
+ * parameters live in the voice profile. Naming them here keeps the page and
+ * the driver node the voice service opens readable against each other.
+ */
+var FXS_DEVICE = '/dev/en75xx-fxs0';
+var FXS_PCM_CHANNEL = 'PCM0';
+var FXS_TERMINATION_ID = 'EN75XX/0';
+
+/*
  * The PON views follow luci-theme-argon: cards, form rows and buttons all come
  * from the theme. Only the small helper stylesheet is ours.
  */
@@ -30,13 +40,6 @@ function ensureStylesheet() {
 		'href': href,
 		'data-pon-stylesheet': ''
 	}));
-}
-
-/* The FXS ports are the sections of type "line"; codecs point back at them. */
-function listVoicePorts() {
-	return uci.sections('voice', 'line').map(function(line) {
-		return line['.name'];
-	});
 }
 
 function validateFlashHookRange(sectionId, value) {
@@ -220,7 +223,7 @@ return view.extend({
 	},
 
 	render: function() {
-		var m, s, o, ports, protocolOption;
+		var m, s, o, protocolOption;
 
 		ensureStylesheet();
 
@@ -313,7 +316,7 @@ return view.extend({
 		 * ---------------------------------------------------------------- */
 
 		s = m.section(form.NamedSection, 'config', 'voice', _('Voice profile'),
-			_('Signalling protocol, DTMF transfer and the tone timers shared by every voice port. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and each FXS port is bound to a SIP account through its entry in the line settings below, with the codec entries defining which codecs it offers and in which order.'));
+			_('Signalling protocol, DTMF transfer and the tone timers of the FXS port, together with the account it registers with. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and the codec entries below define which codecs the port offers and in which order.'));
 		s.anonymous = true;
 		s.addremove = false;
 
@@ -404,6 +407,52 @@ return view.extend({
 		o = s.option(form.Flag, 'time_sync', _('Synchronize the phone clock'),
 			_('Send the gateway time to the connected phone.'));
 		o.default = '0';
+		o.rmempty = false;
+
+		/*
+		 * The FXS port itself. There is exactly one, so instead of a line
+		 * card listing ports there are three read-only rows naming it and
+		 * the per-port options follow directly in this profile.
+		 */
+		o = s.option(form.DummyValue, '_fxs_device', _('FXS device'),
+			_('The only FXS port of the board. It is fixed by the hardware and cannot be changed.'));
+		o.cfgvalue = function() { return FXS_DEVICE; };
+
+		o = s.option(form.DummyValue, '_fxs_pcm', _('PCM channel'),
+			_('PCM channel the FXS port is wired to.'));
+		o.cfgvalue = function() { return FXS_PCM_CHANNEL; };
+
+		o = s.option(form.DummyValue, '_fxs_termination', _('Termination ID'),
+			_('Termination reported to the softswitch for the FXS port.'));
+		o.cfgvalue = function() { return FXS_TERMINATION_ID; };
+
+		o = forSip(s.option(form.Value, 'auth_username', _('Authentication user name'),
+			_('User name the FXS port authenticates with.')));
+		o.rmempty = true;
+
+		o = forSip(s.option(form.Value, 'auth_password', _('Authentication password')));
+		o.password = true;
+		o.rmempty = true;
+
+		o = forSip(s.option(form.Value, 'phone_number', _('Phone number'),
+			_('Number presented to the called party.')));
+		o.rmempty = true;
+
+		o = s.option(form.Value, 'transmit_gain', _('Transmit gain (dB)'),
+			_('Gain applied to the audio sent towards the network.'));
+		o.datatype = 'range(-14,6)';
+		o.placeholder = '0';
+		o.rmempty = false;
+
+		o = s.option(form.Value, 'receive_gain', _('Receive gain (dB)'),
+			_('Gain applied to the audio received from the network.'));
+		o.datatype = 'range(-14,6)';
+		o.placeholder = '0';
+		o.rmempty = false;
+
+		o = s.option(form.Flag, 'echo_cancellation', _('Enable echo cancellation'),
+			_('Cancel the echo the phone side feeds back into the network.'));
+		o.default = '1';
 		o.rmempty = false;
 
 		/* ---------------------------------------------------------------- *
@@ -742,65 +791,17 @@ return view.extend({
 		o.placeholder = '01[34578]xxxxxxxxx|1[34578]xxxxxxxxx|10086|11[0249]|x.T';
 
 		/* ---------------------------------------------------------------- *
-		 * Lines and codecs                                                 *
+		 * Codecs                                                           *
 		 * ---------------------------------------------------------------- */
 
-		ports = listVoicePorts();
-
-		s = m.section(form.TypedSection, 'line', _('Line settings'),
-			_('Gain, echo cancellation and the identity of every FXS port. The two shipped sections are the two FXS ports of the device; the authentication credentials apply to the SIP voice protocols.'));
-		s.anonymous = false;
-
-		/* The number of FXS ports is fixed by the hardware. */
-		s.addremove = false;
-
-		o = s.option(form.Flag, 'enabled', _('Enable'));
-		o.default = '1';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'physical_term_id', _('Line termination ID'),
-			_('Termination reported to the softswitch for this port.'));
-		o.placeholder = 'A0';
-		o.rmempty = true;
-
-		o = forSip(s.option(form.Value, 'auth_username', _('Authentication user name'),
-			_('User name the line authenticates with.')));
-		o.rmempty = true;
-
-		o = forSip(s.option(form.Value, 'auth_password', _('Authentication password')));
-		o.password = true;
-		o.rmempty = true;
-
-		o = forSip(s.option(form.Value, 'phone_number', _('Phone number'),
-			_('Number presented to the called party.')));
-		o.rmempty = true;
-
-		o = s.option(form.Value, 'transmit_gain', _('Transmit gain (dB)'),
-			_('Gain applied to the audio sent towards the network.'));
-		o.datatype = 'range(-14,6)';
-		o.placeholder = '0';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'receive_gain', _('Receive gain (dB)'),
-			_('Gain applied to the audio received from the network.'));
-		o.datatype = 'range(-14,6)';
-		o.placeholder = '0';
-		o.rmempty = false;
-
-		o = s.option(form.Flag, 'echo_cancellation', _('Enable echo cancellation'));
-		o.default = '1';
-		o.rmempty = false;
-
+		/*
+		 * One FXS port means one codec list: a table of codecs is enough,
+		 * there is no port column to pick from any more.
+		 */
 		s = m.section(form.TableSection, 'codec', _('Codecs'),
-			_('Codecs offered on a voice port, ordered by priority.'));
+			_('Codecs offered by the FXS port, ordered by priority.'));
 		s.anonymous = true;
 		s.addremove = true;
-
-		o = s.option(form.ListValue, 'line', _('Voice port'));
-		ports.forEach(function(port) {
-			o.value(port);
-		});
-		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'codec', _('Codec'));
 		o.value('G.711ALaw', 'G.711 A-law');

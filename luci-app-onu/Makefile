@@ -24,7 +24,9 @@ LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
 	+firewall4 +kmod-nft-bridge +kmod-nft-offload +omcproxy +ppp-mod-pppoe
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=9
+# 10: the shipped /etc/config/voice drops the two line sections - the board has
+# a single FXS port, so its parameters moved into the voice profile.
+PKG_RELEASE:=10
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 
