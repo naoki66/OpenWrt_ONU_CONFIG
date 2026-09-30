@@ -16,10 +16,6 @@ var PROTOCOL_OPTION = 'voice.config.protocol';
  * parameters live in the voice profile. Naming them here keeps the page and
  * the driver node the voice service opens readable against each other.
  */
-var FXS_DEVICE = '/dev/en75xx-fxs0';
-var FXS_PCM_CHANNEL = 'PCM0';
-var FXS_TERMINATION_ID = 'EN75XX/0';
-
 /*
  * The PON views follow luci-theme-argon: cards, form rows and buttons all come
  * from the theme. Only the small helper stylesheet is ours.
@@ -243,7 +239,7 @@ return view.extend({
 		 * topology is read before the signalling that rides on it.
 		 */
 		s = m.section(form.NamedSection, 'network', 'network', _('Voice network'),
-			_('The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and stays out of br-lan, so the voice traffic keeps to its own firewall zone.'));
+			_('The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and has its own firewall zone.'));
 		s.anonymous = true;
 		s.addremove = false;
 
@@ -259,7 +255,7 @@ return view.extend({
 		o = s.option(form.Flag, 'enabled', _('Enable voice service'));
 		o.default = '0';
 		o.rmempty = false;
-		o.description = _('The only switch of the page: with it off, no VLAN subinterface and no voice interface are written and no firewall zone is created.');
+		o.description = _('Enable the voice service.');
 
 		o = s.option(form.Value, 'uplink', _('Uplink device'),
 			_('Physical PON device carrying the voice VLAN, normally pon0.'));
@@ -325,7 +321,7 @@ return view.extend({
 		 * ---------------------------------------------------------------- */
 
 		s = m.section(form.NamedSection, 'config', 'voice', _('Voice profile'),
-			_('Signalling protocol, DTMF transfer and the tone timers of the FXS port, together with the account it registers with. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and the codec entries below define which codecs the port offers and in which order.'));
+			_('Signalling protocol, DTMF transfer, tone timers and registration account of the FXS port.'));
 		s.anonymous = true;
 		s.addremove = false;
 
@@ -419,17 +415,7 @@ return view.extend({
 		 * card listing ports there are three read-only rows naming it and
 		 * the per-port options follow directly in this profile.
 		 */
-		o = s.option(form.DummyValue, '_fxs_device', _('FXS device'),
-			_('The only FXS port of the board. It is fixed by the hardware and cannot be changed.'));
-		o.cfgvalue = function() { return FXS_DEVICE; };
 
-		o = s.option(form.DummyValue, '_fxs_pcm', _('PCM channel'),
-			_('PCM channel the FXS port is wired to.'));
-		o.cfgvalue = function() { return FXS_PCM_CHANNEL; };
-
-		o = s.option(form.DummyValue, '_fxs_termination', _('Termination ID'),
-			_('Termination reported to the softswitch for the FXS port.'));
-		o.cfgvalue = function() { return FXS_TERMINATION_ID; };
 
 		o = forSip(s.option(form.Value, 'auth_username', _('Authentication user name'),
 			_('User name the FXS port authenticates with.')));
@@ -483,7 +469,7 @@ return view.extend({
 	 * state.
 	 */
 	s.taboption('basic', form.DummyValue, '_protocol', _('H.248 media gateway'),
-		_('Parameters exchanged with the media gateway controller. This card is hidden automatically when the voice protocol is a SIP flavour.'));
+		_('Parameters exchanged with the media gateway controller.'));
 
 	o = forH248(s.taboption('basic', form.ListValue, 'message_encoding', _('Message encoding'),
 			_('Wire format of the H.248 messages.')));
@@ -657,7 +643,7 @@ return view.extend({
 	 * keeps a pane non-empty in every protocol state.
 	 */
 	s.taboption('server', form.DummyValue, '_protocol', _('SIP voice protocol'),
-		_('Softswitch and IMS SIP signalling parameters. This card is hidden automatically when the voice protocol is H.248.'));
+		_('Softswitch and IMS SIP signalling parameters.'));
 
 		serverOption(s, 'server', 'proxy_server', _('Proxy server'),
 			_('Address of the SIP proxy, an IP address or a domain name.'));

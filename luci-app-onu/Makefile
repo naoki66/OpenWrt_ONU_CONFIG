@@ -28,7 +28,17 @@ PKG_VERSION:=0.1.0
 # a single FXS port, so its parameters moved into the voice profile.
 # 11: voice.config.enabled is gone. Nothing ever read it, so the page now has
 # one switch only: voice.network.enabled, the flag voice-apply actually reads.
-PKG_RELEASE:=11
+# 12: register the top-level ONU menu independently of UCI and ACL state.
+# 13: keep every ONU submenu visible; page code reports missing configuration
+# or backend helpers instead of hiding the menu entry. Keep the parent action
+# as firstchild so themes render it as an expandable menu.
+# 14: hide the fixed internet uplink from LuCI while keeping the UCI and apply
+# defaults at pon0.
+# 15: omit single-port line, interface and protocol section identifiers from
+# the status page while retaining them internally for backend data matching.
+# 16: complete Simplified Chinese translations for the latest status,
+# diagnostics and internet labels.
+PKG_RELEASE:=16
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

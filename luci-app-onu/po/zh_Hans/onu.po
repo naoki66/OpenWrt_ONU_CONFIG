@@ -58,8 +58,8 @@ msgstr "承载运营商 VLAN 的网络设备，通常为 pon0。"
 msgid "Optional. In separate multicast VLAN mode, IPv4 multicast flows downstream and IGMP is allowed upstream."
 msgstr "可选。使用独立组播 VLAN 时，IPv4 组播向机顶盒下行，并允许 IGMP 请求上行。"
 
-msgid "Optional. The upstream connection of the operator ONT UI: the VLAN carrying the membership reports towards the OLT. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured."
-msgstr "可选。相当于运营商光猫界面里的「上游连接」，即成员报告上行到 OLT 所走的 VLAN。留空时使用组播 VLAN；未设置独立组播 VLAN 时使用业务 VLAN。"
+msgid "Optional. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured."
+msgstr "可选。留空时使用组播 VLAN；未设置独立组播 VLAN 时使用业务 VLAN。"
 
 msgid "PON interfaces"
 msgstr "PON 接口"
@@ -80,7 +80,7 @@ msgid "Diagnostic operations"
 msgstr "诊断操作"
 
 msgid "Diagnostics"
-msgstr "网络诊断"
+msgstr "诊断"
 
 msgid "Download diagnostic package"
 msgstr "下载诊断包"
@@ -215,10 +215,10 @@ msgid "Board identity file"
 msgstr "校准分区文件"
 
 msgid "The identity fields burned into the flash image of a storage target, patched in place one field at a time. They take effect after a reboot; the image as a whole is handled by PON board data below."
-msgstr "烧录在存储目标 Flash 镜像里的身份字段，逐个就地改写，重启后生效；整份镜像的处理在本页下方「PON 板级数据」。"
+msgstr "出厂的身份字段，修改重启后生效；整份镜像见下方「PON 板级数据」。"
 
 msgid "The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot."
-msgstr "板级数据镜像就是整个存储目标，身份字段与校准数据都在里面。备份是把它下载下来，上传是整份替换；原镜像另存于 /tmp，两者都要重启后生效。"
+msgstr "DSD镜像就是整个出厂校准分区，身份字段与校准数据都在里面。重启后生效。"
 
 msgid "Board identity fields"
 msgstr "板载身份字段"
@@ -233,7 +233,7 @@ msgid "No storage target is available: /etc/board.json declares no pon_data targ
 msgstr "没有可用的存储目标：/etc/board.json 没有声明 pon_data 目标，因此没有可备份或写入的镜像。"
 
 msgid "Uploads a complete image of the storage target and replaces it, identity fields and calibration data included. The previous image is kept as /tmp/pon-board-data.*.bin."
-msgstr "上传存储目标的完整镜像并整体替换，身份字段与校准数据一并覆盖。原镜像另存为 /tmp/pon-board-data.*.bin。"
+msgstr "上传的完整镜像并整体替换，身份字段与校准数据一并覆盖。原镜像另存为 /tmp/pon-board-data.*.bin。"
 
 msgid "Upload and write"
 msgstr "上传并写入"
@@ -263,7 +263,7 @@ msgid "Backing up the board identity file failed: %s"
 msgstr "备份校准分区文件失败：%s"
 
 msgid "Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one; identity fields and calibration data are included either way. Writing keeps the previous image as /tmp/pon-board-data.*.bin, and both take effect after a reboot."
-msgstr "下载存储目标的完整镜像作为备份，或用上传的镜像整体替换；两种方式都包含身份字段与校准数据。写入时原镜像另存为 /tmp/pon-board-data.*.bin，两者都要重启后生效。"
+msgstr "下载存完整镜像作为备份，或用上传的镜像整体替换；包含身份字段与校准数据。写入时原镜像另存为 /tmp/pon-board-data.*.bin，重启后生效。"
 
 msgid "Writing replaces the whole image of %s, identity fields and calibration data included. Continue?"
 msgstr "写入将整体替换 %s 的镜像，身份字段与校准数据一并覆盖。是否继续？"
@@ -1211,8 +1211,8 @@ msgstr "数据通道等待 PLOAM 分配 Alloc-ID 的秒数，超过后报告失�
 msgid "Voice profile"
 msgstr "语音配置"
 
-msgid "Signalling protocol, DTMF transfer and the tone timers of the FXS port, together with the account it registers with. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and the codec entries below define which codecs the port offers and in which order."
-msgstr "FXS 端口的信令协议、DTMF 传输方式与各类定时器，以及它注册所用的账号。上方的语音业务网络只负责提供 IP 连通性；注册与呼叫控制由语音服务完成，下方的编码条目决定该端口提供哪些编码以及优先级顺序。"
+msgid "Signalling protocol, DTMF transfer, tone timers and registration account of the FXS port."
+msgstr "FXS 端口的信令协议、DTMF 传输方式、音调定时器及注册账号。"
 
 msgid "Enable voice service"
 msgstr "启用语音业务"
@@ -1593,7 +1593,7 @@ msgid "Lower values are offered first."
 msgstr "数值越小越优先。"
 
 msgid "PON"
-msgstr "PON 配置"
+msgstr "PON"
 
 msgid "Use an IPv4 address with a prefix length, for example 10.190.0.2/24."
 msgstr "请填写带前缀长度的 IPv4 地址，例如 10.190.0.2/24。"
@@ -1601,8 +1601,8 @@ msgstr "请填写带前缀长度的 IPv4 地址，例如 10.190.0.2/24。"
 msgid "The IPTV VLANs are carried by the PON uplink and handed over to a set-top box, to a downstream router or to a multicast-to-unicast relay."
 msgstr "IPTV VLAN 由 PON 上行承载，并透传给机顶盒、下挂路由器，或交给组播转单播中继。"
 
-msgid "Where the operator VLANs are handed over and which VLANs are carried."
-msgstr "运营商 IPTV 一般需要配置业务 VLAN 和组播 VLAN，这里可以绑定从哪个LAN透传出去，以及透传哪些 VLAN。"
+msgid "The service VLAN and multicast VLAN of the operator IPTV service."
+msgstr "运营商 IPTV 一般需要配置业务 VLAN 和组播 VLAN。"
 
 msgid "Multicast to unicast"
 msgstr "组播转单播"
@@ -1661,14 +1661,14 @@ msgstr "可选。运营商 IPTV 网络内的地址，ONU 自行加入组播组�
 msgid "Upstream device"
 msgstr "上游设备"
 
-msgid "The bridge the relay listens on. It is the bridge of the relay VLAN in single cable mode, otherwise the bridge carrying the multicast VLAN, or the proxy uplink when the proxy terminates it. The relay listens on the bridge, never on one of its member ports."
-msgstr "中继监听的网桥。单线复用模式下是中继 VLAN 对应的网桥；其它模式下是承载组播 VLAN 的网桥，代理终结该 VLAN 时则为代理的上联口。中继监听的是网桥本身，而不是它的某个成员端口。"
+msgid "The bridge the relay listens on: the relay VLAN bridge in single cable mode, otherwise the multicast VLAN bridge or the proxy uplink. Never a member port."
+msgstr "中继监听的网桥：单线复用模式下为中继 VLAN 网桥，否则为组播 VLAN 网桥或代理上联口。不是成员端口。"
 
 msgid "Relay settings"
 msgstr "中继程序设置"
 
 msgid "Channels, fast channel change and worker tuning stay on the rtp2httpd page. udpxy and msd_lite are alternative relays with their own pages; they are not configured here and their shortcuts only work when the matching package is installed."
-msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的页面：它们不由此处配置，且只有安装了对应软件包时跳转才可用。"
+msgstr "频道、快速切台和工作线程等参数仍在 rtp2httpd 页面设置。udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的页面：它们不由此处配置。"
 
 msgid "Fax negotiation mode"
 msgstr "传真协商模式"
@@ -1844,8 +1844,8 @@ msgstr "呈现给被叫方的号码。"
 msgid "Relay VLAN"
 msgstr "中继 VLAN"
 
-msgid "Optional. Single cable mode only: which of the handed-over VLANs the relay listens on. Leave empty to follow the multicast VLAN, or the service VLAN when no separate multicast VLAN is set."
-msgstr "可选。仅单线复用模式可用：指定中继监听已透传 VLAN 中的哪一个。留空时跟随组播 VLAN；未配置独立组播 VLAN 时则跟随业务 VLAN。"
+msgid "Optional. Single cable mode only: the handed-over VLAN the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set."
+msgstr "可选。仅单线复用模式：中继监听的已透传 VLAN。留空跟随组播 VLAN，未配置时跟随业务 VLAN。"
 
 msgid "Hand this VLAN over on the trunk first: only the handed-over VLANs get a bridge for the relay to listen on."
 msgstr "请先在 trunk 上透传该 VLAN：只有已透传的 VLAN 才会生成网桥供中继监听。"
@@ -1938,11 +1938,10 @@ msgstr "由 internet-apply 生成。两个名字都不超过 15 个字符，这�
 msgid "Voice network"
 msgstr "语音业务网络"
 
-msgid "The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and stays out of br-lan, so the voice traffic keeps to its own firewall zone."
-msgstr "承载语音业务的 IP 网络。它是 PON 上联的 8021q VLAN，不接入 br-lan，因此语音流量始终留在自己的防火墙区域里。"
-
-msgid "The only switch of the page: with it off, no VLAN subinterface and no voice interface are written and no firewall zone is created."
-msgstr "本页唯一的开关：关闭后不会写入 VLAN 子接口与语音接口，也不会创建防火墙区域。"
+msgid "The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and has its own firewall zone."
+msgstr "承载语音业务的 IP 网络。它是 PON 上联的 8021q VLAN，有自己的防火墙区域。"
+msgid "Enable the voice service."
+msgstr "启用语音业务。"
 
 msgid "Physical PON device carrying the voice VLAN, normally pon0."
 msgstr "承载语音 VLAN 的物理 PON 设备，通常为 pon0。"
@@ -1998,11 +1997,20 @@ msgstr "DHCP"
 msgid "H.248 media gateway"
 msgstr "H.248 媒体网关"
 
-msgid "Parameters exchanged with the media gateway controller. This card is hidden automatically when the voice protocol is a SIP flavour."
-msgstr "与媒体网关控制器交换的参数。当语音协议为 SIP 类时，本卡片会自动隐藏。"
+msgid "Parameters exchanged with the media gateway controller."
+msgstr "H.248媒体网关控制器交换的参数。"
 
 msgid "SIP voice protocol"
 msgstr "SIP 语音协议"
 
-msgid "Softswitch and IMS SIP signalling parameters. This card is hidden automatically when the voice protocol is H.248."
-msgstr "软交换与 IMS 的 SIP 信令参数。当语音协议为 H.248 时，本卡片会自动隐藏。"
+msgid "Softswitch and IMS SIP signalling parameters."
+msgstr "软交换与 IMS 的 SIP 信令参数。"
+
+msgid "Bridged"
+msgstr "桥接"
+
+msgid "PON line diagnostics"
+msgstr "PON 线路诊断"
+
+msgid "PPPoE"
+msgstr "PPPoE"

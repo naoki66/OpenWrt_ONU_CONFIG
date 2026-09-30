@@ -38,13 +38,6 @@ function ensureStylesheet() {
 	}));
 }
 
-function validateIfname(sectionId, value) {
-	if (!/^[A-Za-z0-9_.:-]{1,15}$/.test(value || ''))
-		return _('Use a Linux network device name containing at most 15 characters.');
-
-	return true;
-}
-
 function listPonDevices() {
 	return uci.sections('pon', 'xpon').map(function(line) {
 		return line.device || line['.name'];
@@ -157,9 +150,6 @@ return view.extend({
 		s.anonymous = true;
 		s.addremove = false;
 
-		o = s.option(form.DummyValue, '_pon', _('PON interfaces'));
-		o.cfgvalue = listPonDevices;
-
 		o = s.option(form.Flag, 'enabled', _('Enable'));
 		o.default = '0';
 		o.rmempty = false;
@@ -169,16 +159,9 @@ return view.extend({
 			_('Bridged hands the operator VLAN to your own router. DHCP takes whatever address the operator hands out. PPPoE lets the ONT terminate the session and route for the LAN.'));
 		o.default = 'bridge';
 		o.rmempty = false;
-		o.value('bridge', _('Bridged (a downstream router dials)'));
-		o.value('dhcp', _('DHCP client (the operator hands out an address)'));
-		o.value('pppoe', _('Dialled by the ONT (PPPoE)'));
-		o.depends('enabled', '1');
-
-		o = s.option(form.Value, 'uplink', _('Uplink device'),
-			_('Network device carrying the operator VLANs, normally pon0.'));
-		o.default = 'pon0';
-		o.rmempty = false;
-		o.validate = validateIfname;
+		o.value('bridge', _('Bridged'));
+		o.value('dhcp', _('DHCP'));
+		o.value('pppoe', _('PPPoE'));
 		o.depends('enabled', '1');
 
 		o = s.option(form.Value, 'vlan', _('Internet VLAN'),

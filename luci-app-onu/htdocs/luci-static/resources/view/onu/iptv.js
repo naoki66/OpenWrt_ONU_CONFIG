@@ -188,7 +188,7 @@ return view.extend({
 		s.addremove = false;
 
 		s.tab('bridge', _('IPTV bridge'),
-			_('Where the operator VLANs are handed over and which VLANs are carried.'));
+			_('The service VLAN and multicast VLAN of the operator IPTV service.'));
 		s.tab('ipv4', _('IPv4'),
 			_('How IGMP and the IPv4 multicast traffic of the IPTV service are handled.'));
 		s.tab('ipv6', _('IPv6'),
@@ -196,10 +196,7 @@ return view.extend({
 		s.tab('unicast', _('Multicast to unicast'),
 			_('Optional. Relay the multicast streams as HTTP unicast with rtp2httpd so any device on the network can play them.'));
 
-		/* Where the VLANs are handed over */
-		o = s.taboption('bridge', form.DummyValue, '_pon', _('PON interfaces'));
-		o.cfgvalue = listPonDevices;
-
+	
 		o = s.taboption('bridge', form.Flag, 'enabled', _('Enable'));
 		o.default = '0';
 		o.rmempty = false;
@@ -250,12 +247,7 @@ return view.extend({
 		o.rmempty = true;
 		o.depends({ enabled: '1', mode: 'trunk' });
 
-		o = s.taboption('bridge', form.Value, 'uplink', _('Uplink device'),
-			_('Network device carrying the operator VLANs, normally pon0.'));
-		o.default = 'pon0';
-		o.rmempty = false;
-		o.validate = validateIfname;
-		o.depends('enabled', '1');
+	
 
 		o = s.taboption('bridge', form.Value, 'service_vlan', _('Service VLAN'),
 			_('Carries DHCP, authentication and video on demand and, when no separate multicast VLAN is set, multicast traffic.'));
@@ -285,7 +277,7 @@ return view.extend({
 		};
 
 		o = s.taboption('bridge', form.Value, 'igmp_vlan', _('IGMP upstream VLAN'),
-			_('Optional. The upstream connection of the operator ONT UI: the VLAN carrying the membership reports towards the OLT. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured.'));
+			_('Optional. Leave empty to use the multicast VLAN, or the service VLAN when no separate multicast VLAN is configured.'));
 		o.placeholder = _('Same as multicast traffic');
 		o.datatype = 'range(1,4094)';
 		o.rmempty = true;
@@ -330,12 +322,6 @@ return view.extend({
 		o.rmempty = false;
 		o.depends('enabled', '1');
 
-		o = s.taboption('unicast', form.Value, 'unicast_port', _('HTTP port'),
-			_('Listening port of the relay, also set on the rtp2httpd page.'));
-		o.default = '5140';
-		o.datatype = 'port';
-		o.rmempty = false;
-		o.depends({ enabled: '1', unicast: '1' });
 
 		o = s.taboption('unicast', form.Value, 'unicast_addr', _('Relay address'),
 			_('Optional. An address in the operator IPTV network, needed for the ONU to join the groups itself. Leave empty to keep the bridge unaddressed.'));
@@ -351,7 +337,7 @@ return view.extend({
 	 * script writes another — so it stays hidden and the script ignores it.
 	 */
 	o = s.taboption('unicast', form.Value, 'unicast_vlan', _('Relay VLAN'),
-		_('Optional. Single cable mode only: which of the handed-over VLANs the relay listens on. Leave empty to follow the multicast VLAN, or the service VLAN when no separate multicast VLAN is set.'));
+		_('Optional. Single cable mode only: the handed-over VLAN the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set.'));
 	o.datatype = 'range(1,4094)';
 	o.rmempty = true;
 	o.placeholder = uci.get('iptv', 'config', 'multicast_vlan') ||
@@ -368,7 +354,7 @@ return view.extend({
 	};
 
 	o = s.taboption('unicast', form.DummyValue, '_upstream', _('Upstream device'),
-		_('The bridge the relay listens on. It is the bridge of the relay VLAN in single cable mode, otherwise the bridge carrying the multicast VLAN, or the proxy uplink when the proxy terminates it. The relay listens on the bridge, never on one of its member ports.'));
+		_('The bridge the relay listens on: the relay VLAN bridge in single cable mode, otherwise the multicast VLAN bridge or the proxy uplink. Never a member port.'));
 	o.cfgvalue = unicastUpstream;
 	o.depends({ enabled: '1', unicast: '1' });
 

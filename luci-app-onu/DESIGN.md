@@ -119,18 +119,23 @@ luci-app-onu 只补充主题没有提供的东西，全部集中在 `view/onu/on
 ## 7. 信息架构
 
 菜单为**独立的顶级节点** `admin/onu`（不再挂在 `admin/network` 下），显示名 ONU，`order` 为 20。
-父节点 `action.type` 写成 `firstchild` 即会把最靠前的叶子当作默认落地页——现在就是「状态」页。
+父节点使用 `firstchild` 展开子菜单，并由顺序最前的 `admin/onu/status` 作为默认
+落地页；不能使用 `alias`，否则 Argon 会把顶级 ONU 当成没有子菜单的普通链接。
+父节点也不再用 `depends.uci.pon` 限制整个菜单。这样即使首次启动时 PON 配置尚未生成或为空，ONU
+菜单仍会注册；菜单可见性也不依赖 rpcd ACL、UCI 配置或诊断程序是否存在。ACL
+只约束页面发起的 UCI、ubus 和文件操作，不负责隐藏入口。页面本身再报告后端或
+配置尚未就绪。
 子页顺序（自上而下，**由 `menu.d` 的 `order` 决定，与 JSON 书写顺序无关**）：
 
 | Order | 子页 | 视图 | 可见条件 |
 | --- | --- | --- | --- |
-| 10 | **状态** | `onu/status` | 存在 `pon` 配置 |
-| 20 | **硬件身份** | `onu/hardware` | 存在 `pon` 配置 |
-| 30 | **认证配置** | `onu/config` | 存在 `pon` 配置 |
-| **35** | **上网** | `onu/internet` | 存在 `internet` 配置 |
-| 40 | **IPTV** | `onu/iptv` | 存在 `iptv` 配置 |
-| 45 | **语音配置** | `onu/voice` | 存在 `voice` 配置 |
-| 50 | **网络诊断** | `onu/diagnostics` | `/usr/libexec/airoha-pon-debug` 可执行 |
+| 10 | **状态** | `onu/status` | 始终显示 |
+| 20 | **硬件身份** | `onu/hardware` | 始终显示 |
+| 30 | **认证配置** | `onu/config` | 始终显示 |
+| **35** | **上网** | `onu/internet` | 始终显示 |
+| 40 | **IPTV** | `onu/iptv` | 始终显示 |
+| 45 | **语音配置** | `onu/voice` | 始终显示 |
+| 50 | **网络诊断** | `onu/diagnostics` | 始终显示 |
 
 > ⚠️ **「上网」插在 30 与 40 之间，所以用的是 35 而不是 40 之后的值。** 现有两边分别是 30（认证）与
 > 40（IPTV），中间还有空位；直接挤到 45/46 会把语音页顶乱。LuCI 在 `menu.d/*.json` 里按 `order`
@@ -153,7 +158,7 @@ IPTV 原本是独立的 `luci-app-iptv` 包（菜单挂在 `admin/network/iptv`�
 与 ACL 全部随包迁移，ACL 合并为单一 `luci-app-onu` 条目。原因是它配置的正是
 「把 LAN 口桥接到 PON 上联承载的运营商 VLAN」，本来就是 PON 业务的一部分；
 代价是 `luci-app-onu` 现在依赖 `firewall4` 与 `kmod-nft-bridge`。
-IPTV 页只在 `/etc/config/iptv` 存在时显示（`depends.uci`）。
+IPTV 页始终显示；如果配置或后端组件尚未就绪，页面内报告具体状态。
 
 ### 状态页
 
@@ -183,6 +188,8 @@ IPTV 页只在 `/etc/config/iptv` 存在时显示（`depends.uci`）。
 层级由**密度**表达：瓦片（有边框有阴影）→ 键值行（只有发丝分隔线），折叠只改变可见性、
 不改变语言，因此展开折叠不会突然换一种组件。
 OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列表」，并按线路模式只显示对应协议的那一张。
+设备只有一个固定的 PON 口，因此状态页标题只显示 `PON`、`OMCI` 或 `EPON OAM`，
+不再展示 `line0`、`pon0` 等内部 section 和设备名；这些标识仍用于后端数据关联及折叠控件 ID。
 
 ### 硬件身份页（板级数据与 ONU 身份统一入口）
 
@@ -426,7 +433,7 @@ UCI schema（`/etc/config/internet`，同时是该标签页的可见条件）：
 | --- | --- | --- |
 | `enabled` | `0` | 关闭时不写任何 LAN/VLAN 改动，并把原 `wan`/`wan6` 放回原位 |
 | `mode` | `bridge` | `bridge` 桥接 / `dhcp` DHCP 客户端 / `pppoe` 系统拨号 **（三种）** |
-| `uplink` | `pon0` | 承载运营商 VLAN 的设备 |
+| `uplink` | `pon0` | 承载运营商 VLAN 的设备；页面不展示，UCI 与后端继续默认 `pon0` |
 | `vlan` | 空（必填） | 上网业务 VLAN，例如 466 |
 | `ports` | list | 桥接模式下加入上网网桥的 LAN 口（多选） |
 | `ipoe` | `0` | 桥接模式下额外放行原生 IPv4/IPv6（ARP/IP/IPv6） |

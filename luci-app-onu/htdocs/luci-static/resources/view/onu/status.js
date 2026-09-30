@@ -585,14 +585,12 @@ function renderLine(item) {
 	var datapath = item.datapath || {};
 	var mode = getLineModes(item);
 	var epon = isEponMode(mode.shown);
-	var title = _('PON line: %s (%s)').format(item.section['.name'], item.section.device || '-');
+	var title = _('PON');
 	var tags, tiles, rows, groups;
 
 	if (item.error)
 		return { mode: mode.shown, nodes: [ E('div', { 'class': 'cbi-section' }, [
 			E('h3', {}, title),
-			E('div', { 'class': 'cbi-section-descr' },
-				_('Interface %s').format(item.section.device || '-')),
 			metricGrid([ metricTile(_('Error'), item.error, 'error') ])
 		]) ] };
 
@@ -710,8 +708,6 @@ function renderLine(item) {
 	return { mode: mode.shown, nodes: [
 		E('div', { 'class': 'cbi-section' }, [
 			cardHeader(title, tags),
-			E('div', { 'class': 'cbi-section-descr' },
-				_('Interface %s').format(item.section.device || '-')),
 			metricGrid(tiles),
 			detailBlock(_('Line details'), rows),
 			detailFold(epon ? _('EPON line counters and diagnostics') :
@@ -723,7 +719,7 @@ function renderLine(item) {
 
 function renderOmci(item) {
 	var values = item.values;
-	var title = _('OMCI: %s (%s)').format(item.section['.name'], item.section.device || '-');
+	var title = _('OMCI');
 
 	if (item.error)
 		return E('div', { 'class': 'cbi-section' }, [
@@ -769,7 +765,7 @@ function renderOmci(item) {
 
 function renderOam(item) {
 	var values = item.values;
-	var title = _('EPON OAM: %s (%s)').format(item.section['.name'], item.section.device || '-');
+	var title = _('EPON OAM');
 	var ctc = values.operator === 'ctc';
 	var tiles, rows, tags;
 

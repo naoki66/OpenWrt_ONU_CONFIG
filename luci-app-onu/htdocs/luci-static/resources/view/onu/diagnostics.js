@@ -72,14 +72,8 @@ return view.extend({
 		m.chain('pon');
 		m.readonly = !L.hasViewPermission();
 
-		s = m.section(form.NamedSection, 'capture', 'capture', _('PON line'));
+		s = m.section(form.NamedSection, 'capture', 'capture', _('PON line diagnostics'));
 
-		o = s.option(form.DummyValue, '_devices', _('PON interface'));
-		o.cfgvalue = function() {
-			return uci.sections('pon', 'xpon').map(function(line) {
-				return line.device || line['.name'];
-			}).join(', ') || '-';
-		};
 
 		o = s.option(form.Flag, 'enabled', _('Debug mode'));
 		o.default = o.disabled;

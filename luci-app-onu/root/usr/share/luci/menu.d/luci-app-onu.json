@@ -4,10 +4,6 @@
 		"order": 20,
 		"action": {
 			"type": "firstchild"
-		},
-		"depends": {
-			"acl": [ "luci-app-onu" ],
-			"uci": { "pon": true }
 		}
 	},
 	"admin/onu/status": {
@@ -24,10 +20,6 @@
 		"action": {
 			"type": "view",
 			"path": "onu/hardware"
-		},
-		"depends": {
-			"acl": [ "luci-app-onu" ],
-			"uci": { "pon": true }
 		}
 	},
 	"admin/onu/config": {
@@ -44,10 +36,6 @@
 		"action": {
 			"type": "view",
 			"path": "onu/internet"
-		},
-		"depends": {
-			"acl": [ "luci-app-onu" ],
-			"uci": { "internet": true }
 		}
 	},
 	"admin/onu/iptv": {
@@ -56,10 +44,6 @@
 		"action": {
 			"type": "view",
 			"path": "onu/iptv"
-		},
-		"depends": {
-			"acl": [ "luci-app-onu" ],
-			"uci": { "iptv": true }
 		}
 	},
 	"admin/onu/voice": {
@@ -68,10 +52,6 @@
 		"action": {
 			"type": "view",
 			"path": "onu/voice"
-		},
-		"depends": {
-			"acl": [ "luci-app-onu" ],
-			"uci": { "voice": true }
 		}
 	},
 	"admin/onu/diagnostics": {
@@ -80,9 +60,6 @@
 		"action": {
 			"type": "view",
 			"path": "onu/diagnostics"
-		},
-		"depends": {
-			"fs": { "/usr/libexec/airoha-pon-debug": "executable" }
 		}
 	}
 }
