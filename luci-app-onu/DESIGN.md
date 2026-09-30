@@ -351,11 +351,12 @@ password-only 场景下 O5 反复掉线的根因。
 ### 语音配置页
 
 `view/onu/voice.js` 是一张 `form.Map('voice')`，按运营商光猫「应用 → 宽带电话设置」的子页
-（语音配置 / 数图配置）组织成**五个** section，顺序与设备一致：
+（语音配置 / 数图配置）组织成**六个** section，顺序与设备一致：
 
 | Section | 类型 | 内容 |
 | --- | --- | --- |
-| 语音配置 | `NamedSection('config','voice')` | 启用、语音协议（H.248 / 软交换 SIP / IMS SIP）、DTMF 转移模式、PayLoad 类型值、来电显示、拍叉时间间隔上下限、催挂音/忙音/久叫不应时间、Codec 协商规则、传真编码方式、传真协商方式、同步话机时间，**以及唯一 FXS 口的三行只读标识（FXS 设备 / PCM 通道 / 终端 ID）与其参数**（认证用户名、认证密码、电话号码——后三项仅 SIP、呼出增益、呼入增益、开启回声抑制） |
+| 语音业务网络 | `NamedSection('network','network')` | **本页唯一的开关「启用语音业务」**（`voice.network.enabled`）、上联设备、VLAN ID、IP 获取方式（DHCP / 静态）、静态四件套、以及只读的派生接口行 |
+| 语音配置 | `NamedSection('config','voice')` | 语音协议（H.248 / 软交换 SIP / IMS SIP）、DTMF 转移模式、PayLoad 类型值、来电显示、拍叉时间间隔上下限、催挂音/忙音/久叫不应时间、Codec 协商规则、传真编码方式、传真协商方式、同步话机时间，**以及唯一 FXS 口的三行只读标识（FXS 设备 / PCM 通道 / 终端 ID）与其参数**（认证用户名、认证密码、电话号码——后三项仅 SIP、呼出增益、呼入增益、开启回声抑制） |
 | H.248 | `NamedSection('h248','h248')` | 仅协议为 H.248 时出现。四个 tab：基本配置（编码类型、主备服务器地址与端口、MG 注册方式、域名、MG 端口、授权方式、物理端点前缀）、资源（RTP 临时端点前缀/起始/对齐模式/数字长度/数目）、高级配置（ACK 消息、长定时器、PENDING 定时器、重传定时器、重传次数/间隔/时长、重注册周期）、心跳（模式、周期、次数） |
 | SIP | `NamedSection('sip','sip')` | 软交换 SIP 与 IMS SIP 共用。四个 tab：服务器（代理/注册/出局代理/归属网关域名的地址、端口与承载协议）、备用服务器（代理/注册/出局代理的备用地址、端口与承载协议）、高级配置（信令 DSCP、媒体 DSCP、注册周期、注册重试周期、会话更新周期、最小会话更新周期）、心跳（开启心跳、周期、超时次数、模式） |
 | 数图配置 | `NamedSection('digitmap','digitmap')` | 启用拨号计划、匹配模式（最大/最小匹配）、摘机不拨号时间、拨号短定时器、拨号长定时器、数图（多行文本） |
@@ -366,6 +367,19 @@ password-only 场景下 O5 反复掉线的根因。
 > 因此「第几路」这个概念在 UI 上不成立：三行只读标识直接放进「语音配置」，
 > 增益 / 回声抑制 / SIP 账号也从原来的 `voice.line` 段移进 `voice.config`。
 > `codec` 段同样不再带 `line` 字段——编码就是这一路的编码列表。
+
+> ⚠️ **全页只有一个「启用」开关，就是 `voice.network.enabled`（页面上叫「启用语音业务」）。**
+> 原先「语音配置」卡片里还有一个 `voice.config.enabled`，但**全仓没有任何消费者**：
+> `voice-apply` 只做 IP 承载（它的 `config_get_bool VN_ENABLED network enabled` 是唯一入口），
+> 本树也没有语音守护进程，所以那个开关是一个"点了没反应"的死开关，
+> 中文标签还与网络的那个撞成「启用语音业务」/「启用语音业务网络」两个近似名字。
+> 两个合并成有后端响应的那一个：开关留在 `network` 段（后端读的就是它），
+> 文案改成「启用语音业务」并在描述里写明它是全页唯一开关、关闭时什么都不写。
+> `voice.digitmap.enabled`（启用拨号计划）性质不同——它是"要不要下发数图"的配置开关，保留。
+>
+> ⚠️ **H.248 的 `physical_term_prefix` 是运营商可填字段，默认仍为 `A0`**，与上面那个固定的
+> 终端标识 `EN75XX/0` 不是一回事：前者是 H.248 基本配置里的**物理端点前缀**（运营商自定义，
+> 页面 placeholder 与 shipped 值都是 `A0`），后者是本板唯一 FXS 口上报的终端标识（硬件固定）。
 
 字段与取值来自真机（中国移动 ONT，`voice_config.cgi?v=prof|dmap|line`）实测抓取，
 命名沿用 TR-104/CT 前缀（`X_CT_COM_*`、`X_ASB_COM_*` 之外的公开字段），
@@ -390,6 +404,9 @@ SIP 段的字段在 H.248 机器上由 CGI 分支掉、抓不到页面，因此�
   隐藏字段不参与校验；
 - 拍叉时间上下限用自定义 `validate` 比较（最小值留空时报的是「必填」，不重复报错）；
 - 增益是 `range(-14,6)`，LuCI 的 `range()` 支持负数；
+- **后端目前只有 `voice-apply`，它只读 `voice.network.*`**（VLAN / 接口 / zone）。
+  加新开关前先确认有没有消费者：`voice-apply` 的注释已写明它从不碰线路与协议；
+
 - FXS 口**只有一路**，因此不再有 `TypedSection('line')`：端口数是硬件事实，页面上做成
   `DummyValue` 只读行（`/dev/en75xx-fxs0` / `PCM0` / `EN75XX/0` 三个常量在文件顶部），
   参数写进 `voice.config`；codec 用 `TableSection`，一张表就是这一路的编码列表；
@@ -700,7 +717,7 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `htdocs/.../view/onu/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
 | `htdocs/.../view/onu/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转 |
 | `htdocs/.../view/onu/internet.js` | 新增：上网业务页（order 35，插在认证配置与 IPTV 之间）。单张 `form.Map('internet')` + `NamedSection('config')`，**不分 tab**，用 `depends()` 切换；字段：启用、上网方式（**桥接 / DHCP / 系统拨号三种**）、上联设备、VLAN、LAN 口（`MultiValue`，校验至少选 1 且与 IPTV 机顶盒口互斥）、IPoE、IP 版本（**IPv4 only / 双栈，DHCP 与 PPPoE 都显示**）、PPPoE 用户名 / 密码、MTU、`derivedDevices()` 只读派生设备行。**硬件卸载开关已移出本页** |
-| `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置 六个 section，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`） |
+| `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音网络 / 语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`）。**后已改**：删掉「线路设置」卡片改为单 FXS 口（三行只读标识 + 端口参数并入 `voice.config`）；删掉无消费者的 `voice.config.enabled`，全页只留 `voice.network.enabled` 一个开关（文案「启用语音业务」） |
 | `root/etc/config/voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段，同时作为该标签页的可见条件。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `voice.config`，`codec` 段去掉 `line` 字段 |
 | `root/etc/config/internet` | 新增：上网业务页的唯一数据源与标签页可见条件（`depends.uci.internet`）；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
 | `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起（保留原 option）而不是删除；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；卸载打开时额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |

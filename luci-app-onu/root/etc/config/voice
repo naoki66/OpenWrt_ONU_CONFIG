@@ -3,7 +3,6 @@
 # choose, so the port has no section of its own - its parameters live in the
 # voice profile below and the codecs are a single list.
 config voice 'config'
-	option enabled '0'
 	option protocol 'h248'
 	option dtmf_method 'InBand'
 	option dtmf_payload '97'
@@ -26,6 +25,8 @@ config voice 'config'
 
 # The IP carrier under the voice service: an 8021q VLAN of the PON uplink,
 # kept out of br-lan and given a firewall zone of its own by voice-apply.
+# "enabled" is the only switch of the page - voice-apply writes nothing at all
+# when it is off - so it lives here rather than in the profile above.
 config network 'network'
 	option enabled '0'
 	option uplink 'pon0'

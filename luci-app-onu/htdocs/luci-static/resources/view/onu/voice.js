@@ -247,10 +247,19 @@ return view.extend({
 		s.anonymous = true;
 		s.addremove = false;
 
-		o = s.option(form.Flag, 'enabled', _('Enable voice network'));
+		/*
+		 * The one switch of the page. It lives with the carrier because that
+		 * is all the backend does today: voice-apply turns this flag into the
+		 * VLAN subinterface, the voice interface and the firewall zone, and
+		 * writes nothing at all when it is off. The voice profile used to
+		 * carry a second "enable voice service" flag of its own, but nothing
+		 * ever read it - no voice daemon exists - so the two collapsed into
+		 * this one rather than leaving a switch that does nothing.
+		 */
+		o = s.option(form.Flag, 'enabled', _('Enable voice service'));
 		o.default = '0';
 		o.rmempty = false;
-		o.description = _('With the network off, no VLAN subinterface and no voice interface are written and no firewall zone is created.');
+		o.description = _('The only switch of the page: with it off, no VLAN subinterface and no voice interface are written and no firewall zone is created.');
 
 		o = s.option(form.Value, 'uplink', _('Uplink device'),
 			_('Physical PON device carrying the voice VLAN, normally pon0.'));
@@ -319,10 +328,6 @@ return view.extend({
 			_('Signalling protocol, DTMF transfer and the tone timers of the FXS port, together with the account it registers with. The voice network above only provides IP connectivity; registration and call control are handled by the voice service, and the codec entries below define which codecs the port offers and in which order.'));
 		s.anonymous = true;
 		s.addremove = false;
-
-		o = s.option(form.Flag, 'enabled', _('Enable voice service'));
-		o.default = '0';
-		o.rmempty = false;
 
 		protocolOption = o = s.option(form.ListValue, 'protocol', _('Voice protocol'),
 			_('The signalling protocol spoken with the softswitch.'));

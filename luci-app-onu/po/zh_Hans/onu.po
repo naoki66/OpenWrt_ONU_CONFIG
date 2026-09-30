@@ -1941,11 +1941,8 @@ msgstr "语音业务网络"
 msgid "The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and stays out of br-lan, so the voice traffic keeps to its own firewall zone."
 msgstr "承载语音业务的 IP 网络。它是 PON 上联的 8021q VLAN，不接入 br-lan，因此语音流量始终留在自己的防火墙区域里。"
 
-msgid "Enable voice network"
-msgstr "启用语音业务网络"
-
-msgid "With the network off, no VLAN subinterface and no voice interface are written and no firewall zone is created."
-msgstr "关闭后不会写入 VLAN 子接口与语音接口，也不会创建防火墙区域。"
+msgid "The only switch of the page: with it off, no VLAN subinterface and no voice interface are written and no firewall zone is created."
+msgstr "本页唯一的开关：关闭后不会写入 VLAN 子接口与语音接口，也不会创建防火墙区域。"
 
 msgid "Physical PON device carrying the voice VLAN, normally pon0."
 msgstr "承载语音 VLAN 的物理 PON 设备，通常为 pon0。"

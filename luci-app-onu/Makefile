@@ -26,7 +26,9 @@ LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 PKG_VERSION:=0.1.0
 # 10: the shipped /etc/config/voice drops the two line sections - the board has
 # a single FXS port, so its parameters moved into the voice profile.
-PKG_RELEASE:=10
+# 11: voice.config.enabled is gone. Nothing ever read it, so the page now has
+# one switch only: voice.network.enabled, the flag voice-apply actually reads.
+PKG_RELEASE:=11
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 
