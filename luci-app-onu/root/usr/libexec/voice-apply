@@ -12,7 +12,7 @@
 #     (pon0.<vid>), never a br-lan member. Bridging the voice VLAN into the
 #     LAN would mix the two planes and defeat the isolation the voice zone
 #     exists for;
-#   - the subinterface backs one interface, "voice", which is either a DHCP
+#   - the subinterface backs the logical interface "voice", which is either a DHCP
 #     client or a statically addressed link for the ONT itself;
 #   - the interface is put in a firewall zone of its own ("voice") with input
 #     and forward dropped and output accepted, so only the traffic the voice
@@ -20,7 +20,8 @@
 #     the LAN or the management plane.
 #
 # The section is written to the managed names below. Removing the page's
-# configuration is a single sweep over network.voice* and firewall.voice*, so
+# configuration is a single sweep over network.voice* / network.luci_voice* and
+# firewall.luci_voice*, so
 # switching the network off leaves no dangling reference behind.
 #
 # The IP connectivity is all this script provides. SIP registration and call
@@ -33,10 +34,12 @@ ACTION="${1:-reload}"
 
 # Names of the network sections this page owns. The firewall zone name is the
 # literal string the firmware expects the operator to recognise as "voice".
-DEV_PREFIX='voice'		# managed network sections are voice*
+VLAN_SECTION='luci_voice_vlan'
+VLAN_DEVICE='ct-voice'
 ZONE_SECTION='luci_voice_zone'
 ZONE_NAME='voice'
 IFACE='voice'
+LEGACY_IFACE='luci_voice'
 
 fail() {
 	logger -t voice "$*"
@@ -85,10 +88,10 @@ load_voice_network() {
 }
 
 # An interface name has to stay within 15 characters, which the kernel enforces
-# for network devices; <uplink>.<vid> of a sane uplink never breaks it, but a
-# hand-typed uplink could.
+# for network devices. The managed voice device is fixed at ct-voice; validate
+# the physical uplink separately because it is supplied by the operator.
 voice_device() {
-	printf '%s.%s' "$VN_UPLINK" "$VN_VLAN"
+	printf '%s' "$VLAN_DEVICE"
 }
 
 validate_config() {
@@ -148,7 +151,8 @@ check_vlan_conflict() {
 #
 # Managed sections
 #
-# Everything this page writes lives under network.voice* / firewall.luci_voice*,
+# Everything this page writes lives under network.voice* / network.luci_voice* /
+# firewall.luci_voice*,
 # which makes removing it one sweep and leaves the rest of the configuration
 # untouched.
 #
@@ -156,7 +160,9 @@ remove_managed_network() {
 	local section
 
 	for section in $(uci -q show network 2>/dev/null | \
-		sed -n 's/^network\.\(voice[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		sed -n \
+		-e 's/^network\.\(voice[A-Za-z0-9_]*\)=.*/\1/p' \
+		-e 's/^network\.\(luci_voice[A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
 		uci -q delete "network.$section"
 	done
 }
@@ -176,11 +182,14 @@ detach_from_zones() {
 	local zone current
 
 	for zone in $(uci -q show firewall 2>/dev/null | \
-		sed -n 's/^firewall\.\([A-Za-z0-9_]*\)=zone$/\1/p'); do
+		sed -n 's/^firewall\.\([^.=]*\)=zone$/\1/p'); do
 		[ "$zone" = "$ZONE_SECTION" ] && continue
 		for current in $(uci -q get "firewall.$zone.network"); do
-			[ "$current" = "$IFACE" ] &&
-				uci -q del_list "firewall.$zone.network=$IFACE"
+			case "$current" in
+				"$IFACE"|"$LEGACY_IFACE")
+					uci -q del_list "firewall.$zone.network=$current"
+					;;
+			esac
 		done
 	done
 }
@@ -201,17 +210,20 @@ write_network_config() {
 
 	# The 8021q subinterface. "ifname" is the physical PON device, "name" the
 	# device handed to netifd; the two differ on purpose.
-	uci set network.voice_device='device'
-	uci set network.voice_device.type='8021q'
-	uci set network.voice_device.ifname="$VN_UPLINK"
-	uci set network.voice_device.vid="$VN_VLAN"
-	uci set network.voice_device.name="$dev"
+	uci set "network.$VLAN_SECTION"='device'
+	uci set "network.$VLAN_SECTION.type"='8021q'
+	uci set "network.$VLAN_SECTION.ifname"="$VN_UPLINK"
+	uci set "network.$VLAN_SECTION.vid"="$VN_VLAN"
+	uci set "network.$VLAN_SECTION.name"="$dev"
 
 	# The interface the voice service binds to. It never joins br-lan.
 	uci set network.$IFACE='interface'
 	uci set network.$IFACE.device="$dev"
 	uci set network.$IFACE.proto="$VN_PROTO"
 	uci set network.$IFACE.auto='1'
+	uci set network.$IFACE.force_link='1'
+	uci set network.$IFACE.delegate='0'
+	uci set network.$IFACE.luci_voice='1'
 
 	if [ "$VN_PROTO" = 'static' ]; then
 		uci set network.$IFACE.ipaddr="$VN_IPADDR"

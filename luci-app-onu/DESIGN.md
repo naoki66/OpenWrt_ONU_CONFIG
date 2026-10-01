@@ -383,6 +383,10 @@ password-only 场景下 O5 反复掉线的根因。
 > 两个合并成有后端响应的那一个：开关留在 `network` 段（后端读的就是它），
 > 文案改成「启用语音业务」并在描述里写明它是全页唯一开关、关闭时什么都不写。
 > `onu-voice.digitmap.enabled`（启用拨号计划）性质不同——它是"要不要下发数图"的配置开关，保留。
+
+> 语音承载的 UCI 拓扑与 Internet / IPTV 使用同一套命名约定：`luci_voice_vlan` 是受管的
+> 802.1q `device`，设备名固定为 `ct-voice`，三层接口 section 仍为 `voice`，并带有
+> `luci_voice=1` 标记；旧版本留下的 `voice_device` 会在下一次应用时一并清理。
 >
 > ⚠️ **H.248 的 `physical_term_prefix` 是运营商可填字段，默认仍为 `A0`**，与上面那个固定的
 > 终端标识 `EN75XX/0` 不是一回事：前者是 H.248 基本配置里的**物理端点前缀**（运营商自定义，
@@ -469,9 +473,9 @@ UCI schema（`/etc/config/onu-internet`）：
 > 之后需要时再 `ensure_in_zone()` 加回去。
 
 > ⚠️ **统一写在 `wan` 而不是另起一个接口名，不代表可以丢掉原来的配置。** stock `wan`/`wan6` 一律 **rename 到 `luci_wanup_stock_wan{,_wan6}`**，
-> 而不是删除：`uci rename` 不动任何 option，因此原本的 proto/device/ipaddr 全都原样保留，只是被 `auto=0` + `disabled=1` 按住；
-> 页面关闭时按 `luci_wanup_prev_auto` 还原。删除-再重建做不到这一点——尤其 `wan6` 通常是 `@wan`，
-> 不收起来的话它会在系统拨号之后接着在上行张口要 DHCPv6。
+> 并把 section type 改成私有的 `luci_wanup_stock`：`uci rename` 不动任何 option，因此原本的 proto/device/ipaddr 全都原样保留，
+> 同时不会被 LuCI「接口」页或 netifd 当成可用的 `interface`；页面关闭时先改回 `interface`，再按 `luci_wanup_prev_auto` 还原。
+> 删除-再重建做不到这一点——尤其 `wan6` 通常是 `@wan`，不收起来的话它会在系统拨号之后接着在上行张口要 DHCPv6。
 
 #### 桥接模式的二层隔离
 
@@ -727,7 +731,8 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音网络 / 语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`）。**后已改**：删掉「线路设置」卡片改为单 FXS 口（三行只读标识 + 端口参数并入 `onu-voice.config`）；删掉无消费者的 `onu-voice.config.enabled`，全页只留 `onu-voice.network.enabled` 一个开关（文案「启用语音业务」） |
 | `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段 |
 | `root/etc/config/onu-internet` | 新增：上网业务页的唯一数据源；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
-| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起（保留原 option）而不是删除；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；卸载打开时额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
+| `root/usr/libexec/voice-apply` | 新增：把语音网络 UCI 翻译成受管的 `luci_voice_vlan` / `ct-voice` / `voice` 拓扑和 `voice` 防火墙 zone；兼容清理旧版 `network.voice_device` 及实验性 `network.luci_voice`，并对 PON 下层使用 `force_link=1` |
+| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；卸载打开时额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
 | `root/etc/init.d/internet` | 新增：`START=18`（早于 network/firewall，与 sibling `iptv` 同构），procd 服务 + `procd_add_reload_trigger "onu-internet"` |
 | `root/usr/share/luci/menu.d/luci-app-onu.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页本次新增 `admin/onu/internet`，order **35**（认证配置 30 与 IPTV 40 之间） |
 | `root/usr/share/rpcd/acl.d/luci-app-onu.json` | 并入原 `luci-app-iptv` 的 UCI 与 network.device 权限，并授权 `onu-internet` / `onu-iptv` / `onu-voice` |

@@ -44,7 +44,11 @@ PKG_VERSION:=0.1.0
 # generic menu labels supplied by other LuCI applications.
 # 19: namespace the internet, IPTV and voice UCI packages as onu-* to avoid
 # collisions with configurations owned by other applications.
-PKG_RELEASE:=19
+# 20: hide parked stock WAN sections, reuse anonymous WAN zones and force-link
+# the generated PON WAN so netifd does not reject it before carrier appears.
+# 21: align voice with the managed luci_* / ct-* network topology and migrate
+# the legacy voice_device section on the next apply.
+PKG_RELEASE:=21
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

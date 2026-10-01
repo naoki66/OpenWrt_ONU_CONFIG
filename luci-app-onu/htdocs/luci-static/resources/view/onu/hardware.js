@@ -45,7 +45,7 @@ var boardLabels = {
 	device_sn: _('Device serial number'),
 	pon_mac: _('PON MAC address'),
 	board_mac: _('Board MAC address'),
-	lan_base_mac: _('LAN base MAC address')
+	lan_base_mac: _('LAN0 MAC address')
 };
 
 /*
@@ -574,14 +574,11 @@ return view.extend({
 	},
 
 	/*
-	 * The board flash half of the page is two blocks, in the order the two
-	 * operations grow: the identity fields patched in place first, the whole
-	 * image last. Both are form sections of the same map so they end up inside
-	 * the map instead of beside it.
+	 * The board flash half of the page is one block: the identity fields patched
+	 * in place followed by whole-image backup and replacement actions.
 	 */
 	renderBoardBlocks: function(m, identity, storages) {
 		this.renderBoardIdentity(m, identity, storages);
-		this.renderPonBoardData(m, identity, storages);
 	},
 
 	renderBoardIdentity: function(m, identity, storages) {
@@ -592,17 +589,16 @@ return view.extend({
 		});
 		var s, o;
 
-		s = m.section(form.TypedSection, 'pon_identity', _('Board identity'),
-			_('The identity fields burned into the flash image of a storage target, patched in place one field at a time. They take effect after a reboot; the image as a whole is handled by PON board data below.'));
+		s = m.section(form.TypedSection, 'pon_identity',
+			'%s / %s'.format(_('Board identity'), _('PON board data')),
+			_('The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot.'));
 		s.addremove = false;
 
 		/*
 		 * The fields live in the board image, not in UCI, so the section is only
 		 * a container: it is backed by a single synthetic instance whose options
 		 * read and write the storages through pon-board-identity. It is
-		 * anonymous so the synthetic name is not printed as a second heading,
-		 * and the two blocks use different instance names to keep the DOM ids
-		 * unique.
+		 * anonymous so the synthetic name is not printed as a second heading.
 		 */
 		s.anonymous = true;
 		s.cfgsections = function() {
@@ -634,54 +630,40 @@ return view.extend({
 					: _('This board declares no writable identity fields.');
 			};
 
-			return;
-		}
+		} else {
+			withFields.forEach(function(target) {
+				Object.keys(target.fields).forEach(function(field) {
+					var value = (((identity || {}).data || {})[target.id] || {})[field] || '';
+					var optionName = '_identity_' + target.id + '_' + field;
 
-		withFields.forEach(function(target) {
-			Object.keys(target.fields).forEach(function(field) {
-				var value = (((identity || {}).data || {})[target.id] || {})[field] || '';
-				var optionName = '_identity_' + target.id + '_' + field;
+					var field_option = s.option(form.Value, optionName,
+						boardLabels[field] || field);
+					field_option.rmempty = true;
+					field_option.default = value;
+					field_option.cfgvalue = function() {
+						return value;
+					};
+					field_option.validate = function(sectionId, newValue) {
+						return validateBoardField(target.fields[field], newValue);
+					};
 
-				var field_option = s.option(form.Value, optionName,
-					boardLabels[field] || field);
-				field_option.rmempty = true;
-				field_option.default = value;
-				field_option.cfgvalue = function() {
-					return value;
-				};
-				field_option.validate = function(sectionId, newValue) {
-					return validateBoardField(target.fields[field], newValue);
-				};
-
-				self.identityEntries.push({
-					target: target.id,
-					field: field,
-					def: target.fields[field],
-					option: field_option,
-					original: value
+					self.identityEntries.push({
+						target: target.id,
+						field: field,
+						def: target.fields[field],
+						option: field_option,
+						original: value
+					});
 				});
 			});
-		});
-	},
+			o = s.option(form.DummyValue, '_identity_spacer');
+			o.rawhtml = true;
+			o.cfgvalue = function() {
+				return E('div', { 'style': 'height: 1em' });
+			};
+		}
 
-	/*
-	 * The last block of the page, and the one that came from upstream's
-	 * configuration page: the board data image as a whole. Backing it up and
-	 * writing it are two directions of the same image, so they stay next to
-	 * each other instead of living on two pages.
-	 */
-	renderPonBoardData: function(m, identity, storages) {
-		var self = this;
-		var s, o;
-
-		s = m.section(form.TypedSection, 'pon_board_data', _('PON board data'),
-			_('The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot.'));
-		s.addremove = false;
-		s.anonymous = true;
-		s.cfgsections = function() {
-			return [ 'image' ];
-		};
-
+		/* Keep whole-image backup and upload in the same board section. */
 		o = s.option(form.DummyValue, '_file_action', _('Board identity file'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
@@ -716,8 +698,7 @@ return view.extend({
 						return E('option', { 'value': String(index) }, target.label);
 					}))
 				: E('span', {}, options[0].label),
-			E('div', { 'class': 'cbi-section-descr' },
-				_('Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one;  and take effect after a reboot.')),
+
 			E('div', { 'class': 'cbi-page-actions' }, [
 				/*
 				 * Backing up only reads the flash, so it stays available

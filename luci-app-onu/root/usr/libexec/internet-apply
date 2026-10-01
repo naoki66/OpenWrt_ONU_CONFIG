@@ -57,6 +57,7 @@ BRIDGE_DEV='br-wanup'
 UPLINK_IFACE='luci_wanup_uplink'
 STOCK_WAN='luci_wanup_stock_wan'
 STOCK_WAN6='luci_wanup_stock_wan6'
+STOCK_TYPE='luci_wanup_stock'
 
 fail() {
 	logger -t internet "$*"
@@ -387,10 +388,14 @@ take_over_stock() {
 
 	uci -q get "network.$section" >/dev/null || return 0
 	[ "$(uci -q get "network.$section.luci_wanup")" = '1' ] && return 0
-	uci -q get "network.$stock" >/dev/null && return 0
+	if uci -q get "network.$stock" >/dev/null; then
+		uci set "network.$stock"="$STOCK_TYPE"
+		return 0
+	fi
 
 	uci rename "network.$section=$stock" ||
 		fail "Cannot set the existing $section interface aside"
+	uci set "network.$stock"="$STOCK_TYPE"
 
 	prev="$(uci -q get "network.$stock.auto")"
 	[ -n "$prev" ] && uci set "network.$stock.luci_wanup_prev_auto"="$prev"
@@ -417,6 +422,7 @@ restore_stock() {
 		uci -q delete "network.$stock.auto"
 	fi
 
+	uci set "network.$stock"='interface'
 	uci rename "network.$stock=$section" ||
 		warn "Cannot restore the original $section interface"
 }
@@ -470,7 +476,7 @@ unpark_wan6() {
 #
 list_zones() {
 	uci -q show firewall 2>/dev/null |
-		sed -n 's/^firewall\.\([A-Za-z0-9_]*\)=zone$/\1/p'
+		sed -n 's/^firewall\.\([^.=]*\)=zone$/\1/p'
 }
 
 zone_holding() {
@@ -603,6 +609,7 @@ write_bridge_network() {
 	uci set network.wan.proto='none'
 	uci set network.wan.delegate='0'
 	uci set network.wan.auto='1'
+	uci set network.wan.force_link='1'
 	uci set network.wan.luci_wanup='1'
 }
 
@@ -679,6 +686,7 @@ write_pppoe_network() {
 	uci set network.wan.mtu="$MTU"
 	uci set network.wan.peerdns="$peerdns"
 	uci set network.wan.auto='1'
+	uci set network.wan.force_link='1'
 	uci set network.wan.luci_wanup='1'
 
 	if want_ipv6; then
@@ -705,6 +713,7 @@ write_dhcp_network() {
 	uci set network.wan.device="$VLAN_DEV"
 	uci set network.wan.proto='dhcp'
 	uci set network.wan.auto='1'
+	uci set network.wan.force_link='1'
 	uci set network.wan.delegate='0'
 	uci set network.wan.luci_wanup='1'
 

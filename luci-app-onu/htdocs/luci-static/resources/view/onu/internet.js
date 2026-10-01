@@ -142,7 +142,7 @@ return view.extend({
 		 * half of the fields, and a second grouping on top of it would only
 		 * hide where the fields actually live.
 		 */
-		m = new form.Map('onu-internet', _('Internet'),
+		m = new form.Map('onu-internet', _('ONU Internet'),
 			_('The internet service carried by the PON uplink: either handed over as a bridge so a downstream router dials, or dialled by the ONT itself.'));
 		m.readonly = !L.hasViewPermission();
 

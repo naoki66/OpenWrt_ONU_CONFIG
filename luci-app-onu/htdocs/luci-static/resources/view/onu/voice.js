@@ -9,6 +9,7 @@ var STYLESHEET = 'view/onu/onu.css';
 
 /* Fully qualified name of the protocol list: <config>.<section>.<option>. */
 var PROTOCOL_OPTION = 'onu-voice.config.protocol';
+var VOICE_DEVICE = 'ct-voice';
 
 /*
  * The board carries a single FXS port, so there is no port to pick and no
@@ -85,7 +86,7 @@ function forSip(o, extra) {
 /*
  * The voice service runs on the PON uplink in a VLAN of its own, handed to the
  * kernel as an 8021q subinterface of the physical PON device rather than as a
- * br-lan member. Showing the name voice-apply derives keeps this page and the
+ * br-lan member. Showing the fixed managed device keeps this page and the
  * script readable against each other, the same way the internet page does it.
  */
 function derivedVoiceDevice() {
@@ -95,7 +96,7 @@ function derivedVoiceDevice() {
 	var vid = uci.get('onu-voice', 'network', 'vlan_id');
 	var uplink = uci.get('onu-voice', 'network', 'uplink') || 'pon0';
 
-	return '%s.%s (voice VLAN %s)'.format(uplink, vid || '?', vid || '?');
+	return '%s.%s (%s)'.format(uplink, vid || '?', VOICE_DEVICE);
 }
 
 /*
@@ -269,7 +270,7 @@ return view.extend({
 		o.depends('enabled', '1');
 
 		o = s.option(form.Value, 'vlan_id', _('VLAN ID'),
-			_('VLAN carrying the voice service. The interface becomes <uplink>.<VLAN ID>.'));
+			_('VLAN carrying the voice service. It becomes the managed device ct-voice on the selected uplink.'));
 		o.datatype = 'range(1,4094)';
 		o.placeholder = '840';
 		o.rmempty = false;
@@ -312,7 +313,7 @@ return view.extend({
 		o.depends({ enabled: '1', proto: 'static' });
 
 		o = s.option(form.DummyValue, '_network_device', _('Voice interface'),
-			_('The device voice-apply creates. It is never added to br-lan.'));
+			_('The device use for voice service.'));
 		o.cfgvalue = derivedVoiceDevice;
 		o.depends('enabled', '1');
 

@@ -52,7 +52,7 @@ load_iptv_config() {
 	config_get SERVICE_VLAN config service_vlan
 	config_get MULTICAST_VLAN config multicast_vlan
 	config_get IGMP_VLAN config igmp_vlan
-	config_get_bool IGMP_SNOOPING config igmp_snooping 0
+	config_get_bool IGMP_SNOOPING config igmp_snooping 1
 	config_get_bool MLD_SNOOPING config mld_snooping 0
 	config_get_bool IGMP_PROXY config igmp_proxy 0
 	config_get_bool MLD_PROXY config mld_proxy 0

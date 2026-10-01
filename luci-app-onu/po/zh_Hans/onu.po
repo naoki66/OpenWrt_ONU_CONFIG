@@ -416,6 +416,9 @@ msgstr "ONU 身份 — OMCI"
 msgid "ONU identity — EPON OAM"
 msgstr "ONU 身份 — EPON OAM"
 
+msgid "PON line mode and credentials used to register the ONU with the OLT."
+msgstr "PON模式和注册参数配置"
+
 msgid "Reported to the OLT over OMCI when the line runs in GPON, XG-PON or XGS-PON mode."
 msgstr "线路为 GPON、XG-PON 或 XGS-PON 模式时，通过 OMCI 上报给 OLT。"
 
@@ -496,6 +499,9 @@ msgstr "PON 模式"
 
 msgid "PON status"
 msgstr "ONU PON 状态"
+
+msgid "Live PON line status, optical readings and registration details reported by the ONU."
+msgstr "实时显示 ONU 上报的 PON 线路状态、光学读数和注册详情。"
 
 msgid "QDMA TX packets submitted"
 msgstr "QDMA 已提交发送报文"
@@ -1970,8 +1976,8 @@ msgstr "承载语音 VLAN 的物理 PON 设备，通常为 pon0。"
 msgid "VLAN ID"
 msgstr "VLAN ID"
 
-msgid "VLAN carrying the voice service. The interface becomes <uplink>.<VLAN ID>."
-msgstr "承载语音业务的 VLAN。接口名会变成 <上联设备>.<VLAN ID>。"
+msgid "VLAN carrying the voice service. It becomes the managed device ct-voice on the selected uplink."
+msgstr "承载语音业务的 VLAN。它会在所选上联设备上生成受管设备 ct-voice。"
 
 msgid "This VLAN carries the internet service; pick a different one for voice."
 msgstr "该 VLAN 已被上网业务占用，请为语音另选一个。"
@@ -2009,8 +2015,8 @@ msgstr "语音服务使用的 DNS 服务器，多个用逗号分隔。"
 msgid "Voice interface"
 msgstr "语音接口"
 
-msgid "The device voice-apply creates. It is never added to br-lan."
-msgstr "由 voice-apply 生成的设备，绝不加入 br-lan。"
+msgid "The device use for voice service."
+msgstr "语音服务使用的设备。"
 
 msgid "DHCP"
 msgstr "DHCP"
@@ -2032,6 +2038,9 @@ msgstr "桥接"
 
 msgid "PON line diagnostics"
 msgstr "PON 线路诊断"
+
+msgid "ONU Hardware identity"
+msgstr "ONU硬件身份"
 
 msgid "PPPoE"
 msgstr "PPPoE"

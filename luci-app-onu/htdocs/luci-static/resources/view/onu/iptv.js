@@ -286,7 +286,7 @@ return view.extend({
 		/* IPv4 */
 		o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable IGMP snooping'),
 			_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
-		o.default = '0';
+		o.default = '1';
 		o.rmempty = false;
 		o.depends('enabled', '1');
 
