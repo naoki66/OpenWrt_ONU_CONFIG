@@ -61,10 +61,10 @@ function listPonDevices() {
  * relay VLAN as well.
  */
 function trunkVlanList() {
-	var explicit = uci.get('iptv', 'config', 'trunk_vlans');
-	var service = uci.get('iptv', 'config', 'service_vlan');
-	var multicast = uci.get('iptv', 'config', 'multicast_vlan');
-	var igmp = uci.get('iptv', 'config', 'igmp_vlan');
+	var explicit = uci.get('onu-iptv', 'config', 'trunk_vlans');
+	var service = uci.get('onu-iptv', 'config', 'service_vlan');
+	var multicast = uci.get('onu-iptv', 'config', 'multicast_vlan');
+	var igmp = uci.get('onu-iptv', 'config', 'igmp_vlan');
 	var list = [];
 
 	function add(vid) {
@@ -104,13 +104,13 @@ function trunkVlanList() {
  * which takes that VLAN out of br-iptv.
  */
 function unicastUpstream() {
-	var mode = uci.get('iptv', 'config', 'mode');
-	var service = uci.get('iptv', 'config', 'service_vlan');
-	var multicast = uci.get('iptv', 'config', 'multicast_vlan');
-	var igmp = uci.get('iptv', 'config', 'igmp_vlan');
-	var unicastVlan = uci.get('iptv', 'config', 'unicast_vlan');
-	var proxy = uci.get('iptv', 'config', 'igmp_proxy') === '1' ||
-		uci.get('iptv', 'config', 'mld_proxy') === '1';
+	var mode = uci.get('onu-iptv', 'config', 'mode');
+	var service = uci.get('onu-iptv', 'config', 'service_vlan');
+	var multicast = uci.get('onu-iptv', 'config', 'multicast_vlan');
+	var igmp = uci.get('onu-iptv', 'config', 'igmp_vlan');
+	var unicastVlan = uci.get('onu-iptv', 'config', 'unicast_vlan');
+	var proxy = uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
+		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
 	var vid;
 
 	if (mode === 'trunk') {
@@ -168,7 +168,7 @@ return view.extend({
 		 * other read as two different things. One description at the top says
 		 * what the page does.
 		 */
-		m = new form.Map('iptv', _('IPTV'),
+		m = new form.Map('onu-iptv', _('IPTV'),
 			_('The IPTV VLANs are carried by the PON uplink and handed over to a set-top box, to a downstream router or to a multicast-to-unicast relay.'));
 		m.readonly = !L.hasViewPermission();
 
@@ -210,7 +210,7 @@ return view.extend({
 		o.description = _('Set-top box mode bridges the VLANs to one port. Single cable mode keeps the port in br-lan and hands every VLAN over tagged, so a downstream router can carry internet and IPTV on one cable.');
 		o.depends('enabled', '1');
 
-		currentPort = uci.get('iptv', 'config', 'lan_port');
+		currentPort = uci.get('onu-iptv', 'config', 'lan_port');
 		lanPorts = (devices || []).map(function(device) {
 			return device.getName();
 		}).filter(function(name) {
@@ -340,8 +340,8 @@ return view.extend({
 		_('Optional. Single cable mode only: the handed-over VLAN the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set.'));
 	o.datatype = 'range(1,4094)';
 	o.rmempty = true;
-	o.placeholder = uci.get('iptv', 'config', 'multicast_vlan') ||
-		uci.get('iptv', 'config', 'service_vlan') || '';
+	o.placeholder = uci.get('onu-iptv', 'config', 'multicast_vlan') ||
+		uci.get('onu-iptv', 'config', 'service_vlan') || '';
 	o.depends({ enabled: '1', unicast: '1', mode: 'trunk' });
 	o.validate = function(sectionId, value) {
 		if (!value)

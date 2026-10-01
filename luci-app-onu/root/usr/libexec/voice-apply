@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 #
-# voice-apply - turn the "network" section of /etc/config/voice into network
+# voice-apply - turn the "network" section of /etc/config/onu-voice into network
 # and firewall configuration.
 #
 # The voice service talks SIP over an IP network of its own, handed over by the
@@ -72,7 +72,7 @@ validate_vlan() {
 }
 
 load_voice_network() {
-	config_load voice
+	config_load onu-voice
 
 	config_get_bool VN_ENABLED network enabled 0
 	config_get VN_UPLINK network uplink pon0
@@ -123,14 +123,14 @@ check_vlan_conflict() {
 	local net_enabled net_vlan iptv_enabled iptv_vlan
 	local iptv_service_vlan iptv_multicast_vlan iptv_igmp_vlan
 
-	config_load internet
+	config_load onu-internet
 	config_get_bool net_enabled config enabled 0
 	config_get net_vlan config vlan
 	if [ "$net_enabled" -eq 1 ] && [ "$VN_VLAN" = "$net_vlan" ]; then
 		fail "VLAN $VN_VLAN already carries the internet service"
 	fi
 
-	config_load iptv
+	config_load onu-iptv
 	config_get_bool iptv_enabled config enabled 0
 	if [ "$iptv_enabled" -eq 1 ]; then
 		config_get iptv_service_vlan config service_vlan

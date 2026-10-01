@@ -8,7 +8,7 @@
 var STYLESHEET = 'view/onu/onu.css';
 
 /* Fully qualified name of the protocol list: <config>.<section>.<option>. */
-var PROTOCOL_OPTION = 'voice.config.protocol';
+var PROTOCOL_OPTION = 'onu-voice.config.protocol';
 
 /*
  * The board carries a single FXS port, so there is no port to pick and no
@@ -89,11 +89,11 @@ function forSip(o, extra) {
  * script readable against each other, the same way the internet page does it.
  */
 function derivedVoiceDevice() {
-	if (uci.get('voice', 'network', 'enabled') !== '1')
+	if (uci.get('onu-voice', 'network', 'enabled') !== '1')
 		return '-';
 
-	var vid = uci.get('voice', 'network', 'vlan_id');
-	var uplink = uci.get('voice', 'network', 'uplink') || 'pon0';
+	var vid = uci.get('onu-voice', 'network', 'vlan_id');
+	var uplink = uci.get('onu-voice', 'network', 'uplink') || 'pon0';
 
 	return '%s.%s (voice VLAN %s)'.format(uplink, vid || '?', vid || '?');
 }
@@ -105,16 +105,16 @@ function derivedVoiceDevice() {
  */
 function validateVoiceVlan(sectionId, value) {
 	var vid = String(value || '');
-	var netVlan = uci.get('internet', 'config', 'vlan');
-	var iptvVlans = L.toArray(uci.get('iptv', 'config', 'service_vlan'))
-		.concat(L.toArray(uci.get('iptv', 'config', 'multicast_vlan')))
-		.concat(L.toArray(uci.get('iptv', 'config', 'igmp_vlan')));
+	var netVlan = uci.get('onu-internet', 'config', 'vlan');
+	var iptvVlans = L.toArray(uci.get('onu-iptv', 'config', 'service_vlan'))
+		.concat(L.toArray(uci.get('onu-iptv', 'config', 'multicast_vlan')))
+		.concat(L.toArray(uci.get('onu-iptv', 'config', 'igmp_vlan')));
 	var i;
 
-	if (uci.get('internet', 'config', 'enabled') === '1' && vid === String(netVlan))
+	if (uci.get('onu-internet', 'config', 'enabled') === '1' && vid === String(netVlan))
 		return _('This VLAN carries the internet service; pick a different one for voice.');
 
-	if (uci.get('iptv', 'config', 'enabled') === '1')
+	if (uci.get('onu-iptv', 'config', 'enabled') === '1')
 		for (i = 0; i < iptvVlans.length; i++)
 			if (vid === String(iptvVlans[i]))
 				return _('This VLAN carries the IPTV service; pick a different one for voice.');
@@ -125,20 +125,20 @@ function validateVoiceVlan(sectionId, value) {
 /*
  * The dependencies above hide every option of the H.248 and SIP sections, but
  * LuCI still renders the two section containers, so switching the protocol
- * would leave an empty card behind. LuCI puts the "cbi-voice-<name>" id on the
+ * would leave an empty card behind. LuCI puts the "cbi-onu-voice-<name>" id on the
  * inner "cbi-section-node" element; the card to hide is the surrounding
  * "cbi-section" div which also carries the heading.
  */
 function sectionCard(node, name) {
 	/*
 	 * A NamedSection whose name equals its UCI type (the h248 and sip
-	 * sections below) makes LuCI stamp the same id, cbi-voice-<name>, on both
+	 * sections below) makes LuCI stamp the same id, cbi-onu-voice-<name>, on both
 	 * the outer .cbi-section card and the inner .cbi-section-node. Pin the
 	 * selector to the card so the heading collapses with the body; fall back
 	 * to the bare id if a future LuCI no longer carries the class.
 	 */
-	var card = node.querySelector('#cbi-voice-' + name + '.cbi-section')
-		|| node.querySelector('#cbi-voice-' + name);
+	var card = node.querySelector('#cbi-onu-voice-' + name + '.cbi-section')
+		|| node.querySelector('#cbi-onu-voice-' + name);
 
 	return card || null;
 }
@@ -146,7 +146,7 @@ function sectionCard(node, name) {
 function toggleProtocolSections(node, protocolOption) {
 	var h248 = sectionCard(node, 'h248');
 	var sip = sectionCard(node, 'sip');
-	var frame = node.querySelector('#cbi-voice-config-protocol');
+	var frame = node.querySelector('#cbi-onu-voice-config-protocol');
 
 	function update() {
 		var value = protocolOption ? protocolOption.formvalue('config') : null;
@@ -212,9 +212,9 @@ return view.extend({
 		 * with either service, and that check reads their VLAN options.
 		 */
 		return Promise.all([
-			uci.load('voice'),
-			uci.load('internet'),
-			uci.load('iptv')
+			uci.load('onu-voice'),
+			uci.load('onu-internet'),
+			uci.load('onu-iptv')
 		]);
 	},
 
@@ -223,7 +223,7 @@ return view.extend({
 
 		ensureStylesheet();
 
-		m = new form.Map('voice', _('Voice'),
+		m = new form.Map('onu-voice', _('Voice'),
 			_('Voice services carried by the PON uplink.'));
 		m.readonly = !L.hasViewPermission();
 

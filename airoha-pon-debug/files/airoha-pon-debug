@@ -155,7 +155,7 @@ copy_config() {
 	local name
 
 	mkdir -p "$WORK_DIR/config"
-	for name in pon airoha-pon-debug network firewall dhcp iptv rtp2httpd; do
+	for name in pon airoha-pon-debug network firewall dhcp onu-iptv rtp2httpd; do
 		[ -r "/etc/config/$name" ] || continue
 		cp "/etc/config/$name" "$WORK_DIR/config/$name"
 	done

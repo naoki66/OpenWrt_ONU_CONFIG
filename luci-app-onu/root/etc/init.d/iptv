@@ -16,6 +16,6 @@ reload_service() {
 service_triggers() {
 	# The IPTV page owns rtp2httpd's upstream interface, so a change on either
 	# side has to re-derive the topology: also fire when rtp2httpd is edited.
-	procd_add_reload_trigger "iptv"
+	procd_add_reload_trigger "onu-iptv"
 	procd_add_reload_trigger "rtp2httpd"
 }

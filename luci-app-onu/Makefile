@@ -24,10 +24,10 @@ LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
 	+firewall4 +kmod-nft-bridge +kmod-nft-offload +omcproxy +ppp-mod-pppoe
 PKG_VERSION:=0.1.0
-# 10: the shipped /etc/config/voice drops the two line sections - the board has
+# 10: the shipped voice configuration drops the two line sections - the board has
 # a single FXS port, so its parameters moved into the voice profile.
-# 11: voice.config.enabled is gone. Nothing ever read it, so the page now has
-# one switch only: voice.network.enabled, the flag voice-apply actually reads.
+# 11: onu-voice.config.enabled is gone. Nothing ever read it, so the page now
+# has one switch only: onu-voice.network.enabled, the flag voice-apply reads.
 # 12: register the top-level ONU menu independently of UCI and ACL state.
 # 13: keep every ONU submenu visible; page code reports missing configuration
 # or backend helpers instead of hiding the menu entry. Keep the parent action
@@ -38,7 +38,13 @@ PKG_VERSION:=0.1.0
 # the status page while retaining them internally for backend data matching.
 # 16: complete Simplified Chinese translations for the latest status,
 # diagnostics and internet labels.
-PKG_RELEASE:=16
+# 17: use an ONU-specific translation key for the Authentication menu so it
+# is not overridden by the generic LuCI translation.
+# 18: prefix every submenu translation key with ONU to avoid collisions with
+# generic menu labels supplied by other LuCI applications.
+# 19: namespace the internet, IPTV and voice UCI packages as onu-* to avoid
+# collisions with configurations owned by other applications.
+PKG_RELEASE:=19
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

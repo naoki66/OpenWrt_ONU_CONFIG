@@ -67,7 +67,7 @@ return view.extend({
 	render: function() {
 		var m, s, o;
 
-		m = new form.Map('airoha-pon-debug', _('PON diagnostics'),
+		m = new form.Map('airoha-pon-debug', _('ONU PON diagnostics'),
 			_('Debug mode continuously keeps recent raw PON, OMCI and OAM packets in RAM. The setting remains enabled after reboot.'));
 		m.chain('pon');
 		m.readonly = !L.hasViewPermission();

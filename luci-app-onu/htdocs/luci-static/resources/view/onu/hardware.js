@@ -418,7 +418,7 @@ return view.extend({
 		 * half is split by line mode because EPON reports it over OAM while
 		 * GPON, XG-PON and XGS-PON report it over OMCI.
 		 */
-		m = new form.Map('pon', _('Hardware identity'),
+		m = new form.Map('pon', _('ONU Hardware identity'),
 			_('Board identity and calibration data stored in flash, and the ONU identity reported to the OLT.'));
 		m.readonly = readonly;
 
@@ -717,7 +717,7 @@ return view.extend({
 					}))
 				: E('span', {}, options[0].label),
 			E('div', { 'class': 'cbi-section-descr' },
-				_('Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one; identity fields and calibration data are included either way. Writing keeps the previous image as /tmp/pon-board-data.*.bin, and both take effect after a reboot.')),
+				_('Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one;  and take effect after a reboot.')),
 			E('div', { 'class': 'cbi-page-actions' }, [
 				/*
 				 * Backing up only reads the flash, so it stays available

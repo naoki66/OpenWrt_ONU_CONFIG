@@ -70,6 +70,27 @@ msgstr "PON 线路已停止"
 msgid "Authentication"
 msgstr "认证"
 
+msgid "ONU Status"
+msgstr "ONU 状态"
+
+msgid "ONU Hardware"
+msgstr "ONU 硬件"
+
+msgid "ONU Authentication"
+msgstr "ONU 认证"
+
+msgid "ONU Internet"
+msgstr "ONU 上网"
+
+msgid "ONU IPTV"
+msgstr "ONU IPTV"
+
+msgid "ONU Voice"
+msgstr "ONU 语音"
+
+msgid "ONU Diagnostics"
+msgstr "ONU 诊断"
+
 msgid "Debug mode"
 msgstr "调试模式"
 
@@ -91,8 +112,8 @@ msgstr "调试数据保存在内存中，最多占用 20 MB；应用设置后开
 msgid "Enabling starts packet capture before a full PON restart. Disabling stops capture."
 msgstr "开启时先启动抓包，再完整重启 PON；关闭时停止抓包。"
 
-msgid "PON diagnostics"
-msgstr "PON 诊断"
+msgid "ONU PON diagnostics"
+msgstr "ONU PON 诊断"
 
 msgid "PON restart completed."
 msgstr "PON 已重启。"
@@ -215,7 +236,7 @@ msgid "Board identity file"
 msgstr "校准分区文件"
 
 msgid "The identity fields burned into the flash image of a storage target, patched in place one field at a time. They take effect after a reboot; the image as a whole is handled by PON board data below."
-msgstr "出厂的身份字段，修改重启后生效；整份镜像见下方「PON 板级数据」。"
+msgstr "出厂校准分区中的身份字段，修改重启后生效；整份镜像见下方「PON 板级数据」。"
 
 msgid "The board data image is the whole storage target: identity fields and calibration data included. A backup downloads it, an upload replaces it; the previous image is kept under /tmp and both take effect after a reboot."
 msgstr "DSD镜像就是整个出厂校准分区，身份字段与校准数据都在里面。重启后生效。"
@@ -262,8 +283,8 @@ msgstr "已从 %s 备份校准分区文件。"
 msgid "Backing up the board identity file failed: %s"
 msgstr "备份校准分区文件失败：%s"
 
-msgid "Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one; identity fields and calibration data are included either way. Writing keeps the previous image as /tmp/pon-board-data.*.bin, and both take effect after a reboot."
-msgstr "下载存完整镜像作为备份，或用上传的镜像整体替换；包含身份字段与校准数据。写入时原镜像另存为 /tmp/pon-board-data.*.bin，重启后生效。"
+msgid "Downloads the complete image of the storage target as a backup, or replaces it with an uploaded one;  and take effect after a reboot."
+msgstr "下载存完整镜像作为备份，或用上传的镜像整体替换,重启后生效。"
 
 msgid "Writing replaces the whole image of %s, identity fields and calibration data included. Continue?"
 msgstr "写入将整体替换 %s 的镜像，身份字段与校准数据一并覆盖。是否继续？"
@@ -474,7 +495,7 @@ msgid "PON Mode"
 msgstr "PON 模式"
 
 msgid "PON status"
-msgstr "PON 状态"
+msgstr "ONU PON 状态"
 
 msgid "QDMA TX packets submitted"
 msgstr "QDMA 已提交发送报文"
@@ -833,8 +854,8 @@ msgstr "硬件身份"
 msgid "Hardware"
 msgstr "硬件"
 
-msgid "Hardware identity"
-msgstr "硬件身份"
+msgid "ONU "
+msgstr "ONU硬件身份"
 
 msgid "Board MAC address"
 msgstr "板载 MAC 地址"
@@ -849,7 +870,7 @@ msgid "PON MAC address"
 msgstr "PON MAC 地址"
 
 msgid "LAN base MAC address"
-msgstr "LAN 基础 MAC 地址"
+msgstr "LAN0 MAC 地址"
 
 msgid "Current line mode"
 msgstr "当前线路模式"

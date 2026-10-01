@@ -50,17 +50,17 @@ function listPonDevices() {
  * loses, so it is refused here and again in internet-apply.
  */
 function iptvPort() {
-	if (uci.get('iptv', 'config', 'enabled') !== '1')
+	if (uci.get('onu-iptv', 'config', 'enabled') !== '1')
 		return '';
 
-	if (uci.get('iptv', 'config', 'mode') !== 'bridge')
+	if (uci.get('onu-iptv', 'config', 'mode') !== 'bridge')
 		return '';
 
-	return uci.get('iptv', 'config', 'lan_port') || '';
+	return uci.get('onu-iptv', 'config', 'lan_port') || '';
 }
 
 function selectedPorts(sectionId) {
-	return L.toArray(uci.get('internet', 'config', 'ports'));
+	return L.toArray(uci.get('onu-internet', 'config', 'ports'));
 }
 
 function validatePorts(sectionId, value) {
@@ -83,7 +83,7 @@ function validatePorts(sectionId, value) {
  * otherwise this page and the config it writes drift apart.
  */
 function wantsIPv6() {
-	switch (uci.get('internet', 'config', 'ip_version')) {
+	switch (uci.get('onu-internet', 'config', 'ip_version')) {
 	case 'ipv6':
 	case 'ipv4_ipv6':
 	case 'dual':
@@ -99,13 +99,13 @@ function wantsIPv6() {
  * internet-apply readable against each other.
  */
 function derivedDevices() {
-	var uplink = uci.get('internet', 'config', 'uplink') || 'pon0';
-	var vlan = uci.get('internet', 'config', 'vlan');
+	var uplink = uci.get('onu-internet', 'config', 'uplink') || 'pon0';
+	var vlan = uci.get('onu-internet', 'config', 'vlan');
 
-	if (uci.get('internet', 'config', 'enabled') !== '1')
+	if (uci.get('onu-internet', 'config', 'enabled') !== '1')
 		return '-';
 
-	switch (uci.get('internet', 'config', 'mode')) {
+	switch (uci.get('onu-internet', 'config', 'mode')) {
 	case 'pppoe':
 		return '%s.%s (%s) -> pppoe-wan'.format(uplink, vlan || '?', VLAN_DEVICE);
 
@@ -124,8 +124,8 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			network.getDevices(),
-			uci.load('internet'),
-			uci.load('iptv')
+			uci.load('onu-internet'),
+			uci.load('onu-iptv')
 		]).then(function(results) {
 			return results[0];
 		});
@@ -142,7 +142,7 @@ return view.extend({
 		 * half of the fields, and a second grouping on top of it would only
 		 * hide where the fields actually live.
 		 */
-		m = new form.Map('internet', _('Internet'),
+		m = new form.Map('onu-internet', _('Internet'),
 			_('The internet service carried by the PON uplink: either handed over as a bridge so a downstream router dials, or dialled by the ONT itself.'));
 		m.readonly = !L.hasViewPermission();
 
@@ -166,7 +166,7 @@ return view.extend({
 
 		o = s.option(form.Value, 'vlan', _('Internet VLAN'),
 			_('The operator VLAN carrying the internet service. It becomes an 8021q subinterface of the uplink, never a member of br-lan.'));
-		o.placeholder = '466';
+		o.placeholder = '1-4094';
 		o.datatype = 'range(1,4094)';
 		o.rmempty = false;
 		o.depends('enabled', '1');
@@ -254,7 +254,7 @@ return view.extend({
 		 * renders a value it does not know, which would silently fall back to
 		 * the first choice and turn the running stack off on the next save.
 		 */
-		if (uci.get('internet', 'config', 'ip_version') === 'ipv6')
+		if (uci.get('onu-internet', 'config', 'ip_version') === 'ipv6')
 			o.value('ipv6', _('IPv6 only (no longer offered)'));
 
 		o.depends({ enabled: '1', mode: 'pppoe' });
@@ -285,7 +285,7 @@ return view.extend({
 		/*
 		 * Hardware offload used to be a switch on this page. It moved to its
 		 * own page, so there is nothing here any more: internet-apply still
-		 * honours internet.config.offload, which is what lets an existing
+		 * honours onu-internet.config.offload, which is what lets an existing
 		 * configuration keep running unchanged until that page lands.
 		 */
 

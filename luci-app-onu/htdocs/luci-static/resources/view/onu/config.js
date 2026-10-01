@@ -123,7 +123,8 @@ return view.extend({
 	render: function() {
 		var m, s, o, modeOption;
 
-		m = new form.Map('pon');
+		m = new form.Map('pon', _('Authentication'),
+			_('PON line mode and credentials used to register the ONU with the OLT.'));
 		m.readonly = !L.hasViewPermission();
 
 		s = m.section(form.TypedSection, 'xpon', _('PON Mode'));

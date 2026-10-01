@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 #
-# internet-apply - turn /etc/config/internet into network, firewall and
+# internet-apply - turn /etc/config/onu-internet into network, firewall and
 # nftables configuration.
 #
 # Two topologies, always written to network.wan so that whatever zone already
@@ -92,7 +92,7 @@ validate_vlan() {
 }
 
 load_internet_config() {
-	config_load internet
+	config_load onu-internet
 	config_get_bool ENABLED config enabled 0
 	config_get MODE config mode bridge
 	config_get UPLINK config uplink pon0
@@ -109,9 +109,9 @@ load_internet_config() {
 # The IPTV page owns one LAN port of its own in set-top box mode; a port cannot
 # sit in two bridges, so applying would silently break whichever page lost.
 load_iptv_port() {
-	IPTV_PORT="$(uci -q get iptv.config.lan_port)"
-	[ "$(uci -q get iptv.config.enabled)" = '1' ] || IPTV_PORT=''
-	[ "$(uci -q get iptv.config.mode)" = 'trunk' ] && IPTV_PORT=''
+	IPTV_PORT="$(uci -q get onu-iptv.config.lan_port)"
+	[ "$(uci -q get onu-iptv.config.enabled)" = '1' ] || IPTV_PORT=''
+	[ "$(uci -q get onu-iptv.config.mode)" = 'trunk' ] && IPTV_PORT=''
 }
 
 port_selected() {

@@ -42,7 +42,7 @@ validate_vlan() {
 }
 
 load_iptv_config() {
-	config_load iptv
+	config_load onu-iptv
 	config_get_bool ENABLED config enabled 0
 	config_get MODE config mode bridge
 	config_get LAN_PORT config lan_port

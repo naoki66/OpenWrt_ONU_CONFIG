@@ -852,7 +852,7 @@ return view.extend({
 	render: function(data) {
 		var container = E('div', { 'id': 'pon-status' }, renderStatus(data));
 		var root = E('div', { 'class': 'cbi-map' }, [
-			E('h2', {}, _('PON status')), container
+			E('h2', {}, _('ONU PON status')), container
 		]);
 
 		ensureStylesheet();

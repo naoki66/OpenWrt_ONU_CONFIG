@@ -3,7 +3,7 @@
 		"description": "Grant access to PON configuration, board identity, calibration data, the internet service, the IPTV bridge and voice",
 		"read": {
 			"cgi-io": [ "exec" ],
-			"uci": [ "pon", "airoha-pon-debug", "internet", "iptv", "voice", "network" ],
+			"uci": [ "pon", "airoha-pon-debug", "onu-internet", "onu-iptv", "onu-voice", "network" ],
 			"ubus": {
 				"file": [ "read", "exec" ],
 				"network.device": [ "status" ],
@@ -23,7 +23,7 @@
 		},
 		"write": {
 			"cgi-io": [ "upload" ],
-			"uci": [ "pon", "airoha-pon-debug", "internet", "iptv", "voice" ],
+			"uci": [ "pon", "airoha-pon-debug", "onu-internet", "onu-iptv", "onu-voice" ],
 			"ubus": {
 				"file": [ "exec", "write" ]
 			},
