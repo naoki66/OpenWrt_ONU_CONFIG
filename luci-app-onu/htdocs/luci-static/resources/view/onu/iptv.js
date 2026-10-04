@@ -54,11 +54,11 @@ function listPonDevices() {
 }
 
 /*
- * resolve_trunk_vlans(): the VLANs single cable mode hands over, each of which
- * becomes a br-iptv-<vid> of its own. An explicit trunk_vlans list wins,
- * otherwise the VLANs of the bridge tab are used. The unicast relay only has a
- * bridge to listen on inside this list, so it is the candidate list for the
- * relay VLAN as well.
+ * resolve_trunk_vlans(): the VLANs single cable mode hands over, in order.
+ * Each one becomes a br-mux-<n> bridge named after its 1-based position in
+ * this list (never the VLAN ID). An explicit trunk_vlans list wins, otherwise
+ * the VLANs of the bridge tab are used. The unicast relay only has a bridge to
+ * listen on inside this list, so it is the candidate list for the relay VLAN.
  */
 function trunkVlanList() {
 	var explicit = uci.get('onu-iptv', 'config', 'trunk_vlans');
@@ -91,15 +91,41 @@ function trunkVlanList() {
 }
 
 /*
+ * Effective relay VLAN in single cable mode. Mirrors resolve_relay_vlan() in
+ * iptv-apply and must stay in step with it:
+ *   explicit unicast_vlan, when it is one of the handed-over VLANs;
+ *   else the multicast VLAN when handed over;
+ *   else the service VLAN when handed over;
+ *   else the first handed-over VLAN.
+ */
+function relayFallbackVlan() {
+	var list = trunkVlanList();
+	var service = uci.get('onu-iptv', 'config', 'service_vlan');
+	var multicast = uci.get('onu-iptv', 'config', 'multicast_vlan');
+	var explicit = uci.get('onu-iptv', 'config', 'unicast_vlan');
+
+	if (explicit)
+		return (list.indexOf(explicit) >= 0) ? explicit : '';
+
+	if (multicast && list.indexOf(multicast) >= 0)
+		return multicast;
+
+	if (service && list.indexOf(service) >= 0)
+		return service;
+
+	return list[0] || '';
+}
+
+/*
  * The device the multicast-to-unicast relay listens on. This mirrors
  * resolve_unicast() in iptv-apply and must stay in step with it: the relay has
  * to listen on a bridge, never on one of its member ports, because frames
  * reaching a bridge port are handled by the bridge itself and never reach the
  * local stack on that port.
  *
- * Single cable mode builds one br-iptv-<vid> per handed-over VLAN, so the relay
- * follows the VLAN picked below, or the multicast VLAN when none is picked.
- * Outside single cable mode there is only one bridge, so it is br-iptv itself —
+ * Single cable mode builds one br-mux-<n> per handed-over VLAN, where n is the
+ * 1-based position in the handed-over list, so the relay VLAN is mapped to its
+ * index here. Outside single cable mode there is only one bridge, br-iptv —
  * or the proxy uplink when the multicast proxy terminates the multicast VLAN,
  * which takes that VLAN out of br-iptv.
  */
@@ -108,15 +134,15 @@ function unicastUpstream() {
 	var service = uci.get('onu-iptv', 'config', 'service_vlan');
 	var multicast = uci.get('onu-iptv', 'config', 'multicast_vlan');
 	var igmp = uci.get('onu-iptv', 'config', 'igmp_vlan');
-	var unicastVlan = uci.get('onu-iptv', 'config', 'unicast_vlan');
 	var proxy = uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
 		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
-	var vid;
+	var vid, idx;
 
 	if (mode === 'trunk') {
-		vid = unicastVlan || multicast || service;
+		vid = relayFallbackVlan();
+		idx = vid ? trunkVlanList().indexOf(vid) + 1 : 0;
 
-		return vid ? 'br-iptv-' + vid : '';
+		return idx ? 'br-mux-' + idx : '';
 	}
 
 	/* resolve_proxy(): only outside single cable mode, and only when a VLAN is
@@ -337,11 +363,10 @@ return view.extend({
 	 * script writes another — so it stays hidden and the script ignores it.
 	 */
 	o = s.taboption('unicast', form.Value, 'unicast_vlan', _('Relay VLAN'),
-		_('Optional. Single cable mode only: the handed-over VLAN the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set.'));
+		_('Optional. Single cable mode only: one of the handed-over VLANs the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set; when neither is in the handed-over list, the first handed-over VLAN is used.'));
 	o.datatype = 'range(1,4094)';
 	o.rmempty = true;
-	o.placeholder = uci.get('onu-iptv', 'config', 'multicast_vlan') ||
-		uci.get('onu-iptv', 'config', 'service_vlan') || '';
+	o.placeholder = relayFallbackVlan() || '';
 	o.depends({ enabled: '1', unicast: '1', mode: 'trunk' });
 	o.validate = function(sectionId, value) {
 		if (!value)

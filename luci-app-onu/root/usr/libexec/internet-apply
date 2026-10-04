@@ -18,7 +18,9 @@
 #   dhcp    The operator hands the address out on the internet VLAN, nothing
 #           is dialled. Dual stack keeps the DHCPv6-PD client this page has
 #           always written: on a plain DHCP uplink there is no session for
-#           netifd to derive IPv6 from, so wan6 stays a real interface here.
+#           netifd to derive IPv6 from, so wan6 stays a real interface here,
+#           bound directly to the VLAN device (not aliased @wan, see
+#           write_dhcpv6_client).
 #
 #   pppoe   The ONT dials itself. The stock network.wan / network.wan6 are
 #           renamed aside rather than deleted, so switching the page off puts
@@ -169,7 +171,7 @@ detach_from_interface() {
 	local device ifnames ifname
 
 	case "$section" in
-		luci_wanup*|luci_iptv*) return ;;
+		luci_wanup*|br_iptv*|mux_iptv_*|luci_iptv*) return ;;
 	esac
 
 	config_get device "$section" device
@@ -708,7 +710,13 @@ want_ipv6() {
 # luci_wanup, so drop_owned_iface() takes it away again on the next run.
 write_dhcpv6_client() {
 	uci set network.wan6='interface'
-	uci set network.wan6.device='@wan'
+	# Bind the VLAN device directly instead of aliasing @wan: an alias only
+	# resolves once network.wan is protocol-up, so while the IPv4 DHCP lease is
+	# pending (no PON carrier yet, slow DHCP server) wan6 has no device at all
+	# and LuCI reports "Network device not present". ct-wanup exists on its own
+	# thanks to force_link, and DHCPv4/DHCPv6 running side by side on the same
+	# IPoE device is the normal dual-stack arrangement.
+	uci set network.wan6.device="$VLAN_DEV"
 	uci set network.wan6.proto='dhcpv6'
 	uci set network.wan6.reqaddress='try'
 	uci set network.wan6.reqprefix='auto'
