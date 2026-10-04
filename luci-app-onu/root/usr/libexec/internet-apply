@@ -34,11 +34,26 @@
 # versions of this script created (it is marked luci_wanup) and
 # restore_stock() puts the original one back.
 #
-# Why the uplink gets an interface of its own in dial mode: fw4 collects the
-# flowtable devices per firewall zone (fw4.uc builds related_physdevs from
-# zone.network, not from zone.device), and only real devices belong in a
-# flowtable - it resolves the topology below VLAN and PPPoE interfaces itself.
-# Referencing pon0 from a zone is what puts pon0 into the generated flowtable.
+# How the physical uplink reaches the flowtable in dial mode: fw4 collects the
+# flowtable devices per firewall zone. Stock fw4 derives them from the zone
+# network interfaces only (related_physdevs), and while it resolves the lower
+# devices of VLAN/bridge devices it cannot look through a ppp device, so with
+# network.wan on pppoe-wan the physical uplink never makes it into the
+# flowtable. Two ways to anchor it:
+#
+#   1. Patched firewall4 (preferred): put the 802.1q uplink sub-interface in
+#      the zone with "list device". The patched fw4 also resolves zone devices
+#      for offloading (zone_offload_devices()), so ct-wanup expands into pon0.
+#      No extra interface section exists, so nothing shows up on the LuCI
+#      interfaces page.
+#
+#   2. Stock firewall4 (fallback): create the $UPLINK_IFACE helper interface
+#      (proto none) directly on the physical uplink and add it to the zone.
+#      It works, but every UCI interface is listed on the LuCI interfaces
+#      page, so the helper is visible there as a redundant unmanaged iface.
+#
+# DHCP mode needs neither: network.wan runs on ct-wanup itself and the VLAN
+# lower-device resolution already reaches the physical uplink.
 #
 # Hardware offload: airoha_eth registers ndo_setup_tc and accepts
 # TC_SETUP_CLSFLOWER / TC_SETUP_FT, so an accepted flow becomes a PPE entry
@@ -58,6 +73,11 @@ UPLINK_IFACE='luci_wanup_uplink'
 STOCK_WAN='luci_wanup_stock_wan'
 STOCK_WAN6='luci_wanup_stock_wan6'
 STOCK_TYPE='luci_wanup_stock'
+
+# Set by write_pppoe_network when the physical uplink is anchored through a
+# zone "list device" entry instead of the helper interface; write_firewall_config
+# then adds (and purges on every other run) that entry.
+ZONE_DEVICE_UPLINK=0
 
 fail() {
 	logger -t internet "$*"
@@ -241,10 +261,15 @@ warn_on_empty_br_lan() {
 # offloading driver and it is driven by the netfilter flowtable. The previous
 # values are remembered so switching the page off restores them.
 #
+# The firewall config ships one anonymous defaults section; referring to it by
+# "firewall.defaults.*" makes uci treat defaults as a section type and the
+# set/delete calls fail with "Invalid argument".
+DEFAULTS_REF='firewall.@defaults[0]'
+
 offload_backup() {
 	[ -f "$OFFLOAD_BACKUP" ] || {
-		echo "flow_offloading=$(uci -q get firewall.defaults.flow_offloading)" >"$OFFLOAD_BACKUP"
-		echo "flow_offloading_hw=$(uci -q get firewall.defaults.flow_offloading_hw)" >>"$OFFLOAD_BACKUP"
+		echo "flow_offloading=$(uci -q get "$DEFAULTS_REF.flow_offloading")" >"$OFFLOAD_BACKUP"
+		echo "flow_offloading_hw=$(uci -q get "$DEFAULTS_REF.flow_offloading_hw")" >>"$OFFLOAD_BACKUP"
 	}
 }
 
@@ -254,9 +279,9 @@ offload_restore() {
 	while IFS='=' read -r key value; do
 		[ -n "$key" ] || continue
 		if [ -n "$value" ]; then
-			uci set "firewall.defaults.$key"="$value"
+			uci set "$DEFAULTS_REF.$key"="$value"
 		else
-			uci -q delete "firewall.defaults.$key"
+			uci -q delete "$DEFAULTS_REF.$key"
 		fi
 	done <"$OFFLOAD_BACKUP"
 
@@ -266,8 +291,8 @@ offload_restore() {
 write_offload_defaults() {
 	if [ "$OFFLOAD" -eq 1 ]; then
 		offload_backup
-		uci set firewall.defaults.flow_offloading='1'
-		uci set firewall.defaults.flow_offloading_hw='1'
+		uci set "$DEFAULTS_REF.flow_offloading"='1'
+		uci set "$DEFAULTS_REF.flow_offloading_hw"='1'
 	else
 		offload_restore
 	fi
@@ -513,8 +538,23 @@ remove_from_zones() {
 		for current in $(uci -q get "firewall.$zone.network"); do
 			for net in "$@"; do
 				[ "$current" = "$net" ] &&
-					uci -q del_list "firewall.$zone.network"="$net"
+					uci del_list "firewall.$zone.network"="$net"
 			done
+		done
+	done
+}
+
+# The managed vlan sub-interface is added as a zone device only while patched
+# firewall4 needs it as the PPPoE flowtable anchor. Drop it from every zone on
+# every other run (page off, bridge, DHCP, stock-fw4 fallback) so switching
+# modes never leaves a dangling device reference behind.
+purge_managed_zone_devices() {
+	local zone current
+
+	for zone in $(list_zones); do
+		for current in $(uci -q get "firewall.$zone.device"); do
+			[ "$current" = "$VLAN_DEV" ] &&
+				uci del_list "firewall.$zone.device"="$current"
 		done
 	done
 }
@@ -625,9 +665,19 @@ uplink_claimed() {
 	return 1
 }
 
-# In dial mode nothing else references the physical uplink, yet the flowtable
-# needs it: fw4 only learns devices through zone membership, and the flowtable
-# wants the real device rather than pppoe-wan or $VLAN_DEV.
+# Stock fw4 derives flowtable devices from zone network interfaces only; a
+# zone "list device" entry reaches the flowtable only on a firewall4 build
+# that resolves zone devices for offloading. The patched fw4.uc carries the
+# zone_offload_devices() helper this script relies on.
+fw4_zone_device_offload() {
+	[ -r /usr/share/ucode/fw4.uc ] || return 1
+	grep -q 'zone_offload_devices' /usr/share/ucode/fw4.uc 2>/dev/null
+}
+
+# Fallback for stock firewall4: nothing else references the physical uplink in
+# dial mode, yet the flowtable needs the real device rather than pppoe-wan or
+# $VLAN_DEV. The price is a helper interface visible on the LuCI interfaces
+# page; patched builds anchor the uplink through a zone "list device" instead.
 write_uplink_device_interface() {
 	if uplink_claimed; then
 		warn "$UPLINK is already claimed by another interface; put that interface in a zone so the flowtable picks up the uplink"
@@ -703,7 +753,18 @@ write_pppoe_network() {
 		uci set network.wan.delegate='0'
 	fi
 
-	[ "$OFFLOAD" -eq 1 ] && write_uplink_device_interface
+	# Over a live ppp session the l3 device is pppoe-wan, whose lower devices
+	# fw4 cannot resolve, so the physical uplink has to be anchored on its
+	# own. Prefer the zone device entry (no visible interface); fall back to
+	# the helper interface on stock firewall4 builds.
+	if [ "$OFFLOAD" -eq 1 ]; then
+		if fw4_zone_device_offload; then
+			ZONE_DEVICE_UPLINK=1
+		else
+			warn "firewall4 does not resolve zone devices for offloading; keeping the $UPLINK_IFACE helper interface (update firewall4 to hide it)"
+			write_uplink_device_interface
+		fi
+	fi
 }
 
 write_dhcp_network() {
@@ -723,7 +784,9 @@ write_dhcp_network() {
 
 	want_ipv6 && write_dhcpv6_client
 
-	[ "$OFFLOAD" -eq 1 ] && write_uplink_device_interface
+	# No helper interface here: wan runs on the $VLAN_DEV vlan sub-interface
+	# itself and fw4 resolves its lower device (the physical uplink) for the
+	# flowtable on both stock and patched firewall4.
 }
 
 write_network_config() {
@@ -770,6 +833,7 @@ write_network_config() {
 
 write_firewall_config() {
 	remove_managed_firewall
+	purge_managed_zone_devices
 
 	if [ "$ENABLED" -eq 1 ]; then
 		resolve_wan_zone
@@ -777,6 +841,10 @@ write_firewall_config() {
 		uci -q get network.wan6 >/dev/null && ensure_in_zone "$WAN_ZONE" wan6
 		uci -q get "network.$UPLINK_IFACE" >/dev/null &&
 			ensure_in_zone "$WAN_ZONE" "$UPLINK_IFACE"
+		# PPPoE on patched firewall4: anchor the physical uplink through the
+		# zone device list instead of a helper interface (see file header).
+		[ "$ZONE_DEVICE_UPLINK" = 1 ] &&
+			uci add_list "firewall.$WAN_ZONE.device"="$VLAN_DEV"
 		ensure_lan_forwarding
 	fi
 

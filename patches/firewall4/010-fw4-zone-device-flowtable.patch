@@ -1,0 +1,78 @@
+From 0c1ac09a05d4a49abd39e473c1e25437ca221ae8 Mon Sep 17 00:00:00 2001
+From: naoki66 <naoki66@local>
+Date: Sun, 4 Oct 2026 20:31:12 +0800
+Subject: [PATCH] fw4: resolve flowtable devices from zone device list too
+
+related_physdevs only mirrors interfaces referenced via zone network options; devices listed via zone device land solely in match_devices and never reach the flowtable. For a PPPoE session terminating locally (l3_device pppoe-wan, devtype ppp which resolve_lower_devices does not recurse into), the underlying 802.1q uplink and its physical device can therefore never be offloaded. Add zone_offload_devices() to collect concrete zone.device entries (skipping wildcard, inverted and any entries) and feed them through both the hardware and software offload resolution loops, reusing resolve_lower_devices so vlan/bridge lowers are expanded the same way.
+---
+ root/usr/share/ucode/fw4.uc | 33 +++++++++++++++++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/root/usr/share/ucode/fw4.uc b/root/usr/share/ucode/fw4.uc
+index 690deb0..37e70b5 100644
+--- a/root/usr/share/ucode/fw4.uc
++++ b/root/usr/share/ucode/fw4.uc
+@@ -489,6 +489,26 @@ function nft_try_hw_offload(devices) {
+ 	return (rc == 0);
+ }
+ 
++// Devices anchored into a zone via "list device" never land in
++// related_physdevs, which mirrors zone network interfaces only. Collect the
++// concrete device names from zone.device as well, so the physical device
++// below a dialed session (e.g. pon0 below pppoe-wan over an 802.1q uplink)
++// can be included in the flowtable. Wildcard ("name+"), inversion ("!name")
++// and "any" ("*") entries cannot name a concrete device and are skipped.
++function zone_offload_devices(zone) {
++	let devices = [];
++
++	for (let entry in to_array(zone.device)) {
++		if (type(entry) != "object" || entry.any || entry.invert)
++			continue;
++
++		if (entry.device != null && index(entry.device, "+") < 0)
++			push(devices, entry.device);
++	}
++
++	return devices;
++}
++
+ 
+ return {
+ 	read_kernel_version: function() {
+@@ -518,10 +538,14 @@ return {
+ 			bus.disconnect();
+ 		}
+ 
+-		for (let zone in this.zones())
++		for (let zone in this.zones()) {
+ 			for (let device in zone.related_physdevs)
+ 				push(devices ||= [], ...resolve_lower_devices(devstatus, device));
+ 
++			for (let device in zone_offload_devices(zone))
++				push(devices ||= [], ...resolve_lower_devices(devstatus, device));
++		}
++
+ 		if (!devices)
+ 			return null;
+ 
+@@ -546,11 +570,16 @@ return {
+ 		if (!devices) {
+ 			devices = [];
+ 
+-			for (let zone in this.zones())
++			for (let zone in this.zones()) {
+ 				for (let device in zone.related_physdevs)
+ 					if (fs.access(`/sys/class/net/${device}`))
+ 						push(devices, device);
+ 
++				for (let device in zone_offload_devices(zone))
++					if (fs.access(`/sys/class/net/${device}`))
++						push(devices, device);
++			}
++
+ 			devices = sort(uniq(devices));
+ 		}
+ 
+-- 
+2.55.0.windows.5
+

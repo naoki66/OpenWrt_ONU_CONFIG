@@ -536,18 +536,29 @@ table bridge wanup {
   而不是 `ct-wanup` / `pppoe-wan`；
 - PPE 计数可由 `airoha_ppe_debugfs` 读出：`/sys/kernel/debug/ppe/entries`（全部表项）、`/sys/kernel/debug/ppe/bind`（仅已绑定）。
 
-> ⚠️ **fw4 只按 zone 成员推导 flowtable 设备，而且只认 `zone.network`，不认 `zone.device`。**
+> ⚠️ **原版 fw4 只按 zone 成员推导 flowtable 设备，而且只认 `zone.network`，不认 `zone.device`。**
 > 这条来自 fw4 源码本身：`related_physdevs` 只用 option `network`（`fw4.uc`），`list device` 只进 `match_devices`；
 > `resolve_offload_devices()` 再对每个设备走 `resolve_lower_devices()`，后者只对 `devtype` 为 `vlan` / `bridge` 的递归展开成员。
-> 于是：**想让 pon0 进 flowtable，就必须有一个 device 指向 pon0 的接口挂在某个 zone 里**——这就是系统拨号模式下额外写
-> `luci_wanup_uplink`（proto `none`）的唯一理由。桥接模式不需要它：`ct-wanup` 是 `br-wanup` 的成员，顺着网桥就已经展开到 pon0 了。
+> 而 PPPoE 拨号起来后 wan 的 `l3_device` 是 `pppoe-wan`（devtype `ppp`，不递归），物理设备 pon0 因此永远进不了 flowtable。
+>
+> 本包采用**双锚定策略**，由 `internet-apply` 在写配置时自动探测、无需用户干预：
+>
+> 1. **补丁版 fw4（首选）**：固件树对 firewall4 打补丁（新增 `zone_offload_devices()`，让 hw/sw 两处 offload
+>    设备解析循环同时遍历 `zone.device`）。脚本检测到补丁后，PPPoE 模式只向 wan zone 写 `list device 'ct-wanup'`，
+>    fw4 沿 vlan 递归展开到 pon0。不产生任何多余 UCI 接口，LuCI「接口」页干净。
+> 2. **原版 fw4（自动回退）**：检测不到补丁时，回退为创建 `luci_wanup_uplink`（proto `none`，device=pon0）
+>    并挂入 wan zone 的辅助接口——它会显示在 LuCI 接口页（协议"不配置协议"），这是 fw4 限制下的唯一手段，不是配置错误。
+>
+> DHCP 模式两种情况都不需要辅助手段：wan 直接跑在 `ct-wanup` 上，经 vlan 递归即可展开到 pon0。
+> 桥接模式同样不需要：`ct-wanup` 是 `br-wanup` 的成员，顺着网桥就已经展开到 pon0。
+> 写入的 `list device` 与辅助接口都由脚本托管，停用页面 / 切换模式时自动清除。
 
 #### 验收方式（到设备上可执行）
 
 ```sh
-# 1. 卸载开关
-uci get firewall.defaults.flow_offloading          # 应为 1
-uci get firewall.defaults.flow_offloading_hw       # 应为 1
+# 1. 卸载开关（defaults 是匿名段，必须用 @defaults[0]，注意引号）
+uci get 'firewall.@defaults[0].flow_offloading'    # 应为 1
+uci get 'firewall.@defaults[0].flow_offloading_hw' # 应为 1
 
 # 2. flowtable 里必须是真实设备，不能只出现 pppoe-wan / ct-wanup
 nft list flowtable inet fw4 ft                     # devices = { lan1, lan2, pon0 ... }
@@ -732,7 +743,7 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段 |
 | `root/etc/config/onu-internet` | 新增：上网业务页的唯一数据源；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
 | `root/usr/libexec/voice-apply` | 新增：把语音网络 UCI 翻译成受管的 `luci_voice_vlan` / `ct-voice` / `voice` 拓扑和 `voice` 防火墙 zone；兼容清理旧版 `network.voice_device` 及实验性 `network.luci_voice`，并对 PON 下层使用 `force_link=1` |
-| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；卸载打开时额外写 `luci_wanup_uplink` 让真实设备进 flowtable；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
+| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；PPPoE 卸载锚定采用双策略（探测 fw4 是否含 `zone_offload_devices` 补丁：补丁版向 wan zone 写 `list device 'ct-wanup'`，原版回退写 `luci_wanup_uplink` 辅助接口，详见 NPU 卸载一节），托管的 zone device 由 `purge_managed_zone_devices()` 在每次写入前清扫；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
 | `root/etc/init.d/internet` | 新增：`START=18`（早于 network/firewall，与 sibling `iptv` 同构），procd 服务 + `procd_add_reload_trigger "onu-internet"` |
 | `root/usr/share/luci/menu.d/luci-app-onu.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页本次新增 `admin/onu/internet`，order **35**（认证配置 30 与 IPTV 40 之间） |
 | `root/usr/share/rpcd/acl.d/luci-app-onu.json` | 并入原 `luci-app-iptv` 的 UCI 与 network.device 权限，并授权 `onu-internet` / `onu-iptv` / `onu-voice` |
