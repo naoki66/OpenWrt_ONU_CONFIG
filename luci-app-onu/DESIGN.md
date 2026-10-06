@@ -362,7 +362,7 @@ password-only 场景下 O5 反复掉线的根因。
 
 | Section | 类型 | 内容 |
 | --- | --- | --- |
-| 语音业务网络 | `NamedSection('network','network')` | **本页唯一的开关「启用语音业务」**（`onu-voice.network.enabled`）、上联设备、VLAN ID、IP 获取方式（DHCP / 静态）、静态四件套、以及只读的派生接口行 |
+| 语音业务网络 | `NamedSection('network','network')` | **本页唯一的开关「启用语音业务」**（`onu-voice.network.enabled`）、交付方式（route 本机三层 / bridge 专用口桥接 / trunk 单线复用）、上联设备、VLAN ID、桥接模式专用语音口、单线复用 Trunk 口、IP 获取方式（仅 route：DHCP / 静态）、静态四件套、以及只读的派生接口行 |
 | 语音配置 | `NamedSection('config','voice')` | 语音协议（H.248 / 软交换 SIP / IMS SIP）、DTMF 转移模式、PayLoad 类型值、来电显示、拍叉时间间隔上下限、催挂音/忙音/久叫不应时间、Codec 协商规则、传真编码方式、传真协商方式、同步话机时间，**以及唯一 FXS 口的三行只读标识（FXS 设备 / PCM 通道 / 终端 ID）与其参数**（认证用户名、认证密码、电话号码——后三项仅 SIP、呼出增益、呼入增益、开启回声抑制） |
 | H.248 | `NamedSection('h248','h248')` | 仅协议为 H.248 时出现。四个 tab：基本配置（编码类型、主备服务器地址与端口、MG 注册方式、域名、MG 端口、授权方式、物理端点前缀）、资源（RTP 临时端点前缀/起始/对齐模式/数字长度/数目）、高级配置（ACK 消息、长定时器、PENDING 定时器、重传定时器、重传次数/间隔/时长、重注册周期）、心跳（模式、周期、次数） |
 | SIP | `NamedSection('sip','sip')` | 软交换 SIP 与 IMS SIP 共用。四个 tab：服务器（代理/注册/出局代理/归属网关域名的地址、端口与承载协议）、备用服务器（代理/注册/出局代理的备用地址、端口与承载协议）、高级配置（信令 DSCP、媒体 DSCP、注册周期、注册重试周期、会话更新周期、最小会话更新周期）、心跳（开启心跳、周期、超时次数、模式） |
@@ -384,9 +384,29 @@ password-only 场景下 O5 反复掉线的根因。
 > 文案改成「启用语音业务」并在描述里写明它是全页唯一开关、关闭时什么都不写。
 > `onu-voice.digitmap.enabled`（启用拨号计划）性质不同——它是"要不要下发数图"的配置开关，保留。
 
-> 语音承载的 UCI 拓扑与 Internet / IPTV 使用同一套命名约定：`luci_voice_vlan` 是受管的
-> 802.1q `device`，设备名固定为 `ct-voice`，三层接口 section 仍为 `voice`，并带有
-> `luci_voice=1` 标记；旧版本留下的 `voice_device` 会在下一次应用时一并清理。
+> **语音 VLAN 的三种交付方式（`onu-voice.network.mode`，旧配置无此选项时按 `route` 处理）：**
+>
+> | 模式 | 拓扑（受管 UCI 段 → 内核设备） | 是否占 LAN 口 | 三层/防火墙 |
+> | --- | --- | --- | --- |
+> | `route`（默认，兼容旧行为） | `luci_voice_vlan`（8021q）→ `ct-voice`；接口 `voice` 带 `luci_voice=1` 标记 | 否 | ONU 自身 DHCP/静态取地址；`luci_voice_zone`（name=`voice`，in/out/forward=DROP/ACCEPT/DROP） |
+> | `bridge` | `voice_br_vlan`（8021q）→ `ct-voice`；`voice_br_dev`（bridge）→ `br-voice`（端口＝专用 LAN 口 + ct-voice）；无地址接口 `voice_bridge`（proto none） | 专用口在启用期间移出 br-lan | 纯二层，无 zone；专用口即隔离边界，不需要 nft 过滤器 |
+> | `trunk` | `voice_up`/`voice_dn`（一对 8021q，分别在 pon0 与 trunk 口）→ `voice-up`/`voice-dn`；`voice_mux_dev` → `br-voice-mux`；无地址接口 `voice_mux` | 否，trunk 口留在 br-lan，VLAN 带标签离开 | 纯二层，无 zone |
+>
+> bridge/trunk 与 IPTV 页的两种拓扑完全同构（复用同一套「专用口 / 单线复用」模型）。
+> **trunk 口允许与 IPTV 的 trunk 口是同一个物理端口**：不同 VLAN 各有独立的 8021q 子接口对与网桥，
+> 在软件 VLAN 上天然共存，下挂设备一根网线同时拿到 IPTV 与语音的标签帧。
+>
+> **三页端口/VLAN 互斥矩阵**（前后端双校验，后端是手改配置的兜底）：
+>
+> - 专用桥接口（上网 bridge 端口、IPTV lan_port、语音 lan_port）两两互斥；
+> - 专用桥接口不能同时是任一页的 trunk 口；语音/IPTV 的两个 trunk 口可以相同；
+> - 语音 VLAN 不得与上网 VLAN、IPTV 业务/组播/IGMP VLAN 及 IPTV `trunk_vlans` 列表重复；
+>   反向 IPTV 应用时同样校验语音 VLAN；
+> - 切模式/停用会把旧专用口按「从 `voice_br_dev` 回溯」的方式还回 br-lan，IPTV/上网脚本的
+>   detach 保护名单均已加入 `voice*`/`luci_voice*`。
+>
+> 受管段每次写入前全量清扫 `network.voice*` / `network.luci_voice*` 与 `firewall.luci_voice*`，
+> 旧版本留下的 `voice_device` 会在下一次应用时一并清理。
 >
 > ⚠️ **H.248 的 `physical_term_prefix` 是运营商可填字段，默认仍为 `A0`**，与上面那个固定的
 > 终端标识 `EN75XX/0` 不是一回事：前者是 H.248 基本配置里的**物理端点前缀**（运营商自定义，
@@ -415,8 +435,12 @@ SIP 段的字段在 H.248 机器上由 CGI 分支掉、抓不到页面，因此�
   隐藏字段不参与校验；
 - 拍叉时间上下限用自定义 `validate` 比较（最小值留空时报的是「必填」，不重复报错）；
 - 增益是 `range(-14,6)`，LuCI 的 `range()` 支持负数；
-- **后端目前只有 `voice-apply`，它只读 `onu-voice.network.*`**（VLAN / 接口 / zone）。
+- **后端目前只有 `voice-apply`，它只读 `onu-voice.network.*`**（交付模式 / VLAN / 接口 / zone）。
   加新开关前先确认有没有消费者：`voice-apply` 的注释已写明它从不碰线路与协议；
+  bridge/trunk 是纯二层转发，不建 zone、不生成 nft（专用口隔离），route 才写 `voice` zone；
+- `voice.js` 的端口下拉来自 `network.getDevices()`（与 IPTV 页同一个来源），
+  专用口/trunk 口的互斥在前端 `validateVoicePort()` 先挡一遍，后端 `check_port_conflict()` 兜底；
+  IP 四件套只在 `mode=route` 时显示，派生设备行按模式显示 ct-voice / br-voice / br-voice-mux；
 
 - FXS 口**只有一路**，因此不再有 `TypedSection('line')`：端口数是硬件事实，页面上做成
   `DummyValue` 只读行（`/dev/en75xx-fxs0` / `PCM0` / `EN75XX/0` 三个常量在文件顶部），
@@ -771,15 +795,15 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `htdocs/.../view/onu/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
 | `htdocs/.../view/onu/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转。**后已改**：派生网桥按透传列表序号显示为 `br-mux-<n>`（不含 VLAN 号，`unicastUpstream()` 内 indexOf+1 映射），新增 `relayFallbackVlan()` 镜像后端四级回落，中继 VLAN 占位符改为显示实际回落 VLAN |
 | `htdocs/.../view/onu/internet.js` | 新增：上网业务页（order 35，插在认证配置与 IPTV 之间）。单张 `form.Map('onu-internet')` + `NamedSection('config')`，**不分 tab**，用 `depends()` 切换；字段：启用、上网方式（**桥接 / DHCP / 系统拨号三种**）、上联设备、VLAN、LAN 口（`MultiValue`，校验至少选 1 且与 IPTV 机顶盒口互斥）、IPoE、IP 版本（**IPv4 only / 双栈，DHCP 与 PPPoE 都显示**）、PPPoE 用户名 / 密码、MTU、`derivedDevices()` 只读派生设备行。**硬件卸载开关已移出本页** |
-| `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音网络 / 语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`）。**后已改**：删掉「线路设置」卡片改为单 FXS 口（三行只读标识 + 端口参数并入 `onu-voice.config`）；删掉无消费者的 `onu-voice.config.enabled`，全页只留 `onu-voice.network.enabled` 一个开关（文案「启用语音业务」） |
-| `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段 |
+| `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音网络 / 语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`）。**后已改**：删掉「线路设置」卡片改为单 FXS 口（三行只读标识 + 端口参数并入 `onu-voice.config`）；删掉无消费者的 `onu-voice.config.enabled`，全页只留 `onu-voice.network.enabled` 一个开关（文案「启用语音业务」）。**语音 VLAN 交付三模式**：新增 `mode`（route/bridge/trunk）、`lan_port`、`trunk_port` 控件与跨页端口/VLAN 校验，IP 四件套改为仅 route 显示，派生设备行随模式显示 ct-voice/br-voice/br-voice-mux |
+| `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段。**network 段新增** `mode`（route/bridge/trunk，缺省 route）/ `lan_port` / `trunk_port` |
 | `root/etc/config/onu-internet` | 新增：上网业务页的唯一数据源；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
-| `root/usr/libexec/voice-apply` | 新增：把语音网络 UCI 翻译成受管的 `luci_voice_vlan` / `ct-voice` / `voice` 拓扑和 `voice` 防火墙 zone；兼容清理旧版 `network.voice_device` 及实验性 `network.luci_voice`，并对 PON 下层使用 `force_link=1` |
-| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；PPPoE 卸载锚定采用双策略（探测 fw4 是否含 `zone_offload_devices` 补丁：补丁版向 wan zone 写 `list device 'ct-wanup'`，原版回退写 `luci_wanup_uplink` 辅助接口，详见 NPU 卸载一节），托管的 zone device 由 `purge_managed_zone_devices()` 在每次写入前清扫；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口 |
+| `root/usr/libexec/voice-apply` | 新增：把语音网络 UCI 翻译成受管的 `luci_voice_vlan` / `ct-voice` / `voice` 拓扑和 `voice` 防火墙 zone；兼容清理旧版 `network.voice_device` 及实验性 `network.luci_voice`，并对 PON 下层使用 `force_link=1`。**后已改**：按 `mode` 分三种拓扑——route 保持原行为；bridge 写 `voice_br_vlan`/`voice_br_dev`(br-voice)/`voice_bridge` 并把专用口移出 br-lan（停用/切换时从旧 `voice_br_dev` 回溯还口）；trunk 写 `voice_up`/`voice_dn`/`voice_mux_dev`(br-voice-mux)/`voice_mux`，trunk 口留在 br-lan。新增 `check_vlan_conflict()`（含 IPTV `trunk_vlans`）与 `check_port_conflict()`（上网桥接口/IPTV 专用口与 trunk 口互斥矩阵）；zone 仅 route 模式写 |
+| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；PPPoE 卸载锚定采用双策略（探测 fw4 是否含 `zone_offload_devices` 补丁：补丁版向 wan zone 写 `list device 'ct-wanup'`，原版回退写 `luci_wanup_uplink` 辅助接口，详见 NPU 卸载一节），托管的 zone device 由 `purge_managed_zone_devices()` 在每次写入前清扫；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口。**语音三模式加入后**：`load_voice_port()` 把语音专用口/trunk 口纳入桥接端口校验，detach 保护名单加入 `voice*` |
 | `root/etc/init.d/internet` | 新增：`START=18`（早于 network/firewall，与 sibling `iptv` 同构），procd 服务 + `procd_add_reload_trigger "onu-internet"` |
 | `root/usr/share/luci/menu.d/luci-app-onu.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页本次新增 `admin/onu/internet`，order **35**（认证配置 30 与 IPTV 40 之间） |
 | `root/usr/share/rpcd/acl.d/luci-app-onu.json` | 并入原 `luci-app-iptv` 的 UCI 与 network.device 权限，并授权 `onu-internet` / `onu-iptv` / `onu-voice` |
-| `root/etc/config/onu-iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入；新增 `mode` / `trunk_port` / `trunk_vlans` / `unicast` / `unicast_port` / `unicast_addr` / `unicast_vlan`，`iptv-apply` 重写为按模式推导拓扑，新增 `resolve_unicast_vlan()` 校验中继 VLAN 在 `TRUNK_VLAN_LIST` 内，并写 `/etc/config/rtp2httpd`。**后已改**：受管段重命名（`luci_iptv*` → `br_iptv*`，trunk 侧 `mux_up/dn/br<n>` / `mux_iptv_<n>`、内核设备 `mux-up/dn<n>` / `br-mux-<n>`，**按透传列表序号命名、不带 VLAN ID**，`mux_index_of_vid()` 做 VLAN→序号映射，firewall/omcproxy 段改名），清扫兼容历史前缀（含中间态 `mux_*<vid>`）；中继 VLAN 留空回退改由 `resolve_relay_vlan()` 四级回落（回落值也要在透传列表内）；修复 rtp2httpd 写入——真机为匿名 `config instance`（`enabled`/`upstream_interface`），旧代码写 `main.disabled` 一直 Invalid argument 且从未生效 |
+| `root/etc/config/onu-iptv`、`root/etc/init.d/iptv`、`root/usr/libexec/iptv-apply` | 由 `luci-app-iptv` 整包迁入；新增 `mode` / `trunk_port` / `trunk_vlans` / `unicast` / `unicast_port` / `unicast_addr` / `unicast_vlan`，`iptv-apply` 重写为按模式推导拓扑，新增 `resolve_unicast_vlan()` 校验中继 VLAN 在 `TRUNK_VLAN_LIST` 内，并写 `/etc/config/rtp2httpd`。**后已改**：受管段重命名（`luci_iptv*` → `br_iptv*`，trunk 侧 `mux_up/dn/br<n>` / `mux_iptv_<n>`、内核设备 `mux-up/dn<n>` / `br-mux-<n>`，**按透传列表序号命名、不带 VLAN ID**，`mux_index_of_vid()` 做 VLAN→序号映射，firewall/omcproxy 段改名），清扫兼容历史前缀（含中间态 `mux_*<vid>`）；中继 VLAN 留空回退改由 `resolve_relay_vlan()` 四级回落（回落值也要在透传列表内）；修复 rtp2httpd 写入——真机为匿名 `config instance`（`enabled`/`upstream_interface`），旧代码写 `main.disabled` 一直 Invalid argument 且从未生效。**语音三模式加入后**：新增 `load_voice_info()` / `check_voice_port()`（专用口互斥、仅两 trunk 口可共用）/ `check_voice_vlan()`（trunk 列表与 svc/mc/igmp 均不得撞语音 VLAN），detach 保护名单加入 `voice*` |
 | `Makefile` | 新增 `+firewall4 +kmod-nft-bridge +omcproxy` 依赖（IPTV 迁入），本次再加 `+kmod-nft-offload +ppp-mod-pppoe`（卸载与拨号），`PKG_RELEASE` 6 → 7 |
 | `po/zh_Hans/onu.po` | 新增与更新译文，并入原 `iptv.po`；补齐单线复用与组播转单播的 27 条译文；本次再补上网业务页约 26 条（上网方式 / 桥接 / 系统拨号 / Internet VLAN / LAN ports / 硬件卸载 / Derived devices 等） |
 | `luci-app-iptv/` | 整包删除 |

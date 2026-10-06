@@ -48,7 +48,9 @@ PKG_VERSION:=0.1.0
 # the generated PON WAN so netifd does not reject it before carrier appears.
 # 21: align voice with the managed luci_* / ct-* network topology and migrate
 # the legacy voice_device section on the next apply.
-PKG_RELEASE:=21
+# 22: add voice bridge/trunk delivery modes, port/vlan conflict guards
+# across voice/iptv/internet, and card visibility tied to mode.
+PKG_RELEASE:=22
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

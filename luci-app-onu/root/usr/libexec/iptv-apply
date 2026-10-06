@@ -85,6 +85,65 @@ load_iptv_config() {
 	config_get UNICAST_VLAN_OVERRIDE config unicast_vlan
 }
 
+# The voice page can own a dedicated bridge port or a tagged trunk port; the
+# port exclusivity checks and the VLAN uniqueness check both need these facts.
+load_voice_info() {
+	VOICE_ENABLED=0
+	VOICE_MODE='route'
+	VOICE_PORT=''
+	VOICE_TRUNK_PORT=''
+	VOICE_VLAN=''
+
+	config_load onu-voice
+	config_get_bool VOICE_ENABLED network enabled 0
+	[ "$VOICE_ENABLED" -eq 1 ] || return 0
+	config_get VOICE_MODE network mode route
+	config_get VOICE_PORT network lan_port
+	config_get VOICE_TRUNK_PORT network trunk_port
+	config_get VOICE_VLAN network vlan_id
+}
+
+# Same exclusivity matrix as check_port_conflict() in voice-apply: dedicated
+# bridge ports never share, a dedicated port never meets a trunk port, and the
+# IPTV and voice trunks may ride on one physical port on purpose.
+check_voice_port() {
+	local candidate="$1"
+
+	[ "$VOICE_ENABLED" -eq 1 ] || return 0
+	[ -n "$candidate" ] || return 0
+
+	if [ "$VOICE_MODE" = 'bridge' ]; then
+		[ "$candidate" != "$VOICE_PORT" ] ||
+			fail "LAN port $candidate is used by the voice bridge; free it on the voice page first"
+	else
+		[ "$MODE" != 'bridge' ] || [ "$candidate" != "$VOICE_TRUNK_PORT" ] ||
+			fail "LAN port $candidate is the voice trunk port; pick a different IPTV port"
+	fi
+}
+
+# A VLAN handed over by both pages would be bridged twice on (possibly) the
+# same wire; the voice VLAN must stay unique. In trunk mode every handed-over
+# VLAN counts, hence the check runs after resolve_trunk_vlans().
+check_voice_vlan() {
+	local vid
+
+	[ "$VOICE_ENABLED" -eq 1 ] || return 0
+	[ -n "$VOICE_VLAN" ] || return 0
+
+	if [ "$MODE" = 'trunk' ]; then
+		for vid in $TRUNK_VLAN_LIST; do
+			[ "$vid" != "$VOICE_VLAN" ] ||
+				fail "VLAN $vid already carries the voice service"
+		done
+	else
+		for vid in "$SERVICE_VLAN" "$MULTICAST_VLAN" "$IGMP_VLAN"; do
+			[ -n "$vid" ] || continue
+			[ "$vid" != "$VOICE_VLAN" ] ||
+				fail "VLAN $vid already carries the voice service"
+		done
+	fi
+}
+
 find_br_lan() {
 	local section="$1"
 	local name
@@ -125,7 +184,8 @@ detach_from_interface() {
 
 	case "$section" in
 		br_iptv|br_iptv_mc|br_iptv_igmp|mux_iptv_*|\
-		luci_iptv|luci_iptv_mc|luci_iptv_igmp|luci_iptv_v*) return ;;
+		luci_iptv|luci_iptv_mc|luci_iptv_igmp|luci_iptv_v*|\
+		voice|voice_*|luci_voice*) return ;;
 	esac
 
 	config_get device "$section" device
@@ -177,10 +237,12 @@ validate_config() {
 		validate_ifname "$LAN_PORT" || fail "Invalid LAN port name"
 		[ "$LAN_PORT" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
 		[ -e "/sys/class/net/$LAN_PORT" ] || fail "LAN port $LAN_PORT was not found"
+		check_voice_port "$LAN_PORT"
 	else
 		validate_ifname "$TRUNK_PORT" || fail "Invalid trunk port name"
 		[ "$TRUNK_PORT" != "$UPLINK" ] || fail "The trunk port and uplink must be different devices"
 		[ -e "/sys/class/net/$TRUNK_PORT" ] || fail "Trunk port $TRUNK_PORT was not found"
+		check_voice_port "$TRUNK_PORT"
 	fi
 }
 
@@ -821,6 +883,7 @@ reload_runtime() {
 }
 
 load_iptv_config
+load_voice_info
 config_load network
 BR_LAN_SECTION=""
 OLD_LAN_PORT=""
@@ -829,6 +892,7 @@ find_old_iptv_port
 
 validate_config
 resolve_trunk_vlans
+check_voice_vlan
 resolve_igmp_port
 resolve_proxy
 resolve_snooping

@@ -137,6 +137,17 @@ load_iptv_port() {
 	[ "$(uci -q get onu-iptv.config.mode)" = 'trunk' ] && IPTV_PORT=''
 }
 
+# The voice page owns a LAN port in bridge mode and a tagged hand-over port in
+# trunk mode; either one is off-limits for the internet bridge.
+load_voice_port() {
+	VOICE_PORT=''
+	[ "$(uci -q get onu-voice.network.enabled)" = '1' ] || return 0
+	case "$(uci -q get onu-voice.network.mode)" in
+		bridge) VOICE_PORT="$(uci -q get onu-voice.network.lan_port)" ;;
+		trunk) VOICE_PORT="$(uci -q get onu-voice.network.trunk_port)" ;;
+	esac
+}
+
 port_selected() {
 	local port
 
@@ -171,7 +182,8 @@ detach_from_interface() {
 	local device ifnames ifname
 
 	case "$section" in
-		luci_wanup*|br_iptv*|mux_iptv_*|luci_iptv*) return ;;
+		luci_wanup*|br_iptv*|mux_iptv_*|luci_iptv*|\
+		voice|voice_*|luci_voice*) return ;;
 	esac
 
 	config_get device "$section" device
@@ -222,6 +234,8 @@ validate_config() {
 				[ "$port" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
 				[ "$port" != "$IPTV_PORT" ] ||
 					fail "LAN port $port is dedicated to the IPTV set-top box; free it on the IPTV page first"
+				[ "$port" != "$VOICE_PORT" ] ||
+					fail "LAN port $port is used by the voice service; free it on the voice page first"
 			done
 			;;
 		pppoe)
@@ -887,6 +901,7 @@ reload_runtime() {
 
 load_internet_config
 load_iptv_port
+load_voice_port
 config_load network
 BR_LAN_SECTION=''
 config_foreach find_br_lan device

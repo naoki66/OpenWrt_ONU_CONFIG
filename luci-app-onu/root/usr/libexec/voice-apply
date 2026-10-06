@@ -4,42 +4,69 @@
 # voice-apply - turn the "network" section of /etc/config/onu-voice into network
 # and firewall configuration.
 #
-# The voice service talks SIP over an IP network of its own, handed over by the
-# operator as a VLAN of the PON uplink. The carrier is deliberately modelled on
-# the internet page:
+# The voice VLAN of the PON uplink is delivered in one of three modes:
 #
-#   - the VLAN is an 8021q subinterface of the physical PON device
-#     (pon0.<vid>), never a br-lan member. Bridging the voice VLAN into the
-#     LAN would mix the two planes and defeat the isolation the voice zone
-#     exists for;
-#   - the subinterface backs the logical interface "voice", which is either a DHCP
-#     client or a statically addressed link for the ONT itself;
-#   - the interface is put in a firewall zone of its own ("voice") with input
-#     and forward dropped and output accepted, so only the traffic the voice
-#     service initiates is let out and nothing from the voice VLAN can reach
-#     the LAN or the management plane.
+#   route   The ONU terminates the voice VLAN itself: the 8021q subinterface
+#           ct-voice backs the logical interface "voice" (DHCP or static), which
+#           sits in a firewall zone of its own with input/forward dropped. This
+#           is the mode an ONU-side SIP/H.248 stack registers in, and it is the
+#           default for configurations written before the delivery modes
+#           existed.
 #
-# The section is written to the managed names below. Removing the page's
-# configuration is a single sweep over network.voice* / network.luci_voice* and
-# firewall.luci_voice*, so
-# switching the network off leaves no dangling reference behind.
+#   bridge  Set-top box style, the same topology the IPTV page uses in bridge
+#           mode: one LAN port is taken out of br-lan for as long as the
+#           service is enabled and br-voice bridges it, untagged, to
+#           pon0.<vlan> (ct-voice). The bridge owns no IP address and needs no
+#           firewall zone - the dedicated port is removed from br-lan, so the
+#           only plane it carries is the voice VLAN.
 #
-# The IP connectivity is all this script provides. SIP registration and call
-# control are the voice service's job; the FXS ports are bound to SIP accounts
-# through voice.line and voice.codec, which this script never touches.
+#   trunk   Single cable multiplex, the same topology the IPTV page uses in
+#           trunk mode: the 8021q pair voice-up (on the PON uplink) and
+#           voice-dn (on the trunk port) is joined by br-voice-mux, and the VLAN
+#           leaves the trunk port tagged. The trunk port stays in br-lan, so a
+#           downstream router gets management and every handed-over service on
+#           one cable. The port may be the same physical port the IPTV page
+#           hands its VLANs over on: distinct VLANs get distinct 8021q pairs
+#           and bridges, which coexist on software VLAN.
+#
+# Removing the page's configuration is a single sweep over network.voice* /
+# network.luci_voice* and firewall.luci_voice*, so switching the service off or
+# changing its mode leaves no dangling reference behind.
+#
+# The IP connectivity and L2 hand-over are all this script provides. SIP
+# registration and call control are the voice service's job; the FXS port is
+# bound to SIP accounts through voice.line and voice.codec, which this script
+# never touches.
 
 . /lib/functions.sh
 
 ACTION="${1:-reload}"
 
-# Names of the network sections this page owns. The firewall zone name is the
-# literal string the firmware expects the operator to recognise as "voice".
+# Route mode keeps its historical section names. The kernel device is fixed at
+# ct-voice; route and bridge are mutually exclusive (the managed set is swept
+# before every rewrite), so bridge mode reuses the same uplink device name.
 VLAN_SECTION='luci_voice_vlan'
 VLAN_DEVICE='ct-voice'
 ZONE_SECTION='luci_voice_zone'
 ZONE_NAME='voice'
 IFACE='voice'
 LEGACY_IFACE='luci_voice'
+
+# Bridge mode (UCI section names use underscores; kernel devices may carry
+# hyphens):
+BR_VLAN_SEC='voice_br_vlan'
+BR_DEV_SEC='voice_br_dev'
+BR_DEV='br-voice'
+BR_IFACE='voice_bridge'
+
+# Single cable mode:
+MUX_UP_SEC='voice_up'
+MUX_DN_SEC='voice_dn'
+MUX_BR_SEC='voice_mux_dev'
+MUX_UP_DEV='voice-up'
+MUX_DN_DEV='voice-dn'
+MUX_BR_DEV='br-voice-mux'
+MUX_IFACE='voice_mux'
 
 fail() {
 	logger -t voice "$*"
@@ -78,22 +105,27 @@ load_voice_network() {
 	config_load onu-voice
 
 	config_get_bool VN_ENABLED network enabled 0
+	config_get VN_MODE network mode route
 	config_get VN_UPLINK network uplink pon0
 	config_get VN_VLAN network vlan_id
+	config_get VN_LAN_PORT network lan_port
+	config_get VN_TRUNK_PORT network trunk_port
 	config_get VN_PROTO network proto dhcp
 	config_get VN_IPADDR network ipaddr
 	config_get VN_NETMASK network netmask
 	config_get VN_GATEWAY network gateway
 	config_get VN_DNS network dns
+
+	case "$VN_MODE" in
+		route|bridge|trunk) ;;
+		*) VN_MODE='route' ;;
+	esac
 }
 
 # An interface name has to stay within 15 characters, which the kernel enforces
-# for network devices. The managed voice device is fixed at ct-voice; validate
-# the physical uplink separately because it is supplied by the operator.
-voice_device() {
-	printf '%s' "$VLAN_DEVICE"
-}
-
+# for network devices. The managed voice devices are fixed names; validate the
+# physical uplink and the selected LAN ports separately because they are
+# operator supplied.
 validate_config() {
 	[ "$VN_ENABLED" -eq 1 ] || return 0
 
@@ -101,60 +133,196 @@ validate_config() {
 	[ -e "/sys/class/net/$VN_UPLINK" ] || fail "Uplink device $VN_UPLINK was not found"
 	validate_vlan "$VN_VLAN" || fail "The voice VLAN must be between 1 and 4094"
 
-	validate_ifname "$(voice_device)" ||
-		fail "The derived device name $(voice_device) is not a valid interface name"
-
-	case "$VN_PROTO" in
-		dhcp)
+	case "$VN_MODE" in
+		route)
+			case "$VN_PROTO" in
+				dhcp)
+					;;
+				static)
+					[ -n "$VN_IPADDR" ] || fail "A static voice interface needs an IP address"
+					[ -n "$VN_NETMASK" ] || fail "A static voice interface needs a subnet mask"
+					;;
+				*)
+					fail "Unknown IP assignment protocol $VN_PROTO"
+					;;
+			esac
 			;;
-		static)
-			[ -n "$VN_IPADDR" ] || fail "A static voice interface needs an IP address"
-			[ -n "$VN_NETMASK" ] || fail "A static voice interface needs a subnet mask"
+		bridge)
+			validate_ifname "$VN_LAN_PORT" || fail "Invalid voice LAN port name"
+			[ -e "/sys/class/net/$VN_LAN_PORT" ] || fail "Voice LAN port $VN_LAN_PORT was not found"
+			[ "$VN_LAN_PORT" != "$VN_UPLINK" ] || fail "The voice LAN port and uplink must be different devices"
 			;;
-		*)
-			fail "Unknown IP assignment protocol $VN_PROTO"
+		trunk)
+			validate_ifname "$VN_TRUNK_PORT" || fail "Invalid voice trunk port name"
+			[ -e "/sys/class/net/$VN_TRUNK_PORT" ] || fail "Voice trunk port $VN_TRUNK_PORT was not found"
+			[ "$VN_TRUNK_PORT" != "$VN_UPLINK" ] || fail "The voice trunk port and uplink must be different devices"
 			;;
 	esac
 }
 
-# Two services must not share a VLAN: they would end up in one firewall zone
-# and defeat the isolation both zones exist for. The same rule is enforced in
-# the UI, this is the backstop for a hand-edited config.
+# Two services must not share a VLAN: in route mode they would end up in one
+# firewall zone, and in bridge/trunk mode the same VLAN would be handed over by
+# two bridges on the same wire. The same rule is enforced in the UI, this is
+# the backstop for a hand-edited config. The IPTV trunk list is a free-form
+# list that can carry VLANs absent from the service/multicast/IGMP options, so
+# it is checked separately.
 check_vlan_conflict() {
 	[ "$VN_ENABLED" -eq 1 ] || return 0
 
-	local net_enabled net_vlan iptv_enabled iptv_vlan
-	local iptv_service_vlan iptv_multicast_vlan iptv_igmp_vlan
+	local net_enabled net_vlan
+	local iptv_enabled iptv_vlan
+	local iptv_service_vlan iptv_multicast_vlan iptv_igmp_vlan iptv_trunk_vlans
 
 	config_load onu-internet
 	config_get_bool net_enabled config enabled 0
 	config_get net_vlan config vlan
-	if [ "$net_enabled" -eq 1 ] && [ "$VN_VLAN" = "$net_vlan" ]; then
+	if [ "$net_enabled" = '1' ] && [ "$VN_VLAN" = "$net_vlan" ]; then
 		fail "VLAN $VN_VLAN already carries the internet service"
 	fi
 
 	config_load onu-iptv
 	config_get_bool iptv_enabled config enabled 0
-	if [ "$iptv_enabled" -eq 1 ]; then
+	if [ "$iptv_enabled" = '1' ]; then
 		config_get iptv_service_vlan config service_vlan
 		config_get iptv_multicast_vlan config multicast_vlan
 		config_get iptv_igmp_vlan config igmp_vlan
+		config_get iptv_trunk_vlans config trunk_vlans
 
-		for iptv_vlan in "$iptv_service_vlan" "$iptv_multicast_vlan" "$iptv_igmp_vlan"; do
+		for iptv_vlan in "$iptv_service_vlan" "$iptv_multicast_vlan" \
+				"$iptv_igmp_vlan" $iptv_trunk_vlans; do
 			[ -n "$iptv_vlan" ] || continue
 			[ "$VN_VLAN" = "$iptv_vlan" ] &&
-				fail "VLAN $VN_VLAN already carries the IPTV service"
+				fail "VLAN $VN_VLAN already carries an IPTV service"
 		done
 	fi
 }
 
 #
+# Port exclusivity across the three PON service pages
+#
+# A dedicated bridge port (internet bridge, IPTV set-top box port, voice
+# bridge port) is taken out of br-lan and enslaved to exactly one service
+# bridge, so it can never be picked by another dedicated bridge. A trunk port
+# stays in br-lan and only carries tagged 8021q subinterfaces, which is why the
+# voice and IPTV trunks MAY share one port - but a dedicated port must not be a
+# trunk port either, or the dedicated service would leave tagged foreign VLANs
+# on a port that is supposed to carry its one plane untagged.
+check_port_conflict() {
+	[ "$VN_ENABLED" -eq 1 ] || return 0
+
+	local candidate="$1" net_mode port
+	local iptv_mode iptv_port
+
+	[ -n "$candidate" ] || return 0
+
+	config_load onu-internet
+	config_get net_mode config mode bridge
+	if [ "$(uci -q get onu-internet.config.enabled)" = '1' ] && [ "$net_mode" = 'bridge' ]; then
+		for port in $(uci -q get onu-internet.config.ports); do
+			[ "$candidate" != "$port" ] ||
+				fail "LAN port $candidate is used by the internet bridge; free it on the internet page first"
+		done
+	fi
+
+	config_load onu-iptv
+	if [ "$(uci -q get onu-iptv.config.enabled)" = '1' ]; then
+		config_get iptv_mode config mode bridge
+
+		if [ "$iptv_mode" = 'bridge' ]; then
+			config_get iptv_port config lan_port
+			[ "$candidate" != "$iptv_port" ] ||
+				fail "LAN port $candidate is dedicated to the IPTV set-top box; free it on the IPTV page first"
+		else
+			# The voice dedicated port must not become the IPTV trunk port;
+			# the voice trunk may share the IPTV trunk port on purpose.
+			[ "$VN_MODE" != 'bridge' ] || {
+				config_get iptv_port config trunk_port
+				[ "$candidate" != "$iptv_port" ] ||
+					fail "LAN port $candidate is the IPTV trunk port; pick a different voice port"
+			}
+		fi
+	fi
+}
+
+find_br_lan() {
+	local section="$1"
+	local name
+
+	config_get name "$section" name
+	[ "$name" = "br-lan" ] && BR_LAN_SECTION="$section"
+}
+
+find_old_voice_port() {
+	local port
+	local ports
+
+	config_get ports "$BR_DEV_SEC" ports
+	for port in $ports; do
+		case "$port" in
+			ct-voice) ;;
+			*) OLD_LAN_PORT="$port" ;;
+		esac
+	done
+}
+
+detach_from_device() {
+	local section="$1"
+	local ports port
+
+	config_get ports "$section" ports
+	for port in $ports; do
+		[ "$port" = "$VN_LAN_PORT" ] && uci -q del_list "network.$section.ports=$port"
+	done
+}
+
+detach_from_interface() {
+	local section="$1"
+	local device ifnames ifname
+
+	case "$section" in
+		voice|voice_*|luci_voice*|br_iptv*|mux_iptv_*|\
+		luci_iptv*|luci_wanup*) return ;;
+	esac
+
+	config_get device "$section" device
+	config_get ifnames "$section" ifname
+	[ "$device" = "$VN_LAN_PORT" ] && uci -q delete "network.$section.device"
+
+	for ifname in $ifnames; do
+		[ "$ifname" = "$VN_LAN_PORT" ] || continue
+		uci -q del_list "network.$section.ifname=$ifname" || uci -q delete "network.$section.ifname"
+	done
+}
+
+detach_from_bridge_vlan() {
+	local section="$1"
+	local ports token base
+
+	config_get ports "$section" ports
+	for token in $ports; do
+		base="${token%%:*}"
+		[ "$base" = "$VN_LAN_PORT" ] && uci -q del_list "network.$section.ports=$token"
+	done
+}
+
+# Bridge mode owns a LAN port; trunk mode hands VLANs over tagged and never
+# takes a port out of br-lan.
+detach_lan_port() {
+	[ "$VN_MODE" = 'bridge' ] || return 0
+	[ -n "$VN_LAN_PORT" ] || return 0
+
+	config_foreach detach_from_device device
+	config_foreach detach_from_interface interface
+	config_foreach detach_from_bridge_vlan bridge-vlan
+	remove_selected_port_from_br_lan
+}
+
+#
 # Managed sections
 #
-# Everything this page writes lives under network.voice* / network.luci_voice* /
-# firewall.luci_voice*,
-# which makes removing it one sweep and leaves the rest of the configuration
-# untouched.
+# Everything this page writes lives under network.voice* / network.luci_voice*
+# and firewall.luci_voice*, which makes removing it one sweep and leaves the
+# rest of the configuration untouched.
 #
 remove_managed_network() {
 	local section
@@ -176,7 +344,7 @@ remove_managed_firewall() {
 	done
 }
 
-# The interface must not be a member of any other zone; a device can sit in one
+# An interface must not be a member of any other zone; a device can sit in one
 # zone only and a stale reference would make fw4 refuse the configuration.
 detach_from_zones() {
 	local zone current
@@ -186,7 +354,7 @@ detach_from_zones() {
 		[ "$zone" = "$ZONE_SECTION" ] && continue
 		for current in $(uci -q get "firewall.$zone.network"); do
 			case "$current" in
-				"$IFACE"|"$LEGACY_IFACE")
+				"$IFACE"|"$LEGACY_IFACE"|"$BR_IFACE"|"$MUX_IFACE")
 					uci -q del_list "firewall.$zone.network=$current"
 					;;
 			esac
@@ -194,31 +362,34 @@ detach_from_zones() {
 	done
 }
 
+restore_old_lan_port() {
+	[ -n "$OLD_LAN_PORT" ] || return
+	[ -n "$BR_LAN_SECTION" ] || return
+
+	uci -q del_list "network.$BR_LAN_SECTION.ports=$OLD_LAN_PORT"
+	uci -q add_list "network.$BR_LAN_SECTION.ports=$OLD_LAN_PORT"
+}
+
+remove_selected_port_from_br_lan() {
+	[ -n "$BR_LAN_SECTION" ] || return
+	uci -q del_list "network.$BR_LAN_SECTION.ports=$VN_LAN_PORT"
+}
+
 #
 # Topology
 #
-write_network_config() {
-	remove_managed_network
-
-	if [ "$VN_ENABLED" -ne 1 ]; then
-		uci commit network || fail "Cannot save network configuration"
-		return 0
-	fi
-
-	local dev
-	dev="$(voice_device)"
-
+write_route_network() {
 	# The 8021q subinterface. "ifname" is the physical PON device, "name" the
 	# device handed to netifd; the two differ on purpose.
 	uci set "network.$VLAN_SECTION"='device'
 	uci set "network.$VLAN_SECTION.type"='8021q'
 	uci set "network.$VLAN_SECTION.ifname"="$VN_UPLINK"
 	uci set "network.$VLAN_SECTION.vid"="$VN_VLAN"
-	uci set "network.$VLAN_SECTION.name"="$dev"
+	uci set "network.$VLAN_SECTION.name"="$VLAN_DEVICE"
 
 	# The interface the voice service binds to. It never joins br-lan.
 	uci set network.$IFACE='interface'
-	uci set network.$IFACE.device="$dev"
+	uci set network.$IFACE.device="$VLAN_DEVICE"
 	uci set network.$IFACE.proto="$VN_PROTO"
 	uci set network.$IFACE.auto='1'
 	uci set network.$IFACE.force_link='1'
@@ -232,31 +403,102 @@ write_network_config() {
 		if [ -n "$VN_GATEWAY" ]; then
 			uci set network.$IFACE.gateway="$VN_GATEWAY"
 		else
-			uci -q delete "network.$IFACE.gateway"
+			uci -q delete network.$IFACE.gateway
 		fi
 
 		if [ -n "$VN_DNS" ]; then
 			uci set network.$IFACE.dns="$VN_DNS"
 		else
-			uci -q delete "network.$IFACE.dns"
+			uci -q delete network.$IFACE.dns
 		fi
 	else
-		uci -q delete "network.$IFACE.ipaddr"
-		uci -q delete "network.$IFACE.netmask"
-		uci -q delete "network.$IFACE.gateway"
-		uci -q delete "network.$IFACE.dns"
+		uci -q delete network.$IFACE.ipaddr
+		uci -q delete network.$IFACE.netmask
+		uci -q delete network.$IFACE.gateway
+		uci -q delete network.$IFACE.dns
+	fi
+}
+
+write_bridge_network() {
+	uci set "network.$BR_VLAN_SEC"='device'
+	uci set "network.$BR_VLAN_SEC.type"='8021q'
+	uci set "network.$BR_VLAN_SEC.ifname"="$VN_UPLINK"
+	uci set "network.$BR_VLAN_SEC.vid"="$VN_VLAN"
+	uci set "network.$BR_VLAN_SEC.name"="$VLAN_DEVICE"
+
+	uci set "network.$BR_DEV_SEC"='device'
+	uci set "network.$BR_DEV_SEC.type"='bridge'
+	uci set "network.$BR_DEV_SEC.name"="$BR_DEV"
+	uci set "network.$BR_DEV_SEC.stp"='0'
+	# Voice is unicast SIP/RTP; no multicast snooping or querier is needed.
+	uci set "network.$BR_DEV_SEC.igmp_snooping"='0'
+	uci set "network.$BR_DEV_SEC.multicast_querier"='0'
+	uci add_list "network.$BR_DEV_SEC.ports"="$VN_LAN_PORT"
+	uci add_list "network.$BR_DEV_SEC.ports"="$VLAN_DEVICE"
+
+	# Unaddressed: pure L2 hand-over, no firewall zone (the dedicated port left
+	# br-lan, so the bridge is the only plane on it).
+	uci set "network.$BR_IFACE"='interface'
+	uci set "network.$BR_IFACE.device"="$BR_DEV"
+	uci set "network.$BR_IFACE.proto"='none'
+	uci set "network.$BR_IFACE.auto"='1'
+	uci set "network.$BR_IFACE.delegate"='0'
+}
+
+write_trunk_network() {
+	uci set "network.$MUX_UP_SEC"='device'
+	uci set "network.$MUX_UP_SEC.type"='8021q'
+	uci set "network.$MUX_UP_SEC.ifname"="$VN_UPLINK"
+	uci set "network.$MUX_UP_SEC.vid"="$VN_VLAN"
+	uci set "network.$MUX_UP_SEC.name"="$MUX_UP_DEV"
+
+	uci set "network.$MUX_DN_SEC"='device'
+	uci set "network.$MUX_DN_SEC.type"='8021q'
+	uci set "network.$MUX_DN_SEC.ifname"="$VN_TRUNK_PORT"
+	uci set "network.$MUX_DN_SEC.vid"="$VN_VLAN"
+	uci set "network.$MUX_DN_SEC.name"="$MUX_DN_DEV"
+
+	uci set "network.$MUX_BR_SEC"='device'
+	uci set "network.$MUX_BR_SEC.type"='bridge'
+	uci set "network.$MUX_BR_SEC.name"="$MUX_BR_DEV"
+	uci set "network.$MUX_BR_SEC.stp"='0'
+	uci set "network.$MUX_BR_SEC.igmp_snooping"='0'
+	uci set "network.$MUX_BR_SEC.multicast_querier"='0'
+	uci add_list "network.$MUX_BR_SEC.ports"="$MUX_UP_DEV"
+	uci add_list "network.$MUX_BR_SEC.ports"="$MUX_DN_DEV"
+
+	uci set "network.$MUX_IFACE"='interface'
+	uci set "network.$MUX_IFACE.device"="$MUX_BR_DEV"
+	uci set "network.$MUX_IFACE.proto"='none'
+	uci set "network.$MUX_IFACE.auto"='1'
+	uci set "network.$MUX_IFACE.delegate"='0'
+}
+
+write_network_config() {
+	restore_old_lan_port
+	remove_managed_network
+
+	if [ "$VN_ENABLED" -eq 1 ]; then
+		# Only bridge mode needs exclusive netifd ownership of a LAN port.
+		detach_lan_port
+
+		case "$VN_MODE" in
+			route) write_route_network ;;
+			bridge) write_bridge_network ;;
+			trunk) write_trunk_network ;;
+		esac
 	fi
 
 	uci commit network || fail "Cannot save network configuration"
 }
 
-# The zone is written with the literal name "voice" so the operator recognises
-# it, under a section id of its own to keep the managed sweep exact.
+# Route mode is the only delivery with an L3 interface, hence the only one
+# with a firewall zone.
 write_firewall_config() {
 	remove_managed_firewall
 	detach_from_zones
 
-	if [ "$VN_ENABLED" -eq 1 ]; then
+	if [ "$VN_ENABLED" -eq 1 ] && [ "$VN_MODE" = 'route' ]; then
 		uci set "firewall.$ZONE_SECTION"='zone'
 		uci set "firewall.$ZONE_SECTION.name"="$ZONE_NAME"
 		uci set "firewall.$ZONE_SECTION.input"='DROP'
@@ -273,20 +515,32 @@ reload_runtime() {
 	[ "$ACTION" = 'boot' ] && return 0
 
 	# network first, then firewall: the zone has to see the interface when the
-	# firewall builds its ruleset.
+	# firewall builds its ruleset, and a removed zone has to be flushed too.
 	ubus call network reload >/dev/null || fail "netifd reload failed"
 	/etc/init.d/firewall reload || fail "firewall4 reload failed"
 }
 
 load_voice_network
+config_load network
+BR_LAN_SECTION=""
+OLD_LAN_PORT=""
+config_foreach find_br_lan device
+find_old_voice_port
+
 validate_config
 check_vlan_conflict
+if [ "$VN_ENABLED" -eq 1 ]; then
+	case "$VN_MODE" in
+		bridge) check_port_conflict "$VN_LAN_PORT" ;;
+		trunk) check_port_conflict "$VN_TRUNK_PORT" ;;
+	esac
+fi
 write_network_config
 write_firewall_config
 reload_runtime
 
 if [ "$VN_ENABLED" -eq 1 ]; then
-	logger -t voice "Voice network applied (vlan=$VN_VLAN, proto=$VN_PROTO, device=$(voice_device))"
+	logger -t voice "Voice network applied (mode=$VN_MODE vlan=$VN_VLAN)"
 else
 	logger -t voice "Voice network disabled"
 fi

@@ -2,6 +2,7 @@
 
 'use strict';
 'require form';
+'require network';
 'require uci';
 'require view';
 
@@ -84,10 +85,11 @@ function forSip(o, extra) {
 }
 
 /*
- * The voice service runs on the PON uplink in a VLAN of its own, handed to the
- * kernel as an 8021q subinterface of the physical PON device rather than as a
- * br-lan member. Showing the fixed managed device keeps this page and the
- * script readable against each other, the same way the internet page does it.
+ * The derived device mirrors voice-apply per delivery mode:
+ *   route  pon0.<vid> as the L3 ct-voice interface,
+ *   bridge br-voice bridging the VLAN untagged to one dedicated LAN port,
+ *   trunk  br-voice-mux handing the VLAN over tagged on a port that stays in
+ *          br-lan.
  */
 function derivedVoiceDevice() {
 	if (uci.get('onu-voice', 'network', 'enabled') !== '1')
@@ -95,8 +97,57 @@ function derivedVoiceDevice() {
 
 	var vid = uci.get('onu-voice', 'network', 'vlan_id');
 	var uplink = uci.get('onu-voice', 'network', 'uplink') || 'pon0';
+	var mode = uci.get('onu-voice', 'network', 'mode') || 'route';
+
+	if (mode === 'bridge') {
+		var lanPort = uci.get('onu-voice', 'network', 'lan_port');
+		return 'br-voice: %s.%s \u2192 %s'.format(uplink, vid || '?', lanPort || '?');
+	}
+
+	if (mode === 'trunk') {
+		var trunkPort = uci.get('onu-voice', 'network', 'trunk_port');
+		return 'br-voice-mux: %s.%s tagged @ %s'.format(uplink, vid || '?', trunkPort || '?');
+	}
 
 	return '%s.%s (%s)'.format(uplink, vid || '?', VOICE_DEVICE);
+}
+
+/* Ports the internet bridge currently owns, if any. */
+function internetBridgePorts() {
+	if (uci.get('onu-internet', 'config', 'enabled') !== '1' ||
+		uci.get('onu-internet', 'config', 'mode') !== 'bridge')
+		return [];
+
+	return L.toArray(uci.get('onu-internet', 'config', 'ports'));
+}
+
+/*
+ * Port exclusivity backstop in the UI, mirroring check_port_conflict() in
+ * voice-apply: a dedicated port never meets another dedicated port or a trunk
+ * port, while the voice trunk may share the IPTV trunk port on purpose.
+ */
+function validateVoicePort(sectionId, value) {
+	/* Use the mode picked in the very same form, falling back to the saved one. */
+	var mode = (this.section && this.section.formvalue(sectionId, 'mode')) ||
+		uci.get('onu-voice', 'network', 'mode') || 'route';
+
+	if (!value)
+		return true;
+
+	if (internetBridgePorts().indexOf(value) >= 0)
+		return _('This port is used by the internet bridge; free it on the internet page first.');
+
+	if (uci.get('onu-iptv', 'config', 'enabled') === '1') {
+		if (uci.get('onu-iptv', 'config', 'mode') === 'bridge') {
+			if (value === uci.get('onu-iptv', 'config', 'lan_port'))
+				return _('This port is dedicated to the IPTV set-top box; free it on the IPTV page first.');
+		} else if (mode === 'bridge' &&
+				value === uci.get('onu-iptv', 'config', 'trunk_port')) {
+			return _('This port is the IPTV trunk port; pick a different voice port.');
+		}
+	}
+
+	return true;
 }
 
 /*
@@ -109,7 +160,8 @@ function validateVoiceVlan(sectionId, value) {
 	var netVlan = uci.get('onu-internet', 'config', 'vlan');
 	var iptvVlans = L.toArray(uci.get('onu-iptv', 'config', 'service_vlan'))
 		.concat(L.toArray(uci.get('onu-iptv', 'config', 'multicast_vlan')))
-		.concat(L.toArray(uci.get('onu-iptv', 'config', 'igmp_vlan')));
+		.concat(L.toArray(uci.get('onu-iptv', 'config', 'igmp_vlan')))
+		.concat(L.toArray(uci.get('onu-iptv', 'config', 'trunk_vlans')));
 	var i;
 
 	if (uci.get('onu-internet', 'config', 'enabled') === '1' && vid === String(netVlan))
@@ -126,7 +178,10 @@ function validateVoiceVlan(sectionId, value) {
 /*
  * The dependencies above hide every option of the H.248 and SIP sections, but
  * LuCI still renders the two section containers, so switching the protocol
- * would leave an empty card behind. LuCI puts the "cbi-onu-voice-<name>" id on the
+ * would leave an empty card behind. The same applies to the local-termination
+ * cards (voice profile, digit map, codecs): in bridge and trunk modes the
+ * voice VLAN is handed over at layer 2 and the ONU never parses signalling,
+ * so those cards collapse as well. LuCI puts the "cbi-onu-voice-<name>" id on the
  * inner "cbi-section-node" element; the card to hide is the surrounding
  * "cbi-section" div which also carries the heading.
  */
@@ -144,32 +199,56 @@ function sectionCard(node, name) {
 	return card || null;
 }
 
-function toggleProtocolSections(node, protocolOption) {
+function toggleProtocolSections(node, protocolOption, modeOption) {
 	var h248 = sectionCard(node, 'h248');
 	var sip = sectionCard(node, 'sip');
+	var profile = sectionCard(node, 'config');
+	var digitmap = sectionCard(node, 'digitmap');
+	var codec = sectionCard(node, 'codec');
 	var frame = node.querySelector('#cbi-onu-voice-config-protocol');
+	var modeFrame = node.querySelector('#cbi-onu-voice-network-mode');
 
 	function update() {
-		var value = protocolOption ? protocolOption.formvalue('config') : null;
+		var protocol = protocolOption ? protocolOption.formvalue('config') : null;
+		var mode = (modeOption && modeOption.formvalue('network')) ||
+			uci.get('onu-voice', 'network', 'mode') || 'route';
+		var local = (mode === 'route');
 
 		/* Guard every DOM access: an undefined card (section not rendered,
 		   or a LuCI id scheme we did not anticipate) must never turn a render
 		   into a thrown TypeError. */
+		if (profile && profile.classList)
+			profile.classList[local ? 'remove' : 'add']('hidden');
+
+		if (digitmap && digitmap.classList)
+			digitmap.classList[local ? 'remove' : 'add']('hidden');
+
+		if (codec && codec.classList)
+			codec.classList[local ? 'remove' : 'add']('hidden');
+
 		if (h248 && h248.classList)
-			h248.classList[(value === 'h248') ? 'remove' : 'add']('hidden');
+			h248.classList[(local && protocol === 'h248') ? 'remove' : 'add']('hidden');
 
 		if (sip && sip.classList)
-			sip.classList[(value === 'sip' || value === 'ims_sip') ? 'remove' : 'add']('hidden');
+			sip.classList[(local && (protocol === 'sip' || protocol === 'ims_sip')) ? 'remove' : 'add']('hidden');
 	}
 
 	if (protocolOption)
 		protocolOption.onchange = update;
+
+	if (modeOption)
+		modeOption.onchange = update;
 
 	/* The native events bubble up to the option frame; LuCI's own
 	   "widget-change" event is already wired through onchange above. */
 	if (frame) {
 		frame.addEventListener('change', update);
 		frame.addEventListener('input', update);
+	}
+
+	if (modeFrame) {
+		modeFrame.addEventListener('change', update);
+		modeFrame.addEventListener('input', update);
 	}
 
 	update();
@@ -209,18 +288,21 @@ function transportOption(s, tab, name, title) {
 return view.extend({
 	load: function() {
 		/*
-		 * internet and iptv are read too: the voice VLAN must not collide
-		 * with either service, and that check reads their VLAN options.
+		 * The device list fills the LAN/trunk port selectors; internet and
+		 * iptv are read for the VLAN and port exclusivity checks.
 		 */
 		return Promise.all([
+			network.getDevices(),
 			uci.load('onu-voice'),
 			uci.load('onu-internet'),
 			uci.load('onu-iptv')
-		]);
+		]).then(function(results) {
+			return results[0];
+		});
 	},
 
-	render: function() {
-		var m, s, o, protocolOption;
+	render: function(devices) {
+		var m, s, o, protocolOption, modeOption, lanPorts, trunkPorts, currentPort;
 
 		ensureStylesheet();
 
@@ -233,30 +315,31 @@ return view.extend({
 		 * ---------------------------------------------------------------- */
 
 		/*
-		 * The IP carrier under the voice service. It is a VLAN of the PON
-		 * uplink, not a br-lan member: bridging the voice VLAN into the LAN
-		 * would mix the two and defeat the dedicated firewall zone below.
-		 * The section is unsigned and lives before the profile so the
-		 * topology is read before the signalling that rides on it.
-		 */
+	 * The carrier under the voice service. route mode keeps the VLAN an L3
+	 * link of the ONU (ct-voice, own zone); bridge and trunk modes are pure L2
+	 * hand-overs modelled on the IPTV page. The section is unsigned and lives
+	 * before the profile so the topology is read before the signalling that
+	 * rides on it.
+	 */
 		s = m.section(form.NamedSection, 'network', 'network', _('Voice network'),
-			_('The IP network carrying the voice service. It is an 8021q VLAN of the PON uplink and has its own firewall zone.'));
+			_('The VLAN carrying the voice service. It can be terminated on the ONU itself, bridged to a dedicated LAN port untagged, or handed over tagged on a single cable.'));
 		s.anonymous = true;
 		s.addremove = false;
 
-		/*
-		 * The one switch of the page. It lives with the carrier because that
-		 * is all the backend does today: voice-apply turns this flag into the
-		 * VLAN subinterface, the voice interface and the firewall zone, and
-		 * writes nothing at all when it is off. The voice profile used to
-		 * carry a second "enable voice service" flag of its own, but nothing
-		 * ever read it - no voice daemon exists - so the two collapsed into
-		 * this one rather than leaving a switch that does nothing.
-		 */
 		o = s.option(form.Flag, 'enabled', _('Enable voice service'));
 		o.default = '0';
 		o.rmempty = false;
 		o.description = _('Enable the voice service.');
+
+		modeOption = o = s.option(form.ListValue, 'mode', _('Delivery mode'),
+			_('How the voice VLAN reaches the customer equipment.'));
+		o.default = 'route';
+		o.rmempty = false;
+		o.value('route', _('Terminate on the ONU (L3)'));
+		o.value('bridge', _('Bridge to a dedicated LAN port'));
+		o.value('trunk', _('Single cable: VLAN tagged to one port'));
+		o.description = _('L3 mode makes the ONU obtain the voice address itself (ct-voice, own firewall zone). Bridge mode takes one LAN port out of br-lan and delivers the VLAN untagged. Single cable mode keeps the port in br-lan and hands the VLAN over tagged; it may share the port with the IPTV single cable trunk.');
+		o.depends('enabled', '1');
 
 		o = s.option(form.Value, 'uplink', _('Uplink device'),
 			_('Physical PON device carrying the voice VLAN, normally pon0.'));
@@ -270,50 +353,86 @@ return view.extend({
 		o.depends('enabled', '1');
 
 		o = s.option(form.Value, 'vlan_id', _('VLAN ID'),
-			_('VLAN carrying the voice service. It becomes the managed device ct-voice on the selected uplink.'));
+			_('VLAN carrying the voice service.'));
 		o.datatype = 'range(1,4094)';
 		o.placeholder = '840';
 		o.rmempty = false;
 		o.validate = validateVoiceVlan;
 		o.depends('enabled', '1');
 
+		lanPorts = (devices || []).map(function(device) {
+			return device.getName();
+		}).filter(function(name) {
+			return /^lan[0-9]+$/.test(name);
+		}).sort();
+
+		o = s.option(form.ListValue, 'lan_port', _('Voice LAN port'),
+			_('The selected port is dedicated to the voice device and stays out of br-lan while the bridge is enabled. The VLAN arrives there untagged.'));
+		o.rmempty = false;
+		lanPorts.forEach(function(name) {
+			o.value(name);
+		});
+		currentPort = uci.get('onu-voice', 'network', 'lan_port');
+		if (currentPort && lanPorts.indexOf(currentPort) < 0)
+			o.value(currentPort);
+		o.validate = validateVoicePort;
+		o.depends({ enabled: '1', mode: 'bridge' });
+
+		trunkPorts = (devices || []).map(function(device) {
+			return device.getName();
+		}).filter(function(name) {
+			return /^(lan|wan|eth)[0-9]+$/.test(name);
+		}).sort();
+
+		o = s.option(form.ListValue, 'trunk_port', _('Trunk port'),
+			_('The port stays a member of br-lan; the voice VLAN leaves it tagged. It may be the same port the IPTV page uses for its single cable trunk.'));
+		o.rmempty = false;
+		trunkPorts.forEach(function(name) {
+			o.value(name);
+		});
+		currentPort = uci.get('onu-voice', 'network', 'trunk_port');
+		if (currentPort && trunkPorts.indexOf(currentPort) < 0)
+			o.value(currentPort);
+		o.validate = validateVoicePort;
+		o.depends({ enabled: '1', mode: 'trunk' });
+
 		o = s.option(form.ListValue, 'proto', _('IP assignment'),
-			_('How the voice interface obtains its address.'));
+			_('How the ONU voice interface obtains its address. L3 delivery mode only.'));
 		o.default = 'dhcp';
 		o.rmempty = false;
 		o.value('dhcp', _('DHCP'));
 		o.value('static', _('Static'));
-		o.depends('enabled', '1');
+		o.depends({ enabled: '1', mode: 'route' });
 
 		o = s.option(form.Value, 'ipaddr', _('IP address'),
 			_('Address of the voice interface on the voice VLAN.'));
 		o.datatype = 'ip4addr';
 		o.placeholder = '10.0.0.2';
 		o.rmempty = false;
-		o.depends({ enabled: '1', proto: 'static' });
+		o.depends({ enabled: '1', mode: 'route', proto: 'static' });
 
 		o = s.option(form.Value, 'netmask', _('Subnet mask'));
 		o.datatype = 'ip4addr';
 		o.placeholder = '255.255.255.0';
 		o.rmempty = false;
-		o.depends({ enabled: '1', proto: 'static' });
+		o.depends({ enabled: '1', mode: 'route', proto: 'static' });
 
 		o = s.option(form.Value, 'gateway', _('Gateway'),
 			_('Default gateway of the voice VLAN.'));
 		o.datatype = 'ip4addr';
 		o.placeholder = '10.0.0.1';
 		o.rmempty = true;
-		o.depends({ enabled: '1', proto: 'static' });
+		o.depends({ enabled: '1', mode: 'route', proto: 'static' });
 
 		o = s.option(form.Value, 'dns', _('DNS servers'),
 			_('Comma-separated DNS servers used by the voice service.'));
 		o.datatype = 'list(ip4addr)';
 		o.placeholder = '10.0.0.1';
 		o.rmempty = true;
-		o.depends({ enabled: '1', proto: 'static' });
+		o.depends({ enabled: '1', mode: 'route', proto: 'static' });
 
 		o = s.option(form.DummyValue, '_network_device', _('Voice interface'),
-			_('The device use for voice service.'));
+			_('The device derived from the delivery mode: the ct-voice L3 interface, the br-voice dedicated port bridge, or the br-voice-mux tagged trunk.'));
 		o.cfgvalue = derivedVoiceDevice;
 		o.depends('enabled', '1');
 
@@ -817,7 +936,7 @@ return view.extend({
 		o.rmempty = false;
 
 		return m.render().then(function(node) {
-			toggleProtocolSections(node, protocolOption);
+			toggleProtocolSections(node, protocolOption, modeOption);
 
 			return node;
 		});

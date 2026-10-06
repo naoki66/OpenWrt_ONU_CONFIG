@@ -1871,8 +1871,8 @@ msgstr "呈现给被叫方的号码。"
 msgid "Relay VLAN"
 msgstr "中继 VLAN"
 
-msgid "Optional. Single cable mode only: the handed-over VLAN the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set."
-msgstr "可选。仅单线复用模式：中继监听的已透传 VLAN。留空跟随组播 VLAN，未配置时跟随业务 VLAN。"
+msgid "Optional. Single cable mode only: one of the handed-over VLANs the relay listens on. Empty follows the multicast VLAN, or the service VLAN when none is set; when neither is in the handed-over list, the first handed-over VLAN is used."
+msgstr "可选。仅单线复用模式：中继监听的已透传 VLAN 之一。留空跟随组播 VLAN，未配置时跟随业务 VLAN；两者都不在透传列表中时，使用透传列表的第一个 VLAN。"
 
 msgid "Hand this VLAN over on the trunk first: only the handed-over VLANs get a bridge for the relay to listen on."
 msgstr "请先在 trunk 上透传该 VLAN：只有已透传的 VLAN 才会生成网桥供中继监听。"
@@ -2044,3 +2044,57 @@ msgstr "ONU硬件身份"
 
 msgid "PPPoE"
 msgstr "PPPoE"
+
+msgid "The VLAN carrying the voice service. It can be terminated on the ONU itself, bridged to a dedicated LAN port untagged, or handed over tagged on a single cable."
+msgstr "承载语音业务的 VLAN。可在 ONU 本机终结，也可去标签桥接到专用 LAN 口，或以单线复用方式带标签透传。"
+
+msgid "Delivery mode"
+msgstr "交付方式"
+
+msgid "How the voice VLAN reaches the customer equipment."
+msgstr "语音 VLAN 送达用户设备的方式。"
+
+msgid "Terminate on the ONU (L3)"
+msgstr "ONU 本机终结（三层）"
+
+msgid "Bridge to a dedicated LAN port"
+msgstr "桥接到专用 LAN 口"
+
+msgid "Single cable: VLAN tagged to one port"
+msgstr "单线复用：VLAN 带标签走同一个口"
+
+msgid "L3 mode makes the ONU obtain the voice address itself (ct-voice, own firewall zone). Bridge mode takes one LAN port out of br-lan and delivers the VLAN untagged. Single cable mode keeps the port in br-lan and hands the VLAN over tagged; it may share the port with the IPTV single cable trunk."
+msgstr "三层模式下由 ONU 自身获取语音地址（ct-voice，独立防火墙区域）。桥接模式把一个 LAN 口移出 br-lan，VLAN 去标签送达。单线复用模式让端口继续留在 br-lan 内，VLAN 带标签透传，可与 IPTV 单线复用共用同一物理端口。"
+
+msgid "VLAN carrying the voice service."
+msgstr "承载语音业务的 VLAN。"
+
+msgid "Voice LAN port"
+msgstr "语音 LAN 口"
+
+msgid "The selected port is dedicated to the voice device and stays out of br-lan while the bridge is enabled. The VLAN arrives there untagged."
+msgstr "网桥启用期间，所选端口专用于语音设备并保持在 br-lan 之外，VLAN 在该口去标签送达。"
+
+msgid "The port stays a member of br-lan; the voice VLAN leaves it tagged. It may be the same port the IPTV page uses for its single cable trunk."
+msgstr "该端口仍留在 br-lan 内，语音 VLAN 带标签从这里发出。可与 IPTV 页面的单线复用使用同一端口。"
+
+msgid "How the ONU voice interface obtains its address. L3 delivery mode only."
+msgstr "ONU 语音接口的地址获取方式，仅三层交付模式可用。"
+
+msgid "The device derived from the delivery mode: the ct-voice L3 interface, the br-voice dedicated port bridge, or the br-voice-mux tagged trunk."
+msgstr "按交付方式生成的设备：三层接口 ct-voice、专用口网桥 br-voice，或带标签单线复用网桥 br-voice-mux。"
+
+msgid "This port is used by the internet bridge; free it on the internet page first."
+msgstr "该端口已被上网网桥占用，请先在上网页面释放。"
+
+msgid "This port is dedicated to the IPTV set-top box; free it on the IPTV page first."
+msgstr "该端口已专用于 IPTV 机顶盒，请先在 IPTV 页面释放。"
+
+msgid "This port is the IPTV trunk port; pick a different voice port."
+msgstr "该端口是 IPTV 的单线复用口，请为语音选择其它端口。"
+
+msgid "ONU PON status"
+msgstr "ONU PON 状态"
+
+msgid "LAN0 MAC address"
+msgstr "LAN0 MAC 地址"

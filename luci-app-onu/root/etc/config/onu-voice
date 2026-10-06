@@ -29,8 +29,14 @@ config voice 'config'
 # when it is off - so it lives here rather than in the profile above.
 config network 'network'
 	option enabled '0'
+	# route: the ONU terminates the voice VLAN itself (ct-voice + voice zone)
+	# bridge: hand the VLAN to one dedicated LAN port untagged (br-voice)
+	# trunk: hand the VLAN over tagged on a port that stays in br-lan
+	option mode 'route'
 	option uplink 'pon0'
 	option vlan_id ''
+	option lan_port ''
+	option trunk_port ''
 	option proto 'dhcp'
 	option ipaddr ''
 	option netmask ''
