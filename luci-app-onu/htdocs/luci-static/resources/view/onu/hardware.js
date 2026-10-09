@@ -375,6 +375,70 @@ function firstIdentityTarget(identity) {
 	return names.length ? { id: names[0], label: names[0] } : null;
 }
 
+/*
+ * Read one board identity input exactly as the page shows it. Current LuCI
+ * builds return an ui.AbstractElement from getUIElement() (value via
+ * getValue()). The raw DOM is the fallback: ui.Textfield renders
+ * <div id="<cbid>"><input id="widget.<cbid>"></div>, and older builds put the
+ * cbid straight on the input.
+ */
+function identityFieldValue(option) {
+	var node = option && option.getUIElement ? option.getUIElement('board') : null;
+	var cbid, frame, input;
+
+	if (node) {
+		if (typeof node.getValue === 'function') {
+			var widgetValue = node.getValue();
+
+			return widgetValue == null ? null : String(widgetValue).trim();
+		}
+
+		if (node.value != null)
+			return String(node.value).trim();
+	}
+
+	if (!option || typeof option.cbid !== 'function')
+		return null;
+
+	cbid = option.cbid('board');
+	frame = document.getElementById(cbid);
+	input = frame
+		? (frame.tagName === 'INPUT' ? frame : frame.querySelector('input'))
+		: document.getElementById('widget.' + cbid);
+
+	return input && input.value != null ? String(input.value).trim() : null;
+}
+
+/*
+ * Push a freshly read flash value back into the rendered input. The identity
+ * fields are patched straight into the flash image instead of going through
+ * UCI, so CBIMap.save() re-rendering the form does not refresh them; without
+ * this the page keeps displaying the pre-write value until a full reload.
+ */
+function setIdentityFieldValue(option, value) {
+	var node = option && option.getUIElement ? option.getUIElement('board') : null;
+	var cbid, frame, input;
+
+	value = value || '';
+
+	if (node && typeof node.setValue === 'function') {
+		node.setValue(value);
+		return;
+	}
+
+	if (!option || typeof option.cbid !== 'function')
+		return;
+
+	cbid = option.cbid('board');
+	frame = document.getElementById(cbid);
+	input = frame
+		? (frame.tagName === 'INPUT' ? frame : frame.querySelector('input'))
+		: document.getElementById('widget.' + cbid);
+
+	if (input)
+		input.value = value;
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -409,6 +473,7 @@ return view.extend({
 		var readonly = !L.hasViewPermission();
 
 		this.readonly = readonly;
+		this.boardTarget = state.boardTarget || null;
 		ensureStylesheet();
 
 		/*
@@ -452,48 +517,86 @@ return view.extend({
 		};
 
 		/*
-		 * The serial number is what the OLT registers; the board identity is
-		 * what it is burned from. They are shown together here because a
-		 * mismatch is the first thing to check when registration fails, but
-		 * only the override is editable here — the burned value belongs to
-		 * the flash image, edited further down the page.
+		 * The serial number is what the OLT registers. The burned board serial
+		 * is not shown as a separate row: it fills this input as the placeholder
+		 * instead, so an empty box visibly means "register under the burned
+		 * value". Typing anything overrides it; the burned value itself is
+		 * edited further down in the board identity block.
 		 */
-		o = s.option(form.Value, '_serial_number', _('Serial number (SN)'));
-		o.placeholder = _('Board serial number');
-		o.rmempty = true;
-		o.validate = validateSerialNumber;
-		o.cfgvalue = function(sectionId) {
+		var boardSerial = state.boardSerial || '';
+
+		function effectiveSerial(sectionId, override) {
+			if (override != null && override !== '')
+				return String(override);
+
+			var line = uci.get('pon', sectionId, 'line');
+			var saved = line ? uci.get('pon', line, 'serial_number') : null;
+
+			return String(saved || boardSerial || '');
+		}
+
+		function vendorPrefixFrom(serial) {
+			return serial ? serial.substring(0, 4) : '';
+		}
+
+		var serialOption = s.option(form.Value, '_serial_number', _('Serial number (SN)'));
+		serialOption.placeholder = boardSerial;
+		serialOption.rmempty = true;
+		serialOption.validate = validateSerialNumber;
+		serialOption.cfgvalue = function(sectionId) {
 			var line = uci.get('pon', sectionId, 'line');
 
 			return uci.get('pon', line, 'serial_number') || '';
 		};
-		o.write = function(sectionId, value) {
+		serialOption.write = function(sectionId, value) {
 			var line = uci.get('pon', sectionId, 'line');
 
 			uci.set('pon', line, 'serial_number', value);
 		};
-		o.remove = function(sectionId) {
+		serialOption.remove = function(sectionId) {
 			var line = uci.get('pon', sectionId, 'line');
 
 			uci.unset('pon', line, 'serial_number');
 		};
-		o.description = _('Overrides the serial number burned into the board identity. Leave empty to register under the burned value.');
+		serialOption.description = _('Overrides the serial number burned into the board identity. Leave empty to register under the burned value.');
 
-		o = s.option(form.DummyValue, '_board_serial', _('Board serial number (SN)'));
-		o.cfgvalue = function(sectionId) {
-			var serial = state.boardSerial;
+		/*
+		 * Vendor ID is the four-character vendor code of the serial number, so
+		 * an unset value defaults to the first four characters of the effective
+		 * SN (the override above, or the burned serial when the box is empty).
+		 * The default only fills the box: leaving it untouched keeps vendor_id
+		 * unset in UCI, where the PON stack derives it from the SN.
+		 */
+		var vendorOption = s.option(form.Value, 'vendor_id', _('Vendor ID'));
+		vendorOption.rmempty = true;
+		vendorOption.validate = asciiLength(4, 4);
+		vendorOption.cfgvalue = function(sectionId) {
+			var stored = uci.get('pon', sectionId, 'vendor_id');
 
-			if (serial === null || serial === undefined)
-				return _('Not available');
+			if (stored != null && stored !== '')
+				return stored;
 
-			return serial || _('Not set');
+			return vendorPrefixFrom(effectiveSerial(sectionId));
 		};
-		o.description = _('Read from the board identity image. Edit it under Board identity below.');
+		vendorOption.description = _('Usually the same as the first four characters of the serial number.');
 
-		o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
-		o.rmempty = true;
-		o.validate = asciiLength(4, 4);
-		o.description = _('Usually the same as the first four characters of the serial number.');
+		/*
+		 * Keep the default in sync while the SN is being typed: once a vendor
+		 * ID is explicitly stored in UCI or the vendor box has been edited by
+		 * hand, stop touching it.
+		 */
+		serialOption.onchange = function(ev, sectionId, value) {
+			if (uci.get('pon', sectionId, 'vendor_id') != null)
+				return;
+
+			var node = vendorOption.getUIElement(sectionId);
+
+			if (node && node.isChanged && node.isChanged())
+				return;
+
+			if (node && typeof node.setValue === 'function')
+				node.setValue(vendorPrefixFrom(effectiveSerial(sectionId, value)));
+		};
 
 	o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
 	o.rmempty = true;
@@ -616,6 +719,14 @@ return view.extend({
 		this.identityEntries = [];
 
 		/*
+		 * Mutable mirror of the values read from flash. CBIMap.save() ends with
+		 * renderContents(), which rebuilds every input from cfgvalue(); pointing
+		 * cfgvalue at this store lets a successful flash write update the form
+		 * in place instead of waiting for a full page reload.
+		 */
+		this.identityValues = {};
+
+		/*
 		 * Say why the fields are missing instead of dropping the block: a card
 		 * that vanishes reads as "the feature is gone", while a card that
 		 * explains itself still tells the user where to look. This is what a
@@ -636,12 +747,15 @@ return view.extend({
 					var value = (((identity || {}).data || {})[target.id] || {})[field] || '';
 					var optionName = '_identity_' + target.id + '_' + field;
 
+					self.identityValues[target.id] = self.identityValues[target.id] || {};
+					self.identityValues[target.id][field] = value;
+
 					var field_option = s.option(form.Value, optionName,
 						boardLabels[field] || field);
 					field_option.rmempty = true;
 					field_option.default = value;
 					field_option.cfgvalue = function() {
-						return value;
+						return self.identityValues[target.id][field] || '';
 					};
 					field_option.validate = function(sectionId, newValue) {
 						return validateBoardField(target.fields[field], newValue);
@@ -688,18 +802,24 @@ return view.extend({
 			options = [ fallback ];
 
 		if (!options.length)
-			return E('div', { 'class': 'cbi-section-descr' },
-				_('No storage target is available: /etc/board.json declares no pon_data target, so there is no image to back up or write.'));
+		return E('div', { 'class': 'cbi-section-descr' },
+			_('No storage target is available: /etc/board.json declares no pon_data target, so there is no image to back up or write.'));
 
-		return E('div', {}, [
-			options.length > 1
-				? E('select', { 'class': 'cbi-input-select', 'id': TARGET_SELECT_ID },
-					options.map(function(target, index) {
-						return E('option', { 'value': String(index) }, target.label);
-					}))
-				: E('span', {}, options[0].label),
+		/*
+		 * With one target its label is already printed by the "Storage target"
+		 * row above, so it is not repeated here; only a multi-target board gets
+		 * the picker. The backup/write buttons are always shown.
+		 */
+		var nodes = [];
 
-			E('div', { 'class': 'cbi-page-actions' }, [
+		if (options.length > 1) {
+			nodes.push(E('select', { 'class': 'cbi-input-select', 'id': TARGET_SELECT_ID },
+				options.map(function(target, index) {
+					return E('option', { 'value': String(index) }, target.label);
+				})));
+		}
+
+		nodes.push(E('div', { 'class': 'cbi-page-actions' }, [
 				/*
 				 * Backing up only reads the flash, so it stays available
 				 * for a user who may not write.
@@ -720,7 +840,9 @@ return view.extend({
 						options, 'pon-identity-upload')
 				}, [ _('Upload and write') ])
 			])
-		]);
+		);
+
+		return E('div', {}, nodes);
 	},
 
 	/*
@@ -839,25 +961,27 @@ handleIdentityUpload: function(options, buttonId) {
 },
 
 /*
- * Writes the changed identity fields of every storage target. The values come
- * from the form's own inputs, so the fields are read exactly as the page shows
- * them, whether or not the browser kept a node reference around.
+ * Read every board identity input right now and split the entries into the
+ * changed values and the first validation failure. This must run BEFORE
+ * CBIMap.save(): current LuCI builds finish save() with load() and
+ * renderContents(), which rebuild every input from cfgvalue (the burned-in
+ * original), so reading the fields afterwards always sees the old value and
+ * the write is skipped with "no field changed".
  */
-handleIdentityWrite: function() {
-	var self = this;
+collectIdentityChanges: function() {
 	var pending = [];
 	var failure = null;
 
 	this.identityEntries.forEach(function(entry) {
-		var node, value, result;
+		var value = identityFieldValue(entry.option);
 
-		node = entry.option.getUIElement ? entry.option.getUIElement('board') : null;
-		value = node && node.value != null ? node.value.trim() : String(entry.original || '');
+		if (value === null)
+			value = String(entry.original || '');
 
 		if (value == entry.original)
 			return;
 
-		result = validateBoardField(entry.def, value);
+		var result = validateBoardField(entry.def, value);
 
 		if (result !== true) {
 			failure = failure || result;
@@ -867,15 +991,18 @@ handleIdentityWrite: function() {
 		pending.push({ target: entry.target, field: entry.field, value: value });
 	});
 
-	if (failure) {
-		ui.addNotification(null, E('p', {}, failure), 'danger');
-		return Promise.resolve();
-	}
+	return { pending: pending, failure: failure };
+},
 
-	if (!pending.length) {
-		ui.addNotification(null, E('p', {}, _('No board identity field was changed.')), 'info');
-		return Promise.resolve();
-	}
+/*
+ * Writes the collected identity field changes of every storage target
+ * straight into the flash image. Runs after CBIMap.save() so the UCI half of
+ * the page is saved in the same click. Resolves to true when at least one
+ * field was written, or false when nothing changed.
+ */
+writeIdentityChanges: function(pending) {
+	if (!pending.length)
+		return Promise.resolve(false);
 
 	var byTarget = {};
 
@@ -885,7 +1012,6 @@ handleIdentityWrite: function() {
 	});
 
 	var sequence = Promise.resolve();
-	var output = [];
 
 	Object.keys(byTarget).forEach(function(target) {
 		sequence = sequence.then(function() {
@@ -895,24 +1021,122 @@ handleIdentityWrite: function() {
 				args.push(change.field + '=' + change.value);
 			});
 
-			return runIdentity(args).then(function(result) {
-				output.push(result);
-			});
+			return runIdentity(args);
 		});
 	});
 
 	return sequence.then(function() {
-		self.identityEntries.forEach(function(entry) {
-			var node = entry.option.getUIElement ? entry.option.getUIElement('board') : null;
+		return true;
+	});
+},
 
-			if (node && node.value != null)
-				entry.original = node.value.trim();
+/*
+ * Re-read the flash image after a write and push every new value into the
+ * rendered inputs, their comparison baselines and the value store behind
+ * cfgvalue(). Also refreshes the burned-serial placeholder on the OMCI SN
+ * box. This is what keeps the page correct without a manual Ctrl+F5: the
+ * flash image is outside UCI, so CBIMap.save()'s own re-render cannot know
+ * the values changed.
+ */
+refreshIdentityInputs: function() {
+	var self = this;
+
+	return loadIdentity().then(function(identity) {
+		if (!identity || !identity.data)
+			return;
+
+		self.identityEntries.forEach(function(entry) {
+			var values = identity.data[entry.target] || {};
+
+			if (!Object.prototype.hasOwnProperty.call(values, entry.field))
+				return;
+
+			var value = values[entry.field] || '';
+
+			self.identityValues[entry.target][entry.field] = value;
+			entry.original = value;
+			setIdentityFieldValue(entry.option, value);
 		});
 
-		ui.addNotification(null, E('p', [
-			_('Board identity written. Reboot the device to use the new values.'),
-			E('br'), output.join('; ')
-		]), 'info');
+		if (self.boardTarget &&
+				Object.prototype.hasOwnProperty.call(
+					identity.data[self.boardTarget] || {}, 'pon_sn')) {
+			var snField = document.querySelector('[data-field$="._serial_number"]');
+			var snInput = snField ? snField.querySelector('input') : null;
+
+			if (snInput)
+				snInput.placeholder = identity.data[self.boardTarget].pon_sn || '';
+		}
+	}).catch(function() {
+		/* A failed refresh only costs a manual page reload; the write itself
+		   has already been confirmed by the helper. */
+	});
+},
+
+/*
+ * Saving the page covers both halves: UCI carries the line identity overrides,
+ * while the board fields are written straight into the flash image. The board
+ * fields are captured and validated first: map.save() re-renders the form once
+ * it resolves, which would wipe the unsubmitted input values, and an invalid
+ * board field must stop the whole save instead of leaving UCI half-applied.
+ *
+ * "Save" stages UCI and the flash image without applying anything; the new
+ * board identity needs a reboot anyway. "Save & Apply" opens the standard
+ * apply countdown only when UCI really has staged changes: the board fields
+ * live in flash rather than in UCI, so a board-only edit would otherwise
+ * trigger the apply endpoint's 204 reply and the misleading "There are no
+ * changes to apply" notice even though the write succeeded. A board-only save
+ * instead gets one dismissible "written, reboot required" notification - the
+ * flash image cannot be covered by the UCI countdown and the old double-modal
+ * stacking cannot happen because the countdown modal is not shown. Only
+ * failures are surfaced as errors.
+ */
+savePage: function(andApply, mode) {
+	var self = this;
+	var map = document.querySelector('.cbi-map');
+
+	if (!map)
+		return Promise.resolve();
+
+	var collected = this.collectIdentityChanges();
+
+	if (collected.failure) {
+		ui.addNotification(null, E('p', {}, collected.failure), 'danger');
+		return Promise.resolve();
+	}
+
+	function notifyFlashWritten() {
+		ui.addNotification(null, E('p',
+			_('Board identity written. Reboot the device to use the new values.')),
+			'info');
+	}
+
+	return dom.callClassMethod(map, 'save').then(function() {
+		return self.writeIdentityChanges(collected.pending);
+	}).then(function(flashWritten) {
+		return self.refreshIdentityInputs().then(function() {
+			return flashWritten;
+		});
+	}).then(function(flashWritten) {
+		if (!andApply) {
+			if (flashWritten)
+				notifyFlashWritten();
+			return;
+		}
+
+		return uci.changes().then(function(changes) {
+			var hasUciChanges = Object.keys(changes || {}).some(function(config) {
+				return L.toArray(changes[config]).length > 0;
+			});
+
+			if (hasUciChanges)
+				return L.ui.changes.apply(mode == '0');
+
+			/* Flash-only write: no UCI countdown to show, so give the
+			   explicit feedback that the write happened. */
+			if (flashWritten)
+				notifyFlashWritten();
+		});
 	}).catch(function(error) {
 		ui.addNotification(null, E('p', [
 			_('Board identity write failed: %s').format(error.message)
@@ -920,26 +1144,11 @@ handleIdentityWrite: function() {
 	});
 },
 
-/*
- * Saving the page covers both halves: UCI carries the line identity overrides,
- * while the board fields are written straight into the flash image. The board
- * write runs first so a failure there does not silently leave UCI ahead of the
- * image it is supposed to agree with.
- */
 handleSave: function() {
-	var self = this;
-	var map = document.querySelector('.cbi-map');
-
-	if (!map)
-		return Promise.resolve();
-
-	return dom.callClassMethod(map, 'save').then(function() {
-		return self.handleIdentityWrite();
-	}).then(function() {
-		ui.hideModal();
-		return L.ui.changes.apply();
-	});
+	return this.savePage(false);
 },
 
-handleSaveApply: null
+handleSaveApply: function(ev, mode) {
+	return this.savePage(true, mode);
+}
 });

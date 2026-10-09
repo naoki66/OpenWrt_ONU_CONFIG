@@ -50,7 +50,11 @@ PKG_VERSION:=0.1.0
 # the legacy voice_device section on the next apply.
 # 22: add voice bridge/trunk delivery modes, port/vlan conflict guards
 # across voice/iptv/internet, and card visibility tied to mode.
-PKG_RELEASE:=22
+# 23: fix board identity save on current LuCI (capture before save()
+# re-renders), refresh flash values in place, gate the UCI apply
+# countdown on real staged changes, and default the OMCI vendor ID to
+# the serial number's first four characters.
+PKG_RELEASE:=23
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 
