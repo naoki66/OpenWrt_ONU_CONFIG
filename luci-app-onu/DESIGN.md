@@ -509,6 +509,8 @@ UCI schema（`/etc/config/onu-internet`）：
 
 - 选中端口要独占 netifd 归属（`detach_ports()`，与 IPTV 的 `detach_lan_port()` 同一套 `device` / `interface` / `bridge-vlan` 遍历）：
   一端留在 `br-lan` 里，两个网桥会互相抢同一个端口；
+- **摘走得还回去**：`reattach_ports()` 在「停用页面」或「切到非桥接模式」时（`ENABLED != 1` 或 `MODE != bridge`），赶在 `remove_managed_network` 清扫之前把 `luci_wanup_bridge.ports` 的端口还回 `br-lan`（跳过上行口与 `ct-wanup`、并去重）。少了这一步，离开桥接后那些 LAN 口会「无桥可归」而彻底失效——真机上 `br-lan` 一度只剩一个口即为此证；
+- 被桥接的端口归入 **wan zone（`input='REJECT'`、`proto='none'` 无 DHCP）**，所以光猫不再给这些口提供地址与管理面，管理必须从**未选中**的口进（这点已写进前端 LAN ports 的警示文案）；
 - `br-wanup` 永远不合并进 `br-lan`，因此光猫自己的管理面（br-lan、dnsmasq、Web）不受影响；
 - 所有桥接流量按 EtherType 在 **`bridge` 家族**里过滤（见下），只放行会话需要的帧去上行口，其余留在本地；
 - 与 IPTV 机顶盒模式争同一端口时 **`fail`**：一个端口不能同属两个网桥，谁后被 netifd 应用谁胜出，属于会导致静默损坏的一类 bug。UI 侧同样先拦；
