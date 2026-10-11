@@ -474,9 +474,13 @@ UCI schema（`/etc/config/onu-internet`）：
 
 | 模式 | 拓扑 | IPv6 从哪来 |
 | --- | --- | --- |
-| `bridge` | `pon0.<vlan>`（`ct-wanup`）+ 选中 LAN 口 → `br-wanup` | 不涉及：网桥只转帧，地址由下游路由器拿 |
+| `bridge` | `ct-wanup` + 选中 LAN 口 → `br-wanup`（TAG 下 `ct-wanup=pon0.<vlan>`；UNTAG 非桥接下 `ct-wanup`=承载裸 `pon0` 的网桥；**UNTAG 桥接例外见下方说明**） | 不涉及：网桥只转帧，地址由下游路由器拿 |
 | `dhcp` | `pon0.<vlan>`（`ct-wanup`）→ `network.wan`（proto `dhcp`） | 双栈时**另写一个真实的 `wan6`**（**device 直接绑 `ct-wanup`** + `dhcpv6`，`reqprefix auto`）。不能写 `@wan`：别名要等 wan 协议层 up 后才解析得到设备，IPv4 租约 pending 期间（无光/DHCP 慢）wan6 会 `NO_DEVICE`，LuCI 报"网络设备不存在" |
 | `pppoe` | `pon0.<vlan>`（`ct-wanup`）→ `network.wan`（proto `pppoe`） | **会话自己协商**，netifd 在 ppp 设备上起虚拟 `wan_6`；**不写 `network.wan6`** |
+
+> **透明模式（`transparent_mode`）只决定 `ct-wanup` 的物理形态，不改变上面的拓扑骨架：** TAG（默认）`ct-wanup` 是 `<uplink>.<vlan>` 的 802.1q 子接口；UNTAG（除桥接外）`ct-wanup` 是承载裸 `<uplink>` 的网桥设备（不施加 VLAN 标签）。
+>
+> **⚠️ UNTAG 桥接模式的唯一例外（已实机核实）：Airoha/ImmortalWrt 内核禁止"桥中桥"——`ip link set <bridge> master <bridge>` 直接报 `RTNETLINK answers: Symbolic link loop`，无法把承载 `pon0` 的网桥 `ct-wanup` 再塞进 `br-wanup`。** 因此 UNTAG 桥接**不创建 `ct-wanup`**，直接把裸 `pon0` 作为成员端口内联进 `br-wanup`，nft 规则的 `iifname/oifname` 与桥接端口也都引用裸 `pon0`。这样拓扑可行；代价是 NPU 卸载锚点 `ct-wanup` 在 UNTAG 桥接下不存在，桥接卸载只能靠 `br-wanup → pon0` 的成员展开（见 NPU 卸载小节）。
 
 > ⚠️ **`wan_6` 与 `wan6` 是两个不同的东西，别混。** `wan_6`（下划线）是 netifd 在 `option ipv6 'auto'`
 > 时**为 PPPoE 接口自动生成**的虚拟接口——它没有 UCI section，随会话一起生灭，proto 由 netifd 决定。
@@ -565,17 +569,20 @@ table bridge wanup {
 > `resolve_offload_devices()` 再对每个设备走 `resolve_lower_devices()`，后者只对 `devtype` 为 `vlan` / `bridge` 的递归展开成员。
 > 而 PPPoE 拨号起来后 wan 的 `l3_device` 是 `pppoe-wan`（devtype `ppp`，不递归），物理设备 pon0 因此永远进不了 flowtable。
 >
-> 本包采用**双锚定策略**，由 `internet-apply` 在写配置时自动探测、无需用户干预：
+> 本包统一采用 **zone `list device` 锚定**：PPPoE 模式（且开启卸载）向 wan zone 写 `list device`，指向当前服务设备
+> （TAG 模式为 `ct-wanup`，即 pon0.vlan；UNTAG 模式——仅非桥接——同样为 `ct-wanup`，只是它变成承载 `pon0` 的网桥设备）。该锚定是** zone 的 device 引用，而非 UCI 接口**，
+> 因此既不产生任何多余的 `network` 接口段，也永远不会出现在 LuCI「接口」页（这是早期 `luci_wanup_uplink` 辅助接口
+> 的痛点的彻底解决）。
 >
-> 1. **补丁版 fw4（首选）**：固件树对 firewall4 打补丁（新增 `zone_offload_devices()`，让 hw/sw 两处 offload
->    设备解析循环同时遍历 `zone.device`）。脚本检测到补丁后，PPPoE 模式只向 wan zone 写 `list device 'ct-wanup'`，
->    fw4 沿 vlan 递归展开到 pon0。不产生任何多余 UCI 接口，LuCI「接口」页干净。
-> 2. **原版 fw4（自动回退）**：检测不到补丁时，回退为创建 `luci_wanup_uplink`（proto `none`，device=pon0）
->    并挂入 wan zone 的辅助接口——它会显示在 LuCI 接口页（协议"不配置协议"），这是 fw4 限制下的唯一手段，不是配置错误。
+> - **补丁版 fw4（首选）**：固件树对 firewall4 打补丁（新增 `zone_offload_devices()`，让 hw/sw 两处 offload
+>   设备解析循环同时遍历 `zone.device`）。脚本写 `list device 'ct-wanup'`，TAG 与 UNTAG（非桥接）都是它（UNTAG 非桥接下 `ct-wanup` 是承载 pon0 的网桥，hw/sw offload 均能沿网桥递归展开到 pon0），
+>   fw4 沿 vlan / 物理口递归展开到 pon0，卸载生效。
+> - **原版 fw4（自动回退）**：补丁缺失时 `list device` 条目仍写入但 fw4 不会据此卸载，属 fw4 能力限制；接口页同样干净。
 >
-> DHCP 模式两种情况都不需要辅助手段：wan 直接跑在 `ct-wanup` 上，经 vlan 递归即可展开到 pon0。
-> 桥接模式同样不需要：`ct-wanup` 是 `br-wanup` 的成员，顺着网桥就已经展开到 pon0。
-> 写入的 `list device` 与辅助接口都由脚本托管，停用页面 / 切换模式时自动清除。
+> DHCP 模式两种情况都不需要辅助手段：wan 直接跑在服务设备上，经下层递归即可展开到 pon0。
+> 桥接模式同样不写 `list device` 锚定（`ZONE_DEVICE_UPLINK` 仅 PPPoE 置位）：服务设备是 `br-wanup` 的成员，顺着网桥就已经展开到 pon0。TAG 桥接下该成员是 `ct-wanup`（pon0.vlan），UNTAG 桥接下该成员是裸 `pon0` 本身（因 UNTAG 桥接不建 `ct-wanup`），两种情形都能沿网桥递归展开到 pon0。
+> 写入的 `list device` 由脚本托管，停用页面 / 切换模式时由 `purge_managed_zone_devices()` 自动清除
+> （同时清扫 `ct-wanup` 与 `pon0`，覆盖 TAG<->UNTAG 切换残留）。
 
 #### 验收方式（到设备上可执行）
 
@@ -799,7 +806,7 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段。**network 段新增** `mode`（route/bridge/trunk，缺省 route）/ `lan_port` / `trunk_port` |
 | `root/etc/config/onu-internet` | 新增：上网业务页的唯一数据源；`enabled` / `mode` / `uplink` / `vlan` / `ports` / `ipoe` / `ip_version` / `username` / `password` / `mtu` / `offload` |
 | `root/usr/libexec/voice-apply` | 新增：把语音网络 UCI 翻译成受管的 `luci_voice_vlan` / `ct-voice` / `voice` 拓扑和 `voice` 防火墙 zone；兼容清理旧版 `network.voice_device` 及实验性 `network.luci_voice`，并对 PON 下层使用 `force_link=1`。**后已改**：按 `mode` 分三种拓扑——route 保持原行为；bridge 写 `voice_br_vlan`/`voice_br_dev`(br-voice)/`voice_bridge` 并把专用口移出 br-lan（停用/切换时从旧 `voice_br_dev` 回溯还口）；trunk 写 `voice_up`/`voice_dn`/`voice_mux_dev`(br-voice-mux)/`voice_mux`，trunk 口留在 br-lan。新增 `check_vlan_conflict()`（含 IPTV `trunk_vlans`）与 `check_port_conflict()`（上网桥接口/IPTV 专用口与 trunk 口互斥矩阵）；zone 仅 route 模式写 |
-| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；PPPoE 卸载锚定采用双策略（探测 fw4 是否含 `zone_offload_devices` 补丁：补丁版向 wan zone 写 `list device 'ct-wanup'`，原版回退写 `luci_wanup_uplink` 辅助接口，详见 NPU 卸载一节），托管的 zone device 由 `purge_managed_zone_devices()` 在每次写入前清扫；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口。**语音三模式加入后**：`load_voice_port()` 把语音专用口/trunk 口纳入桥接端口校验，detach 保护名单加入 `voice*` |
+| `root/usr/libexec/internet-apply` | 新增：把上述 UCI 翻译成 network / firewall / nftables 的后端。**三种**模式统一落在 `network.wan` 上；stock `wan`/`wan6` 用 `uci rename` 收起并改为私有 section type（保留原 option且不出现在 LuCI 接口页）而不是删除；生成的 WAN 设 `force_link=1`，允许 PON 下层尚未报告 carrier 时由 netifd 继续创建 VLAN/拨号设备；桥接模式写 `ct-wanup` + `br-wanup` 并生成 `/etc/internet.nft`（`bridge` 家族按 EtherType `0x8863`/`0x8864` 过滤）；`dhcp` 模式写 DHCP，双栈时另写 `wan6`（DHCPv6 客户端）；`pppoe` 模式写 PPPoE **并且不再写 `wan6`**（IPv6 由会话协商，netifd 自起 `wan_6`），同时 `park_wan6()` 停泊现存 `wan6`、离开该模式时 `unpark_wan6()` 还原；**透明模式 `transparent_mode`**（tag/untag，新增 UCI）：服务设备名恒为 `ct-wanup`——TAG 写 802.1q 子接口 `ct-wanup`=<uplink>.<vlan>，UNTAG 写 `ct-wanup` 为承载裸 <uplink> 的桥设备；桥接模式把 `ct-wanup` 作为成员端口并入 `br-wanup`（TAG 下 `ct-wanup=pon0.<vlan>`，UNTAG 非桥接下 `ct-wanup`=承载裸 pon0 的网桥）；**UNTAG 桥接例外**：Airoha 内核禁止桥中桥（`ip link set <bridge> master <bridge>` 报 `Symbolic link loop`），故不建 `ct-wanup`，直接把裸 `pon0` 内联进 `br-wanup`，nft 规则与桥接端口均引用 `pon0`；PPPoE 卸载锚定统一采用 zone `list device`（TAG 与 UNTAG 非桥接为 `ct-wanup`；UNTAG 非桥接下 `ct-wanup` 为承载 pon0 的网桥，hw/sw offload 均可沿网桥展开到 pon0），是 zone 的 device 引用而非 UCI 接口，永不出现在 LuCI 接口页（旧 `luci_wanup_uplink` 辅助接口已删除），由 `purge_managed_zone_devices()` 在每次写入前清扫 `ct-wanup` 与 `pon0`；`firewall.luci_wanup` 为 `include`；页面关闭时按 `luci_wanup*` 前缀一键清扫并还原 stock 接口。**语音三模式加入后**：`load_voice_port()` 把语音专用口/trunk 口纳入桥接端口校验，detach 保护名单加入 `voice*` |
 | `root/etc/init.d/internet` | 新增：`START=18`（早于 network/firewall，与 sibling `iptv` 同构），procd 服务 + `procd_add_reload_trigger "onu-internet"` |
 | `root/usr/share/luci/menu.d/luci-app-onu.json` | 顶层标题 PON → ONU、order 85 → 5（排到「接口」之前）；子页本次新增 `admin/onu/internet`，order **35**（认证配置 30 与 IPTV 40 之间） |
 | `root/usr/share/rpcd/acl.d/luci-app-onu.json` | 并入原 `luci-app-iptv` 的 UCI 与 network.device 权限，并授权 `onu-internet` / `onu-iptv` / `onu-voice` |

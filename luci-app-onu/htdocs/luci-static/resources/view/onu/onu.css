@@ -278,3 +278,19 @@
 #cbi-pon-xpon {
 	padding-bottom: 4rem;
 }
+
+/*
+ * Internet page: a conditionally disabled form row. When Transparent mode is
+ * UNTAG, the Internet VLAN field is dimmed and its input made non-interactive
+ * (the input itself is disabled in JS; this only fades the row so the disabled
+ * state reads at a glance). Scoped to the onu-internet card to avoid touching
+ * any theme-level disabled styling elsewhere.
+ */
+#cbi-onu-internet .cbi-value.cbi-value-disabled {
+	opacity: 0.45;
+}
+
+#cbi-onu-internet .cbi-value.cbi-value-disabled input,
+#cbi-onu-internet .cbi-value.cbi-value-disabled select {
+	cursor: not-allowed;
+}

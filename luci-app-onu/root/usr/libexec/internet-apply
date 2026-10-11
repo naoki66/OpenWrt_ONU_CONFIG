@@ -5,28 +5,42 @@
 # nftables configuration.
 #
 # Two topologies, always written to network.wan so that whatever zone already
-# references "wan" keeps resolving:
+# references "wan" keeps resolving. Each may run in either transparent mode. The
+# service device is always named ct-wanup - one stable name every consumer
+# references - and only its underlying type changes with the mode:
 #
-#   bridge  The selected LAN ports and <uplink>.<vlan> form br-wanup, a bridge
-#           of its own. It never joins br-lan, so the ONT management plane
-#           stays on the ports left behind. Only the frames a downstream router
-#           needs are let through towards the uplink: /etc/internet.nft matches
-#           EtherType 0x8863 / 0x8864 in the bridge family and drops everything
-#           else that would leave through the uplink, which keeps local ARP,
-#           management and IPv6 traffic out of the operator VLAN.
+#   Transparent mode (TAG, the default): ct-wanup is the 802.1q sub-interface
+#       <uplink>.<vlan>.
 #
-#   dhcp    The operator hands the address out on the internet VLAN, nothing
-#           is dialled. Dual stack keeps the DHCPv6-PD client this page has
-#           always written: on a plain DHCP uplink there is no session for
+#   Transparent mode (UNTAG): ct-wanup is a bridge device carrying the raw
+#       <uplink>, so no VLAN tag is imposed. The one exception is UNTAG bridge:
+#       the Airoha kernel rejects a bridge nested inside a bridge (ip link set
+#       <bridge> master <bridge> fails with "Symbolic link loop"), so ct-wanup
+#       is NOT created there - the raw uplink is added straight into br-wanup
+#       instead. PPPoE offload in UNTAG still uses ct-wanup, so its anchor stays
+#       identical to TAG mode; bridge offload relies on br-wanup -> uplink
+#       member resolution (see DESIGN.md).
+#
+#   bridge  The selected LAN ports and the service device form br-wanup, a
+#           bridge of its own. It never joins br-lan, so the ONT management
+#           plane stays on the ports left behind. Only the frames a downstream
+#           router needs are let through towards the uplink: /etc/internet.nft
+#           matches EtherType 0x8863 / 0x8864 in the bridge family and drops
+#           everything else that would leave through the uplink, which keeps
+#           local ARP, management and IPv6 traffic out of the operator path.
+#
+#   dhcp    The operator hands the address out on the internet service device,
+#           nothing is dialled. Dual stack keeps the DHCPv6-PD client this page
+#           has always written: on a plain DHCP uplink there is no session for
 #           netifd to derive IPv6 from, so wan6 stays a real interface here,
-#           bound directly to the VLAN device (not aliased @wan, see
+#           bound directly to the service device (not aliased @wan, see
 #           write_dhcpv6_client).
 #
 #   pppoe   The ONT dials itself. The stock network.wan / network.wan6 are
 #           renamed aside rather than deleted, so switching the page off puts
 #           the original sections back unchanged. The leftovers have to be
 #           silenced too: a stock wan6 usually rides on @wan and would solicit
-#           DHCPv6 straight into the operator VLAN.
+#           DHCPv6 straight into the operator path.
 #
 # IPv6 in dialled mode comes from the session itself: netifd raises its own
 # virtual wan_6 on top of the ppp interface when the interface carries
@@ -41,20 +55,19 @@
 # network interfaces only (related_physdevs), and while it resolves the lower
 # devices of VLAN/bridge devices it cannot look through a ppp device, so with
 # network.wan on pppoe-wan the physical uplink never makes it into the
-# flowtable. Two ways to anchor it:
+# flowtable. The anchor is a zone "list device" entry pointing at the service
+# device (ct-wanup in TAG mode, the raw uplink in UNTAG mode):
 #
-#   1. Patched firewall4 (preferred): put the 802.1q uplink sub-interface in
-#      the zone with "list device". The patched fw4 also resolves zone devices
-#      for offloading (zone_offload_devices()), so ct-wanup expands into pon0.
-#      No extra interface section exists, so nothing shows up on the LuCI
-#      interfaces page.
+#   - Patched firewall4: the zone_offload_devices() helper resolves the entry
+#     into the physical uplink (pon0), so offloading reaches the wire. No extra
+#     interface section exists, so nothing shows up on the LuCI interfaces page.
 #
-#   2. Stock firewall4 (fallback): create the $UPLINK_IFACE helper interface
-#      (proto none) directly on the physical uplink and add it to the zone.
-#      It works, but every UCI interface is listed on the LuCI interfaces
-#      page, so the helper is visible there as a redundant unmanaged iface.
+#   - Stock firewall4: the entry is harmless but does not anchor the uplink for
+#     offloading. There is no visible helper interface either way, which is what
+#     we want - the service device is a zone device reference, not a UCI
+#     interface, so the LuCI interfaces page never lists it.
 #
-# DHCP mode needs neither: network.wan runs on ct-wanup itself and the VLAN
+# DHCP mode needs neither: network.wan runs on the service device itself and the
 # lower-device resolution already reaches the physical uplink.
 #
 # Hardware offload: airoha_eth registers ndo_setup_tc and accepts
@@ -71,7 +84,6 @@ OFFLOAD_BACKUP="/etc/internet.offload.orig"
 # Names of the derived devices and of the network sections this page owns.
 VLAN_DEV='ct-wanup'
 BRIDGE_DEV='br-wanup'
-UPLINK_IFACE='luci_wanup_uplink'
 STOCK_WAN='luci_wanup_stock_wan'
 STOCK_WAN6='luci_wanup_stock_wan6'
 STOCK_TYPE='luci_wanup_stock'
@@ -120,6 +132,7 @@ load_internet_config() {
 	config_get MODE config mode bridge
 	config_get UPLINK config uplink pon0
 	config_get VLAN config vlan
+	config_get TRANSMODE config transparent_mode tag
 	config_get PORTS config ports
 	config_get_bool IPOE config ipoe 0
 	config_get_bool OFFLOAD config offload 1
@@ -222,7 +235,8 @@ validate_config() {
 
 	validate_ifname "$UPLINK" || fail "Invalid uplink device name"
 	[ -e "/sys/class/net/$UPLINK" ] || fail "Uplink device $UPLINK was not found"
-	validate_vlan "$VLAN" || fail "The internet VLAN must be between 1 and 4094"
+	[ "$TRANSMODE" = 'untag' ] ||
+		validate_vlan "$VLAN" || fail "The internet VLAN must be between 1 and 4094"
 
 	case "$MODE" in
 		bridge)
@@ -323,6 +337,10 @@ write_offload_defaults() {
 #
 write_nft_rules() {
 	local tmp port
+	# UNTAG bridge references the raw uplink (ct-wanup does not exist there);
+	# every other mode references ct-wanup.
+	local uplink_ref="$VLAN_DEV"
+	[ "$TRANSMODE" = 'untag' ] && [ "$MODE" = 'bridge' ] && uplink_ref="$UPLINK"
 
 	tmp="$(mktemp /etc/internet.nft.XXXXXX)" || fail "Cannot create nftables staging file"
 
@@ -342,9 +360,9 @@ EOF
 		for port in $PORTS; do
 			cat >>"$tmp" <<EOF
 		# Session of the router plugged into $port.
-		iifname "$port" oifname "$VLAN_DEV" ether type { 0x8863, 0x8864 } \
+		iifname "$port" oifname "$uplink_ref" ether type { 0x8863, 0x8864 } \
 			counter accept comment "pppoe-to-uplink-$port"
-		iifname "$VLAN_DEV" oifname "$port" ether type { 0x8863, 0x8864 } \
+		iifname "$uplink_ref" oifname "$port" ether type { 0x8863, 0x8864 } \
 			counter accept comment "pppoe-from-uplink-$port"
 EOF
 		done
@@ -353,18 +371,18 @@ EOF
 			for port in $PORTS; do
 				cat >>"$tmp" <<EOF
 		# IPoE operators carry native IPv4/IPv6 instead of a PPPoE session.
-		iifname "$port" oifname "$VLAN_DEV" ether type { arp, ip, ip6 } \
+		iifname "$port" oifname "$uplink_ref" ether type { arp, ip, ip6 } \
 			counter accept comment "ipoe-to-uplink-$port"
-		iifname "$VLAN_DEV" oifname "$port" ether type { arp, ip, ip6 } \
+		iifname "$uplink_ref" oifname "$port" ether type { arp, ip, ip6 } \
 			counter accept comment "ipoe-from-uplink-$port"
 EOF
 			done
 		fi
 
 		cat >>"$tmp" <<EOF
-		# Everything else is local: it must not reach the operator VLAN.
-		iifname "$VLAN_DEV" counter drop comment "drop-non-pppoe-from-uplink"
-		oifname "$VLAN_DEV" counter drop comment "drop-non-pppoe-to-uplink"
+		# Everything else is local: it must not reach the operator path.
+		iifname "$uplink_ref" counter drop comment "drop-non-pppoe-from-uplink"
+		oifname "$uplink_ref" counter drop comment "drop-non-pppoe-to-uplink"
 		counter accept comment "allow-traffic-between-lan-ports"
 	}
 
@@ -560,17 +578,22 @@ remove_from_zones() {
 	done
 }
 
-# The managed vlan sub-interface is added as a zone device only while patched
-# firewall4 needs it as the PPPoE flowtable anchor. Drop it from every zone on
-# every other run (page off, bridge, DHCP, stock-fw4 fallback) so switching
-# modes never leaves a dangling device reference behind.
+# The managed service device is added as a zone device in dial mode only while
+# offload asks for it (the PPPoE flowtable anchor). Drop it from every zone on
+# every other run (page off, bridge, DHCP) and on a mode switch (TAG <-> UNTAG)
+# so switching never leaves a dangling device reference behind. Purge both the
+# 802.1q sub-interface name and the raw uplink: the one we add depends on the
+# transparent mode, and a stale entry from the other mode must go too.
 purge_managed_zone_devices() {
 	local zone current
 
 	for zone in $(list_zones); do
 		for current in $(uci -q get "firewall.$zone.device"); do
-			[ "$current" = "$VLAN_DEV" ] &&
-				uci del_list "firewall.$zone.device"="$current"
+			case "$current" in
+				"$VLAN_DEV"|"$UPLINK")
+					uci del_list "firewall.$zone.device"="$current"
+					;;
+			esac
 		done
 	done
 }
@@ -580,7 +603,7 @@ purge_managed_zone_devices() {
 drop_dead_zone_references() {
 	local net refs='' zone current
 
-	for net in wan wan6 "$UPLINK_IFACE"; do
+	for net in wan wan6; do
 		uci -q get "network.$net" >/dev/null && continue
 		refs="${refs:+$refs }$net"
 	done
@@ -635,15 +658,47 @@ ensure_lan_forwarding() {
 # Topology
 #
 write_common_uplink() {
-	uci set network.luci_wanup_vlan='device'
-	uci set network.luci_wanup_vlan.type='8021q'
-	uci set network.luci_wanup_vlan.ifname="$UPLINK"
-	uci set network.luci_wanup_vlan.vid="$VLAN"
-	uci set network.luci_wanup_vlan.name="$VLAN_DEV"
+	# The service device is always named ct-wanup so every consumer (network.wan,
+	# wan6, the zone offload anchor, the bridge, the nft rules) references one
+	# stable name regardless of transparent mode:
+	#
+	#   TAG  : an 802.1q sub-interface of the uplink, ct-wanup = <uplink>.<vlan>.
+	#   UNTAG: a bridge device carrying the raw uplink, ct-wanup = <uplink>.
+	#
+	# The one exception is UNTAG bridge: the Airoha kernel rejects a bridge
+	# nested inside a bridge (ip link set <bridge> master <bridge> fails with
+	# "Symbolic link loop"), so ct-wanup is NOT created there. The raw uplink is
+	# added straight into br-wanup instead, and the nft rules / bridge ports
+	# reference the raw uplink. PPPoE offload in UNTAG still uses ct-wanup
+	# (bridge over the raw uplink, no nesting), so its anchor stays identical to
+	# TAG mode and the flowtable still resolves down to the physical uplink.
+	if [ "$TRANSMODE" = 'untag' ] && [ "$MODE" = 'bridge' ]; then
+		return 0
+	fi
+
+	if [ "$TRANSMODE" = 'untag' ]; then
+		uci set network.luci_wanup_dev='device'
+		uci set network.luci_wanup_dev.type='bridge'
+		uci set network.luci_wanup_dev.name="$VLAN_DEV"
+		uci set network.luci_wanup_dev.stp='0'
+		uci add_list network.luci_wanup_dev.ports="$UPLINK"
+		return 0
+	fi
+
+	uci set network.luci_wanup_dev='device'
+	uci set network.luci_wanup_dev.type='8021q'
+	uci set network.luci_wanup_dev.ifname="$UPLINK"
+	uci set network.luci_wanup_dev.vid="$VLAN"
+	uci set network.luci_wanup_dev.name="$VLAN_DEV"
 }
 
 write_bridge_network() {
 	write_common_uplink
+
+	# UNTAG bridge inlines the raw uplink into the bridge (ct-wanup is skipped
+	# for that mode - see write_common_uplink); every other mode bridges ct-wanup.
+	local uplink_port="$VLAN_DEV"
+	[ "$TRANSMODE" = 'untag' ] && [ "$MODE" = 'bridge' ] && uplink_port="$UPLINK"
 
 	uci set network.luci_wanup_bridge='device'
 	uci set network.luci_wanup_bridge.type='bridge'
@@ -651,7 +706,7 @@ write_bridge_network() {
 	uci set network.luci_wanup_bridge.stp='0'
 	uci set network.luci_wanup_bridge.igmp_snooping='0'
 	uci set network.luci_wanup_bridge.multicast_querier='0'
-	uci add_list network.luci_wanup_bridge.ports="$VLAN_DEV"
+	uci add_list network.luci_wanup_bridge.ports="$uplink_port"
 
 	for port in $PORTS; do
 		uci add_list network.luci_wanup_bridge.ports="$port"
@@ -667,45 +722,6 @@ write_bridge_network() {
 	uci set network.wan.auto='1'
 	uci set network.wan.force_link='1'
 	uci set network.wan.luci_wanup='1'
-}
-
-uplink_claimed() {
-	local section device
-
-	for section in $(uci -q show network 2>/dev/null | \
-		sed -n 's/^network\.\([A-Za-z0-9_]*\)=interface$/\1/p'); do
-		device="$(uci -q get "network.$section.device")"
-		[ "$device" = "$UPLINK" ] && return 0
-	done
-
-	return 1
-}
-
-# Stock fw4 derives flowtable devices from zone network interfaces only; a
-# zone "list device" entry reaches the flowtable only on a firewall4 build
-# that resolves zone devices for offloading. The patched fw4.uc carries the
-# zone_offload_devices() helper this script relies on.
-fw4_zone_device_offload() {
-	[ -r /usr/share/ucode/fw4.uc ] || return 1
-	grep -q 'zone_offload_devices' /usr/share/ucode/fw4.uc 2>/dev/null
-}
-
-# Fallback for stock firewall4: nothing else references the physical uplink in
-# dial mode, yet the flowtable needs the real device rather than pppoe-wan or
-# $VLAN_DEV. The price is a helper interface visible on the LuCI interfaces
-# page; patched builds anchor the uplink through a zone "list device" instead.
-write_uplink_device_interface() {
-	if uplink_claimed; then
-		warn "$UPLINK is already claimed by another interface; put that interface in a zone so the flowtable picks up the uplink"
-		return 0
-	fi
-
-	uci set "network.$UPLINK_IFACE"='interface'
-	uci set "network.$UPLINK_IFACE.device"="$UPLINK"
-	uci set "network.$UPLINK_IFACE.proto"='none'
-	uci set "network.$UPLINK_IFACE.delegate"='0'
-	uci set "network.$UPLINK_IFACE.auto"='1'
-	uci set "network.$UPLINK_IFACE.luci_wanup"='1'
 }
 
 # IPv6 is wanted for everything but plain IPv4. "dual" is what the page writes
@@ -777,15 +793,12 @@ write_pppoe_network() {
 
 	# Over a live ppp session the l3 device is pppoe-wan, whose lower devices
 	# fw4 cannot resolve, so the physical uplink has to be anchored on its
-	# own. Prefer the zone device entry (no visible interface); fall back to
-	# the helper interface on stock firewall4 builds.
+	# own. Anchor it through a zone "list device" entry on the service device.
+	# On a patched firewall4 this reaches the flowtable; it is also a zone
+	# device reference rather than a UCI interface, so nothing shows up on the
+	# LuCI interfaces page (the old luci_wanup_uplink helper interface is gone).
 	if [ "$OFFLOAD" -eq 1 ]; then
-		if fw4_zone_device_offload; then
-			ZONE_DEVICE_UPLINK=1
-		else
-			warn "firewall4 does not resolve zone devices for offloading; keeping the $UPLINK_IFACE helper interface (update firewall4 to hide it)"
-			write_uplink_device_interface
-		fi
+		ZONE_DEVICE_UPLINK=1
 	fi
 }
 
@@ -806,8 +819,8 @@ write_dhcp_network() {
 
 	want_ipv6 && write_dhcpv6_client
 
-	# No helper interface here: wan runs on the $VLAN_DEV vlan sub-interface
-	# itself and fw4 resolves its lower device (the physical uplink) for the
+	# No helper interface here: wan runs on the service device (ct-wanup) itself
+	# and fw4 resolves its lower device (the physical uplink) for the
 	# flowtable on both stock and patched firewall4.
 }
 
@@ -819,8 +832,6 @@ write_network_config() {
 	# Undo what a previous PPPoE run did before anything is written, so a
 	# parked wan6 is back in one piece by the time this run needs it.
 	unpark_wan6
-
-	remove_from_zones "$UPLINK_IFACE"
 
 	if [ "$ENABLED" -ne 1 ]; then
 		restore_stock wan "$STOCK_WAN"
@@ -861,10 +872,10 @@ write_firewall_config() {
 		resolve_wan_zone
 		ensure_in_zone "$WAN_ZONE" wan
 		uci -q get network.wan6 >/dev/null && ensure_in_zone "$WAN_ZONE" wan6
-		uci -q get "network.$UPLINK_IFACE" >/dev/null &&
-			ensure_in_zone "$WAN_ZONE" "$UPLINK_IFACE"
-		# PPPoE on patched firewall4: anchor the physical uplink through the
-		# zone device list instead of a helper interface (see file header).
+		# PPPoE with offload: anchor the physical uplink through the zone
+		# device list on the service device (ct-wanup in TAG, the raw uplink in
+		# UNTAG). It is a zone device reference, never a UCI interface, so it
+		# never shows on the LuCI interfaces page.
 		[ "$ZONE_DEVICE_UPLINK" = 1 ] &&
 			uci add_list "firewall.$WAN_ZONE.device"="$VLAN_DEV"
 		ensure_lan_forwarding

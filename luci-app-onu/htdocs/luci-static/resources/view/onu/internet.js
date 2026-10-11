@@ -97,26 +97,37 @@ function wantsIPv6() {
  * What the apply script builds from the current settings. Layer two devices are
  * not invented by the user, they are derived - showing them keeps this page and
  * internet-apply readable against each other.
+ *
+ * In UNTAG transparent mode there is no 8021q subinterface: the uplink itself
+ * carries the service, so the ".vlan" part is dropped from every line.
  */
 function derivedDevices() {
 	var uplink = uci.get('onu-internet', 'config', 'uplink') || 'pon0';
 	var vlan = uci.get('onu-internet', 'config', 'vlan');
+	var tmode = uci.get('onu-internet', 'config', 'transparent_mode') || 'tag';
 
 	if (uci.get('onu-internet', 'config', 'enabled') !== '1')
 		return '-';
 
+	var iface = (tmode === 'untag') ? uplink : '%s.%s'.format(uplink, vlan || '?');
+
 	switch (uci.get('onu-internet', 'config', 'mode')) {
 	case 'pppoe':
-		return '%s.%s (%s) -> pppoe-wan'.format(uplink, vlan || '?', VLAN_DEVICE);
+		return '%s (%s) -> pppoe-wan'.format(iface, VLAN_DEVICE);
 
 	case 'dhcp':
 		/* Only the dual-stack case gets a second interface: that is the one
 		 * place a real DHCPv6 client is written. */
-		return '%s.%s (%s) -> wan%s'.format(uplink, vlan || '?', VLAN_DEVICE,
+		return '%s (%s) -> wan%s'.format(iface, VLAN_DEVICE,
 			wantsIPv6() ? ' + wan6' : '');
 
 	default:
-		return '%s.%s (%s) + LAN ports -> %s'.format(uplink, vlan || '?', VLAN_DEVICE, BRIDGE_DEVICE);
+		/* UNTAG bridge inlines the raw uplink into br-wanup: the Airoha kernel
+		 * rejects a bridge nested in a bridge, so ct-wanup is not created there
+		 * and the uplink itself is the bridge member. Show it directly. */
+		if (tmode === 'untag')
+			return '%s + LAN ports -> %s'.format(uplink, BRIDGE_DEVICE);
+		return '%s (%s) + LAN ports -> %s'.format(iface, VLAN_DEVICE, BRIDGE_DEVICE);
 	}
 }
 
@@ -155,13 +166,18 @@ return view.extend({
 		o.rmempty = false;
 		o.description = _('With the service off, no VLAN subinterface and no dialling interface is written, and the stock WAN interfaces of the network page are put back.');
 
-		o = s.option(form.ListValue, 'mode', _('Internet mode'),
-			_('Bridged hands the operator VLAN to your own router. DHCP takes whatever address the operator hands out. PPPoE lets the ONT terminate the session and route for the LAN.'));
-		o.default = 'bridge';
+		/*
+		 * Transparent mode sits above the VLAN field because it governs whether
+		 * the VLAN field is usable at all: TAG carries the service on an 8021q
+		 * subinterface and needs a VLAN ID; UNTAG hands the raw uplink through
+		 * and the VLAN field below is disabled.
+		 */
+		o = s.option(form.ListValue, 'transparent_mode', _('Transparent mode'),
+			_('TAG mode requires an Internet VLAN ID for the service. UNTAG mode passes the raw uplink through without VLAN tagging, and disables the Internet VLAN field below.'));
+		o.default = 'tag';
 		o.rmempty = false;
-		o.value('bridge', _('Bridged'));
-		o.value('dhcp', _('DHCP'));
-		o.value('pppoe', _('PPPoE'));
+		o.value('tag', _('TAG'));
+		o.value('untag', _('UNTAG'));
 		o.depends('enabled', '1');
 
 		o = s.option(form.Value, 'vlan', _('Internet VLAN'),
@@ -169,6 +185,54 @@ return view.extend({
 		o.placeholder = '1-4094';
 		o.datatype = 'range(1,4094)';
 		o.rmempty = false;
+
+		/*
+		 * Hidden outright in UNTAG instead of greyed out. A disabled input
+		 * still counts as an empty required field, so the page rejected the
+		 * save with "must not be empty" even though UNTAG has no VLAN at all.
+		 * depends() drops the whole row from the DOM in UNTAG, so there is
+		 * nothing left to validate.
+		 */
+		o.depends({ enabled: '1', transparent_mode: 'tag' });
+
+		/*
+		 * In UNTAG mode the VLAN has no meaning. The row is hidden by
+		 * depends(), and if the field is ever parsed anyway, the stored VLAN
+		 * is dropped so internet-apply never sees one in UNTAG.
+		 */
+		o.cfgvalue = function(section_id) {
+			if (uci.get('onu-internet', 'config', 'transparent_mode') === 'untag')
+				return '';
+			return uci.get('onu-internet', 'config', 'vlan') || '';
+		};
+
+		(function() {
+			var origVlanParse = o.parse;
+			o.parse = function(section_id) {
+				var tmodeEl = document.getElementById('cbi.onu-internet.config.transparent_mode');
+				var tmode = tmodeEl ? (tmodeEl.value || 'tag')
+				                    : (uci.get('onu-internet', 'config', 'transparent_mode') || 'tag');
+
+				if (tmode === 'untag')
+					return this.remove(section_id);
+
+				return origVlanParse.call(this, section_id);
+			};
+		})();
+
+		/*
+		 * Internet mode (Bridged / DHCP / PPPoE) lives below the VLAN field:
+		 * the VLAN identifies the service, the mode decides what is done with
+		 * it. Order is cosmetic here - depends() resolves against the DOM, not
+		 * the declaration order - but it keeps the reading order logical.
+		 */
+		o = s.option(form.ListValue, 'mode', _('Internet mode'),
+			_('Bridged hands the operator VLAN to your own router. DHCP takes whatever address the operator hands out. PPPoE lets the ONT terminate the session and route for the LAN.'));
+		o.default = 'bridge';
+		o.rmempty = false;
+		o.value('bridge', _('Bridged'));
+		o.value('dhcp', _('DHCP'));
+		o.value('pppoe', _('PPPoE'));
 		o.depends('enabled', '1');
 
 		lanPorts = (devices || []).map(function(device) {
@@ -195,8 +259,14 @@ return view.extend({
 		 * an empty picker.
 		 */
 		if (lanPorts.length || current.length) {
+			/*
+			 * Bridged ports are not just moved: they end up in the WAN zone,
+			 * which is why picking the port you manage the ONT from cuts you
+			 * off - no DHCP and no management pages are served there any more.
+			 * Say so up front instead of leaving it to the operator to infer.
+			 */
 			o = s.option(form.MultiValue, 'ports', _('LAN ports'),
-				_('The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind.'));
+				_('The selected ports leave br-lan and join the internet bridge, where they are treated as operator-facing WAN ports: the ONT no longer serves DHCP or its own management pages (LuCI/SSH) on them. Leave at least one port unselected so the ONT stays manageable.'));
 			lanPorts.forEach(function(name) {
 				o.value(name);
 			});
@@ -211,7 +281,7 @@ return view.extend({
 		}
 		else {
 			o = s.option(form.DummyValue, '_ports', _('LAN ports'),
-				_('The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind.'));
+				_('The selected ports leave br-lan and join the internet bridge, where they are treated as operator-facing WAN ports: the ONT no longer serves DHCP or its own management pages (LuCI/SSH) on them. Leave at least one port unselected so the ONT stays manageable.'));
 			o.cfgvalue = function() {
 				return _('No LAN port devices are available to bridge.');
 			};
@@ -289,6 +359,12 @@ return view.extend({
 		 * configuration keep running unchanged until that page lands.
 		 */
 
+		/*
+		 * No post-render wiring for the VLAN field any more: depends() hides
+		 * the whole row in UNTAG, which is both simpler and safer than
+		 * disabling it - a disabled required field still failed validation
+		 * with "must not be empty".
+		 */
 		return m.render();
 	}
 });
