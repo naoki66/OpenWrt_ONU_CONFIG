@@ -54,9 +54,25 @@ PKG_VERSION:=0.1.0
 # re-renders), refresh flash values in place, gate the UCI apply
 # countdown on real staged changes, and default the OMCI vendor ID to
 # the serial number's first four characters.
-PKG_RELEASE:=23
+# 24: UNTAG transparent mode inlines the raw uplink into br-wanup instead of
+# nesting a ct-wanup bridge in it (the Airoha kernel rejects bridge-on-bridge);
+# the Internet VLAN row is hidden rather than disabled in UNTAG, because a
+# disabled required field still failed validation; bridge ports are handed back
+# to br-lan when bridge mode is left, so they are not orphaned; Simplified
+# Chinese translations cover the transparent mode labels.
+PKG_RELEASE:=24
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
+
+# Scripts under root/usr/libexec and root/etc/init.d must keep their executable
+# bit - 0755 in git. luci.mk copies root/ with $(CP), which preserves the mode,
+# so the mode recorded in git is what ends up on the target (0775 there, from
+# the build umask). Never move these to INSTALL_DATA: a non-executable
+# internet-apply silently disables the whole internet page, and the same applies
+# to iptv-apply / voice-apply. If the sources are ever shipped through the image
+# files/ overlay instead of the package, add an explicit chmod 0755 in the build
+# step - a plain shell redirect there creates the file with the umask and drops
+# the x bit (0644/0664), which is exactly how it can be lost.
 
 include $(TOPDIR)/feeds/luci/luci.mk
 

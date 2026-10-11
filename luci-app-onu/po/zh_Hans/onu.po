@@ -1902,6 +1902,18 @@ msgid "Dialled by the ONT (PPPoE)"
 msgstr "系统拨号（光猫 PPPoE 拨号）"
 
 
+msgid "Transparent mode"
+msgstr "透传模式"
+
+msgid "TAG mode requires an Internet VLAN ID for the service. UNTAG mode passes the raw uplink through without VLAN tagging, so the Internet VLAN field below is hidden and no VLAN is stored."
+msgstr "TAG 模式需要为业务指定上网 VLAN ID；UNTAG 模式直接透传裸上联、不打 VLAN 标签，因此下方的上网 VLAN 字段会被隐藏且不保存 VLAN。"
+
+msgid "TAG"
+msgstr "TAG（打 VLAN 标签）"
+
+msgid "UNTAG"
+msgstr "UNTAG（透传，不打标签）"
+
 msgid "Internet VLAN"
 msgstr "上网 VLAN"
 
@@ -1911,8 +1923,8 @@ msgstr "承载上网业务的运营商 VLAN。它成为上联设备的 8021q 子
 msgid "LAN ports"
 msgstr "LAN 口"
 
-msgid "The selected ports leave br-lan and join the internet bridge, so the ONT stays manageable over the ports left behind."
-msgstr "选中的端口会离开 br-lan 并加入上网网桥，光猫仍可通过剩下的端口管理。"
+msgid "The selected ports leave br-lan and join the internet bridge, where they are treated as operator-facing WAN ports: the ONT no longer serves DHCP or its own management pages (LuCI/SSH) on them. Leave at least one port unselected so the ONT stays manageable."
+msgstr "选中的端口会离开 br-lan 并加入上网网桥，且被视为面向运营商的 WAN 口：光猫不再为它们提供 DHCP 与自身管理页面（LuCI/SSH）。请至少保留一个端口不选，以保证光猫仍可管理。"
 
 msgid "Pick at least one LAN port for the internet bridge."
 msgstr "上网网桥至少要选择一个 LAN 口。"

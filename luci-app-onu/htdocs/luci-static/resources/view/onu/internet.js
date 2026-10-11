@@ -173,7 +173,7 @@ return view.extend({
 		 * and the VLAN field below is disabled.
 		 */
 		o = s.option(form.ListValue, 'transparent_mode', _('Transparent mode'),
-			_('TAG mode requires an Internet VLAN ID for the service. UNTAG mode passes the raw uplink through without VLAN tagging, and disables the Internet VLAN field below.'));
+			_('TAG mode requires an Internet VLAN ID for the service. UNTAG mode passes the raw uplink through without VLAN tagging, so the Internet VLAN field below is hidden and no VLAN is stored.'));
 		o.default = 'tag';
 		o.rmempty = false;
 		o.value('tag', _('TAG'));
