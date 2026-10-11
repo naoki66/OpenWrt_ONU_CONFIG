@@ -151,6 +151,27 @@ function validateVoicePort(sectionId, value) {
 }
 
 /*
+ * Ports another page owns and that must therefore not be offered here. The
+ * voice trunk may share the IPTV trunk port on purpose - both stay in br-lan
+ * and only carry tagged 8021q subinterfaces - so that one is foreign to the
+ * dedicated voice port only.
+ */
+function foreignPorts(dedicated) {
+	var ports = internetBridgePorts();
+
+	if (uci.get('onu-iptv', 'config', 'enabled') === '1') {
+		if (uci.get('onu-iptv', 'config', 'mode') === 'bridge')
+			ports = ports.concat(L.toArray(uci.get('onu-iptv', 'config', 'lan_port')));
+		else if (dedicated)
+			ports = ports.concat(L.toArray(uci.get('onu-iptv', 'config', 'trunk_port')));
+	}
+
+	return ports.filter(function(port) {
+		return !!port;
+	});
+}
+
+/*
  * voice-apply refuses to share a VLAN with the internet or the IPTV page: two
  * services on one 8021q subinterface would end up in one zone and defeat the
  * isolation the voice zone exists for.
@@ -303,6 +324,7 @@ return view.extend({
 
 	render: function(devices) {
 		var m, s, o, protocolOption, modeOption, lanPorts, trunkPorts, currentPort;
+		var dedicatedTaken, trunkTaken;
 
 		ensureStylesheet();
 
@@ -366,10 +388,21 @@ return view.extend({
 			return /^lan[0-9]+$/.test(name);
 		}).sort();
 
+		/*
+		 * A port the internet or IPTV page already bound is not offered: one
+		 * port cannot serve two services. The saved value is registered even
+		 * when it is foreign, so a hand-edited configuration stays visible and
+		 * validateVoicePort() reports it instead of silently dropping it.
+		 */
+		dedicatedTaken = foreignPorts(true);
+		trunkTaken = foreignPorts(false);
+
 		o = s.option(form.ListValue, 'lan_port', _('Voice LAN port'),
 			_('The selected port is dedicated to the voice device and stays out of br-lan while the bridge is enabled. The VLAN arrives there untagged.'));
 		o.rmempty = false;
-		lanPorts.forEach(function(name) {
+		lanPorts.filter(function(name) {
+			return dedicatedTaken.indexOf(name) < 0;
+		}).forEach(function(name) {
 			o.value(name);
 		});
 		currentPort = uci.get('onu-voice', 'network', 'lan_port');
@@ -387,7 +420,9 @@ return view.extend({
 		o = s.option(form.ListValue, 'trunk_port', _('Trunk port'),
 			_('The port stays a member of br-lan; the voice VLAN leaves it tagged. It may be the same port the IPTV page uses for its single cable trunk.'));
 		o.rmempty = false;
-		trunkPorts.forEach(function(name) {
+		trunkPorts.filter(function(name) {
+			return trunkTaken.indexOf(name) < 0;
+		}).forEach(function(name) {
 			o.value(name);
 		});
 		currentPort = uci.get('onu-voice', 'network', 'trunk_port');

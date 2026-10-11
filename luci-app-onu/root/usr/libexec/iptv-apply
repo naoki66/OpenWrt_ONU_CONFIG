@@ -85,6 +85,20 @@ load_iptv_config() {
 	config_get UNICAST_VLAN_OVERRIDE config unicast_vlan
 }
 
+# The internet page owns every port of its bridge in bridged mode; in the
+# dialled modes (PPPoE/DHCP) it owns no LAN port at all.
+load_internet_info() {
+	NET_ENABLED=0
+	NET_MODE='bridge'
+	NET_PORTS=''
+
+	config_load onu-internet
+	config_get_bool NET_ENABLED config enabled 0
+	[ "$NET_ENABLED" -eq 1 ] || return 0
+	config_get NET_MODE config mode bridge
+	config_get NET_PORTS config ports
+}
+
 # The voice page can own a dedicated bridge port or a tagged trunk port; the
 # port exclusivity checks and the VLAN uniqueness check both need these facts.
 load_voice_info() {
@@ -119,6 +133,41 @@ check_voice_port() {
 		[ "$MODE" != 'bridge' ] || [ "$candidate" != "$VOICE_TRUNK_PORT" ] ||
 			fail "LAN port $candidate is the voice trunk port; pick a different IPTV port"
 	fi
+}
+
+# Ports of the internet bridge are dedicated ports: they left br-lan and are
+# enslaved to br-wanup, so neither the IPTV set-top box port nor the IPTV trunk
+# port may take one. The internet page has no trunk of its own, so there is
+# nothing that could be shared with it on purpose.
+check_internet_port() {
+	local candidate="$1"
+	local port
+
+	[ -n "$candidate" ] || return 0
+	[ "$NET_ENABLED" -eq 1 ] || return 0
+	[ "$NET_MODE" = 'bridge' ] || return 0
+
+	for port in $NET_PORTS; do
+		[ "$candidate" != "$port" ] ||
+			fail "LAN port $candidate is used by the internet bridge; free it on the internet page first"
+	done
+}
+
+# True when the internet bridge owns the port. find_old_iptv_port() uses it so
+# a port the internet page took over is not handed back to br-lan behind its
+# back.
+internet_owns_port() {
+	local port
+
+	[ -n "$1" ] || return 1
+	[ "$NET_ENABLED" -eq 1 ] || return 1
+	[ "$NET_MODE" = 'bridge' ] || return 1
+
+	for port in $NET_PORTS; do
+		[ "$1" = "$port" ] && return 0
+	done
+
+	return 1
 }
 
 # A VLAN handed over by both pages would be bridged twice on (possibly) the
@@ -162,9 +211,11 @@ find_old_iptv_port() {
 	[ -z "$ports" ] && config_get ports luci_iptv_bridge ports
 	for port in $ports; do
 		case "$port" in
-			ct-iptv-svc|ct-iptv-mc|ct-iptv-igmp) ;;
-			*) OLD_LAN_PORT="$port" ;;
+			ct-iptv-svc|ct-iptv-mc|ct-iptv-igmp) continue ;;
 		esac
+		# A port the internet bridge took over is not ours to hand back.
+		internet_owns_port "$port" && continue
+		OLD_LAN_PORT="$port"
 	done
 }
 
@@ -237,11 +288,13 @@ validate_config() {
 		validate_ifname "$LAN_PORT" || fail "Invalid LAN port name"
 		[ "$LAN_PORT" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
 		[ -e "/sys/class/net/$LAN_PORT" ] || fail "LAN port $LAN_PORT was not found"
+		check_internet_port "$LAN_PORT"
 		check_voice_port "$LAN_PORT"
 	else
 		validate_ifname "$TRUNK_PORT" || fail "Invalid trunk port name"
 		[ "$TRUNK_PORT" != "$UPLINK" ] || fail "The trunk port and uplink must be different devices"
 		[ -e "/sys/class/net/$TRUNK_PORT" ] || fail "Trunk port $TRUNK_PORT was not found"
+		check_internet_port "$TRUNK_PORT"
 		check_voice_port "$TRUNK_PORT"
 	fi
 }
@@ -883,6 +936,7 @@ reload_runtime() {
 }
 
 load_iptv_config
+load_internet_info
 load_voice_info
 config_load network
 BR_LAN_SECTION=""

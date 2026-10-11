@@ -45,18 +45,70 @@ function listPonDevices() {
 }
 
 /*
- * The port the IPTV page took for its set-top box bridge. Section ownership has
- * to be exclusive: applying both pages onto one port silently breaks whichever
- * loses, so it is refused here and again in internet-apply.
+ * Port ownership across the three PON service pages, mirroring
+ * port_owned_elsewhere() in internet-apply.
+ *
+ * A dedicated bridge port (internet bridge, IPTV set-top box port, voice
+ * bridge port) leaves br-lan and belongs to exactly one service bridge, so no
+ * other page may pick it. A trunk port stays in br-lan and only carries tagged
+ * 8021q subinterfaces, so the IPTV and voice trunks may share one port on
+ * purpose - but a dedicated port must never become a trunk port either, or it
+ * would carry foreign tagged VLANs while its own service expects it untagged.
+ *
+ * The internet page owns ports in bridge mode only, and a bridged port is a
+ * dedicated port. So both the IPTV and the voice port are off-limits here in
+ * either of their delivery modes.
  */
-function iptvPort() {
+function portsOf(value) {
+	return L.toArray(value).filter(function(port) {
+		return !!port;
+	});
+}
+
+function iptvPorts() {
 	if (uci.get('onu-iptv', 'config', 'enabled') !== '1')
-		return '';
+		return [];
 
-	if (uci.get('onu-iptv', 'config', 'mode') !== 'bridge')
-		return '';
+	switch (uci.get('onu-iptv', 'config', 'mode')) {
+	case 'bridge':
+		return portsOf(uci.get('onu-iptv', 'config', 'lan_port'));
 
-	return uci.get('onu-iptv', 'config', 'lan_port') || '';
+	case 'trunk':
+		return portsOf(uci.get('onu-iptv', 'config', 'trunk_port'));
+	}
+
+	return [];
+}
+
+function voicePorts() {
+	if (uci.get('onu-voice', 'network', 'enabled') !== '1')
+		return [];
+
+	switch (uci.get('onu-voice', 'network', 'mode')) {
+	case 'bridge':
+		return portsOf(uci.get('onu-voice', 'network', 'lan_port'));
+
+	case 'trunk':
+		return portsOf(uci.get('onu-voice', 'network', 'trunk_port'));
+	}
+
+	return [];
+}
+
+/* Every port another page already bound, so it can be left out of the picker. */
+function foreignPorts() {
+	return iptvPorts().concat(voicePorts());
+}
+
+/* Who owns the port, for the validation message. */
+function portOwner(port) {
+	if (iptvPorts().indexOf(port) >= 0)
+		return _('IPTV');
+
+	if (voicePorts().indexOf(port) >= 0)
+		return _('voice');
+
+	return null;
 }
 
 function selectedPorts(sectionId) {
@@ -65,15 +117,17 @@ function selectedPorts(sectionId) {
 
 function validatePorts(sectionId, value) {
 	var ports = L.toArray(value);
-	var taken = iptvPort();
-	var i;
+	var owner, i;
 
 	if (!ports.length)
 		return _('Pick at least one LAN port for the internet bridge.');
 
-	for (i = 0; i < ports.length; i++)
-		if (ports[i] === taken)
-			return _('This port carries the IPTV set-top box bridge; free it on the IPTV page first.');
+	for (i = 0; i < ports.length; i++) {
+		owner = portOwner(ports[i]);
+
+		if (owner)
+			return _('This port is already bound by the %s page; free it there first.').format(owner);
+	}
 
 	return true;
 }
@@ -136,14 +190,15 @@ return view.extend({
 		return Promise.all([
 			network.getDevices(),
 			uci.load('onu-internet'),
-			uci.load('onu-iptv')
+			uci.load('onu-iptv'),
+			uci.load('onu-voice')
 		]).then(function(results) {
 			return results[0];
 		});
 	},
 
 	render: function(devices) {
-		var m, s, o, lanPorts, current;
+		var m, s, o, allLanPorts, lanPorts, current, taken;
 
 		ensureStylesheet();
 
@@ -235,11 +290,21 @@ return view.extend({
 		o.value('pppoe', _('PPPoE'));
 		o.depends('enabled', '1');
 
-		lanPorts = (devices || []).map(function(device) {
+		allLanPorts = (devices || []).map(function(device) {
 			return device.getName();
 		}).filter(function(name) {
 			return /^lan[0-9]+$/.test(name);
 		}).sort();
+
+		/*
+		 * A port the IPTV or the voice page already bound is not offered at
+		 * all: two services cannot own one port, and offering it would only
+		 * let the operator build a configuration internet-apply then refuses.
+		 */
+		taken = foreignPorts();
+		lanPorts = allLanPorts.filter(function(name) {
+			return taken.indexOf(name) < 0;
+		});
 
 		current = selectedPorts();
 
@@ -275,15 +340,24 @@ return view.extend({
 					o.value(name);
 			});
 			o.rmempty = false;
-			o.display_size = lanPorts.length || 3;
+			o.display_size = allLanPorts.length || 3;
 			o.validate = validatePorts;
 			o.depends({ enabled: '1', mode: 'bridge' });
 		}
 		else {
+			/*
+			 * Nothing left to offer. Say which of the two reasons applies:
+			 * no LAN port device at all, or every one of them already bound by
+			 * the IPTV or the voice page.
+			 */
+			var reason = allLanPorts.length
+				? _('Every LAN port is already bound by the IPTV or voice page. Free one there first.')
+				: _('No LAN port devices are available to bridge.');
+
 			o = s.option(form.DummyValue, '_ports', _('LAN ports'),
 				_('The selected ports leave br-lan and join the internet bridge, where they are treated as operator-facing WAN ports: the ONT no longer serves DHCP or its own management pages (LuCI/SSH) on them. Leave at least one port unselected so the ONT stays manageable.'));
 			o.cfgvalue = function() {
-				return _('No LAN port devices are available to bridge.');
+				return reason;
 			};
 			o.depends({ enabled: '1', mode: 'bridge' });
 		}

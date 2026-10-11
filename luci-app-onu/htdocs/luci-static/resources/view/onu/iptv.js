@@ -54,6 +54,96 @@ function listPonDevices() {
 }
 
 /*
+ * Port ownership across the three PON service pages, mirroring
+ * check_internet_port() and check_voice_port() in iptv-apply.
+ *
+ * A dedicated bridge port (internet bridge, IPTV set-top box port, voice
+ * bridge port) leaves br-lan and belongs to exactly one service bridge, so no
+ * other page may pick it. A trunk port stays in br-lan and only carries tagged
+ * 8021q subinterfaces, so the IPTV trunk and the voice trunk may share one
+ * port on purpose - but a dedicated port must never become a trunk port
+ * either, or it would carry foreign tagged VLANs while its own service expects
+ * it untagged.
+ */
+function portsOf(value) {
+	return L.toArray(value).filter(function(port) {
+		return !!port;
+	});
+}
+
+/* The internet page owns ports in bridge mode only, and they are dedicated. */
+function internetPorts() {
+	if (uci.get('onu-internet', 'config', 'enabled') !== '1')
+		return [];
+
+	if (uci.get('onu-internet', 'config', 'mode') !== 'bridge')
+		return [];
+
+	return portsOf(uci.get('onu-internet', 'config', 'ports'));
+}
+
+function voicePorts() {
+	if (uci.get('onu-voice', 'network', 'enabled') !== '1')
+		return [];
+
+	switch (uci.get('onu-voice', 'network', 'mode')) {
+	case 'bridge':
+		return portsOf(uci.get('onu-voice', 'network', 'lan_port'));
+
+	case 'trunk':
+		return portsOf(uci.get('onu-voice', 'network', 'trunk_port'));
+	}
+
+	return [];
+}
+
+/*
+ * Ports this page must not offer. The set-top box port is dedicated, so even
+ * the voice trunk is off-limits to it; the IPTV trunk may in turn share the
+ * voice trunk, so that one is only foreign to the dedicated port.
+ */
+function foreignPorts(dedicated) {
+	var ports = internetPorts();
+
+	if (uci.get('onu-voice', 'network', 'enabled') === '1') {
+		if (uci.get('onu-voice', 'network', 'mode') === 'bridge')
+			ports = ports.concat(portsOf(uci.get('onu-voice', 'network', 'lan_port')));
+		else if (dedicated)
+			ports = ports.concat(portsOf(uci.get('onu-voice', 'network', 'trunk_port')));
+	}
+
+	return ports;
+}
+
+function validateIptvLanPort(sectionId, value) {
+	if (!value)
+		return true;
+
+	if (internetPorts().indexOf(value) >= 0)
+		return _('This port is used by the internet bridge; free it on the internet page first.');
+
+	if (voicePorts().indexOf(value) >= 0)
+		return _('This port is already bound by the voice page; free it there first.');
+
+	return true;
+}
+
+function validateIptvTrunkPort(sectionId, value) {
+	if (!value)
+		return true;
+
+	if (internetPorts().indexOf(value) >= 0)
+		return _('This port is used by the internet bridge; free it on the internet page first.');
+
+	if (uci.get('onu-voice', 'network', 'enabled') === '1' &&
+		uci.get('onu-voice', 'network', 'mode') === 'bridge' &&
+		value === uci.get('onu-voice', 'network', 'lan_port'))
+		return _('This port is dedicated to the voice bridge; free it on the voice page first.');
+
+	return true;
+}
+
+/*
  * resolve_trunk_vlans(): the VLANs single cable mode hands over, in order.
  * Each one becomes a br-mux-<n> bridge named after its 1-based position in
  * this list (never the VLAN ID). An explicit trunk_vlans list wins, otherwise
@@ -177,14 +267,20 @@ function relayButtons() {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ network.getDevices(), uci.load('pon') ])
-			.then(function(results) {
-				return results[0];
-			});
+		return Promise.all([
+			network.getDevices(),
+			uci.load('pon'),
+			uci.load('onu-iptv'),
+			uci.load('onu-internet'),
+			uci.load('onu-voice')
+		]).then(function(results) {
+			return results[0];
+		});
 	},
 
 	render: function(devices) {
-		var m, s, o, currentPort, lanPorts, trunkPorts;
+		var m, s, o, currentPort, currentTrunkPort, lanPorts, trunkPorts;
+		var dedicatedTaken, trunkTaken;
 
 		ensureStylesheet();
 
@@ -237,20 +333,33 @@ return view.extend({
 		o.depends('enabled', '1');
 
 		currentPort = uci.get('onu-iptv', 'config', 'lan_port');
+
+		/*
+		 * Ports the internet or voice page already bound are not offered: one
+		 * port cannot serve two services. The saved value is registered even
+		 * when it is foreign, so a hand-edited configuration stays visible and
+		 * the validator below reports it instead of silently dropping it.
+		 */
 		lanPorts = (devices || []).map(function(device) {
 			return device.getName();
 		}).filter(function(name) {
 			return /^lan[0-9]+$/.test(name);
 		}).sort();
 
+		dedicatedTaken = foreignPorts(true);
+		trunkTaken = foreignPorts(false);
+
 		o = s.taboption('bridge', form.ListValue, 'lan_port', _('IPTV LAN port'),
 			_('The selected port is dedicated to the set-top box.'));
 		o.rmempty = false;
-		lanPorts.forEach(function(name) {
+		lanPorts.filter(function(name) {
+			return dedicatedTaken.indexOf(name) < 0;
+		}).forEach(function(name) {
 			o.value(name);
 		});
 		if (currentPort && lanPorts.indexOf(currentPort) < 0)
 			o.value(currentPort);
+		o.validate = validateIptvLanPort;
 		o.depends({ enabled: '1', mode: 'bridge' });
 
 		trunkPorts = (devices || []).map(function(device) {
@@ -259,12 +368,19 @@ return view.extend({
 			return /^(lan|wan|eth)[0-9]+$/.test(name);
 		}).sort();
 
+		currentTrunkPort = uci.get('onu-iptv', 'config', 'trunk_port');
+
 		o = s.taboption('bridge', form.ListValue, 'trunk_port', _('Trunk port'),
 			_('The port stays a member of br-lan; the VLANs below leave it tagged.'));
 		o.rmempty = false;
-		trunkPorts.forEach(function(name) {
+		trunkPorts.filter(function(name) {
+			return trunkTaken.indexOf(name) < 0;
+		}).forEach(function(name) {
 			o.value(name);
 		});
+		if (currentTrunkPort && trunkPorts.indexOf(currentTrunkPort) < 0)
+			o.value(currentTrunkPort);
+		o.validate = validateIptvTrunkPort;
 		o.depends({ enabled: '1', mode: 'trunk' });
 
 		o = s.taboption('bridge', form.DynamicList, 'trunk_vlans', _('VLANs to hand over'),

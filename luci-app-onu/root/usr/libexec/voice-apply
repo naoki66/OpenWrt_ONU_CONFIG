@@ -252,6 +252,36 @@ find_br_lan() {
 	[ "$name" = "br-lan" ] && BR_LAN_SECTION="$section"
 }
 
+# The internet page owns every port of its bridge in bridged mode; in the
+# dialled modes (PPPoE/DHCP) it owns no LAN port at all. check_port_conflict()
+# needs the ports and find_old_voice_port() needs to recognise them, so a port
+# the internet page took over is not handed back to br-lan behind its back.
+load_internet_info() {
+	NET_ENABLED=0
+	NET_MODE='bridge'
+	NET_PORTS=''
+
+	config_load onu-internet
+	config_get_bool NET_ENABLED config enabled 0
+	[ "$NET_ENABLED" -eq 1 ] || return 0
+	config_get NET_MODE config mode bridge
+	config_get NET_PORTS config ports
+}
+
+internet_owns_port() {
+	local port
+
+	[ -n "$1" ] || return 1
+	[ "$NET_ENABLED" -eq 1 ] || return 1
+	[ "$NET_MODE" = 'bridge' ] || return 1
+
+	for port in $NET_PORTS; do
+		[ "$1" = "$port" ] && return 0
+	done
+
+	return 1
+}
+
 find_old_voice_port() {
 	local port
 	local ports
@@ -259,9 +289,10 @@ find_old_voice_port() {
 	config_get ports "$BR_DEV_SEC" ports
 	for port in $ports; do
 		case "$port" in
-			ct-voice) ;;
-			*) OLD_LAN_PORT="$port" ;;
+			ct-voice) continue ;;
 		esac
+		internet_owns_port "$port" && continue
+		OLD_LAN_PORT="$port"
 	done
 }
 
@@ -521,11 +552,7 @@ reload_runtime() {
 }
 
 load_voice_network
-config_load network
-BR_LAN_SECTION=""
-OLD_LAN_PORT=""
-config_foreach find_br_lan device
-find_old_voice_port
+load_internet_info
 
 validate_config
 check_vlan_conflict
@@ -535,6 +562,17 @@ if [ "$VN_ENABLED" -eq 1 ]; then
 		trunk) check_port_conflict "$VN_TRUNK_PORT" ;;
 	esac
 fi
+
+# Everything above reads onu-* packages through config_load, which replaces
+# the in-memory configuration. The network package has to be loaded last and
+# stay loaded: detach_lan_port() walks it with config_foreach, and running
+# that against onu-voice or onu-iptv silently detaches nothing.
+config_load network
+BR_LAN_SECTION=""
+OLD_LAN_PORT=""
+config_foreach find_br_lan device
+find_old_voice_port
+
 write_network_config
 write_firewall_config
 reload_runtime

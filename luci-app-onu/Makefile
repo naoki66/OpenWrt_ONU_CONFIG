@@ -60,7 +60,14 @@ PKG_VERSION:=0.1.0
 # disabled required field still failed validation; bridge ports are handed back
 # to br-lan when bridge mode is left, so they are not orphaned; Simplified
 # Chinese translations cover the transparent mode labels.
-PKG_RELEASE:=24
+# 25: close the remaining gaps in LAN port ownership. iptv-apply now refuses
+# ports the internet bridge owns (its detach sweep would otherwise steal them
+# from br-wanup), internet-apply also refuses the IPTV trunk port, and
+# voice-apply loads network last so detach_lan_port() no longer walks the
+# wrong UCI package and silently detaches nothing. Every script skips ports
+# another service still bridges when handing ports back to br-lan, and all
+# three pages drop taken ports from their pickers.
+PKG_RELEASE:=25
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

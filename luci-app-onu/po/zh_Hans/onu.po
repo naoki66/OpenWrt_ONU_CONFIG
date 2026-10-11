@@ -40,6 +40,9 @@ msgstr "IGMP 上行 VLAN"
 msgid "IPTV"
 msgstr "IPTV"
 
+msgid "voice"
+msgstr "语音"
+
 msgid "IPTV LAN port"
 msgstr "IPTV LAN 口"
 
@@ -358,6 +361,9 @@ msgstr "没有配置 PON 实例。"
 
 msgid "No LAN port devices are available to bridge."
 msgstr "没有可用于桥接的 LAN 口设备。"
+
+msgid "Every LAN port is already bound by the IPTV or voice page. Free one there first."
+msgstr "所有 LAN 口都已被 IPTV 或语音页面占用，请先在其中一处释放一个端口。"
 
 msgid "No device configured"
 msgstr "未配置设备"
@@ -2104,6 +2110,15 @@ msgstr "该端口已专用于 IPTV 机顶盒，请先在 IPTV 页面释放。"
 
 msgid "This port is the IPTV trunk port; pick a different voice port."
 msgstr "该端口是 IPTV 的单线复用口，请为语音选择其它端口。"
+
+msgid "This port is already bound by the %s page; free it there first."
+msgstr "该端口已被「%s」页面占用，请先在该页面释放。"
+
+msgid "This port is already bound by the voice page; free it there first."
+msgstr "该端口已被语音页面占用，请先在语音页面释放。"
+
+msgid "This port is dedicated to the voice bridge; free it on the voice page first."
+msgstr "该端口已专用于语音网桥，请先在语音页面释放。"
 
 msgid "ONU PON status"
 msgstr "ONU PON 状态"

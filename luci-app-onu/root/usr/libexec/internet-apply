@@ -142,12 +142,26 @@ load_internet_config() {
 	config_get MTU config mtu 1492
 }
 
-# The IPTV page owns one LAN port of its own in set-top box mode; a port cannot
-# sit in two bridges, so applying would silently break whichever page lost.
+# Port ownership across the three PON service pages. A dedicated bridge port
+# (internet bridge, IPTV set-top box port, voice bridge port) leaves br-lan
+# and belongs to exactly one service bridge, so no other page may pick it. A
+# trunk port stays in br-lan and only carries tagged 8021q subinterfaces, so
+# the IPTV and voice trunks may share one port on purpose - but a dedicated
+# port must never become a trunk port either, or that port would carry foreign
+# tagged VLANs while its own service expects it untagged.
+#
+# The internet page only owns ports in bridge mode, so both the IPTV and the
+# voice port are off-limits in either of their delivery modes.
 load_iptv_port() {
-	IPTV_PORT="$(uci -q get onu-iptv.config.lan_port)"
-	[ "$(uci -q get onu-iptv.config.enabled)" = '1' ] || IPTV_PORT=''
-	[ "$(uci -q get onu-iptv.config.mode)" = 'trunk' ] && IPTV_PORT=''
+	IPTV_PORT=''
+	IPTV_TRUNK_PORT=''
+
+	[ "$(uci -q get onu-iptv.config.enabled)" = '1' ] || return 0
+
+	case "$(uci -q get onu-iptv.config.mode)" in
+		bridge) IPTV_PORT="$(uci -q get onu-iptv.config.lan_port)" ;;
+		trunk) IPTV_TRUNK_PORT="$(uci -q get onu-iptv.config.trunk_port)" ;;
+	esac
 }
 
 # The voice page owns a LAN port in bridge mode and a tagged hand-over port in
@@ -159,6 +173,20 @@ load_voice_port() {
 		bridge) VOICE_PORT="$(uci -q get onu-voice.network.lan_port)" ;;
 		trunk) VOICE_PORT="$(uci -q get onu-voice.network.trunk_port)" ;;
 	esac
+}
+
+# True when another service page already owns the port. Used by the checks
+# above and by reattach_ports() below, which must not hand a port back to
+# br-lan while another service still bridges it.
+port_owned_elsewhere() {
+	local port="$1"
+
+	[ -n "$port" ] || return 1
+	[ "$port" = "$IPTV_PORT" ] && return 0
+	[ "$port" = "$IPTV_TRUNK_PORT" ] && return 0
+	[ "$port" = "$VOICE_PORT" ] && return 0
+
+	return 1
 }
 
 port_selected() {
@@ -248,6 +276,10 @@ reattach_ports() {
 		[ "$port" = "$UPLINK" ] && continue
 		[ "$port" = "$VLAN_DEV" ] && continue
 
+		# Never hand a port back that the IPTV or voice page still bridges:
+		# br-lan and that service bridge would race for the same port.
+		port_owned_elsewhere "$port" && continue
+
 		for current in $(uci -q get "network.$BR_LAN_SECTION.ports"); do
 			[ "$current" = "$port" ] && continue 2
 		done
@@ -274,6 +306,8 @@ validate_config() {
 				[ "$port" != "$UPLINK" ] || fail "The LAN port and uplink must be different devices"
 				[ "$port" != "$IPTV_PORT" ] ||
 					fail "LAN port $port is dedicated to the IPTV set-top box; free it on the IPTV page first"
+				[ "$port" != "$IPTV_TRUNK_PORT" ] ||
+					fail "LAN port $port is the IPTV trunk port; pick a different internet port"
 				[ "$port" != "$VOICE_PORT" ] ||
 					fail "LAN port $port is used by the voice service; free it on the voice page first"
 			done
