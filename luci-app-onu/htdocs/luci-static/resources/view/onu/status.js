@@ -344,6 +344,31 @@ function credentialSeverity(values) {
 	return values.loid_configured ? 'ok' : '';
 }
 
+/*
+ * The OLT writes the LOID authentication result, and only into the CTC LOID
+ * Authentication ME. When the agent does not offer that ME - password
+ * authentication, or LOID authentication with no LOID to look up - the OLT has
+ * no result to write. Without this the tile would sit on "not reported"
+ * forever, which on a line that authenticates by its registration ID reads as
+ * an authentication that never completed. An agent too old to report the flag
+ * keeps the previous reading.
+ */
+function loidAuthenticationAdvertised(values) {
+	return values.ctc_loid_advertised !== false;
+}
+
+function displayAuthenticationResult(values) {
+	if (!loidAuthenticationAdvertised(values))
+		return _('Not applicable');
+	return displayAuthentication(values.authentication_meaning);
+}
+
+function authenticationResultSeverity(values) {
+	if (!loidAuthenticationAdvertised(values))
+		return '';
+	return authenticationSeverity(values.authentication_meaning);
+}
+
 function backendSeverity(value) {
 	switch (value) {
 	case 'applied': return 'ok';
@@ -737,8 +762,8 @@ function renderOmci(item) {
 			metricTile(_('OMCI channel online'), displayBoolean(values.channel_available),
 				booleanSeverity(values.channel_available)),
 			metricTile(_('LOID authentication'),
-				displayAuthentication(values.authentication_meaning),
-				authenticationSeverity(values.authentication_meaning)),
+				displayAuthenticationResult(values),
+				authenticationResultSeverity(values)),
 			metricTile(_('Data path state'), displayBackendState(values.backend_state),
 				backendSeverity(values.backend_state)),
 			metricTile(_('Active Alloc-ID'), values.active_alloc_id),

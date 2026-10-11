@@ -354,6 +354,12 @@ password-only 场景下 O5 反复掉线的根因。
 `auth_mode` 与 `ctc_loid_advertised` 都进了 OMCI 状态 JSON，所以页面判定的是
 **agent 实际做了什么**，而不是**配置看起来像什么**。
 
+认证**结果**磁贴沿用同一条判据：`ctc_loid_advertised` 为假时（密码认证，或 LOID 认证但
+没有 LOID 可查），OLT 根本不会回写结果，磁贴显示「不适用」而不是「OLT 尚未上报」——
+否则一条用注册 ID 认证的线路上，这个磁贴会永远带着 pending 圆点停在"尚未上报"，
+把"认证方式不是 LOID"误读成"LOID 认证没完成"。只有 ME 确实上报给 OLT 后才显示回写结果
+（收到之前仍是「OLT 尚未上报」，pending）。旧 agent 不报该字段时维持原显示。
+
 
 ### 语音配置页
 
