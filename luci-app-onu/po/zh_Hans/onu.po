@@ -995,12 +995,6 @@ msgstr "读取失败。"
 msgid "Line mode and registration identity take effect after the PON interface restarts."
 msgstr "线路模式和注册身份在 PON 接口重启后生效。"
 
-msgid "EPON line counters and diagnostics"
-msgstr "EPON 线路计数与诊断"
-
-msgid "ITU-T PON counters and diagnostics"
-msgstr "ITU-T PON 线路计数与诊断"
-
 msgid "Last start error"
 msgstr "最近启动错误"
 

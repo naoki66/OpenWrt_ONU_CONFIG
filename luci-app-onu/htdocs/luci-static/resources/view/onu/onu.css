@@ -140,21 +140,8 @@
 	}
 }
 
-/*
- * Always visible group inside a card: line details are read together with the
- * headline metrics, so they are a block with a heading rather than a fold.
- */
-.pon-block {
-	margin: 0 1rem 1rem;
-}
-
-.pon-block > .pon-subhead,
 .pon-fold .pon-subhead {
 	padding: 0.875rem 0 0.3125rem;
-}
-
-.pon-block > .pon-subhead:first-child {
-	padding-top: 0.125rem;
 }
 
 .pon-fold-body {
@@ -197,9 +184,9 @@
 }
 
 /*
- * Folded group for troubleshooting data. The body holds the same row lists as
- * the always visible details, grouped by topic, so expanding a fold does not
- * switch to another visual language.
+ * Folded group: line details first, then the counters, grouped by topic.
+ * Expanding a fold does not switch to another visual language — the body is
+ * the same row lists the metric grid sits above.
  */
 .pon-fold {
 	margin: 0 1rem 1rem;

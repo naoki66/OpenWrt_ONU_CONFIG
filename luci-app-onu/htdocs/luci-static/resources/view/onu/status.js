@@ -574,18 +574,6 @@ function detailList(rows, flags) {
 	return E('dl', { 'class': classes.join(' ') }, listNodes(rows));
 }
 
-/*
- * Line details stay visible: they answer "is the line set up the way I
- * expect", which is read together with the headline metrics, not dug out of a
- * fold. Only the counters are folded, because they are for troubleshooting.
- */
-function detailBlock(title, rows) {
-	return E('div', { 'class': 'pon-block' }, [
-		E('h4', { 'class': 'pon-subhead' }, title),
-		detailList(rows)
-	]);
-}
-
 function detailGroup(group) {
 	var list = detailList(group.rows, group);
 
@@ -781,9 +769,13 @@ function renderLine(item) {
 		E('div', { 'class': 'cbi-section' }, [
 			cardHeader(title, tags),
 			metricGrid(tiles),
-			detailBlock(_('Line details'), rows),
-			detailFold(epon ? _('EPON line counters and diagnostics') :
-				_('ITU-T PON counters and diagnostics'), groups,
+			/*
+			 * Line details and the counters are one fold, details first: both
+			 * are read in the same moment — when the headline metrics say
+			 * something is off — so keeping the details outside the fold only
+			 * pushed the card taller at rest.
+			 */
+			detailFold(_('Line details'), [ { title: null, rows: rows } ].concat(groups),
 				item.section['.name'] + '-counters')
 		])
 	] };
@@ -813,15 +805,21 @@ function renderOmci(item, registration) {
 				authenticationResultSeverity(values, registration)),
 			metricTile(_('Data path state'), displayBackendState(values.backend_state),
 				backendSeverity(values.backend_state)),
-			metricTile(_('Active Alloc-ID'), values.active_alloc_id),
-			metricTile(_('Active GEM-ID'), values.active_gem_id)
+			/*
+			 * What the line is configured against (authentication mode, OLT
+			 * vendor) stays on the headline row; the Alloc-ID / GEM-ID the OLT
+			 * hands out only exist while the line is up, so they sit in the
+			 * fold with the other line-derived values.
+			 */
+			metricTile(_('Authentication mode'),
+				authModeName(values.auth_mode) || _('Not reported')),
+			metricTile(_('OLT vendor ID'), values.olt_vendor_id)
 		]),
 		detailFold(_('Protocol details'), [ { title: null, rows: [
-			listRow(_('Authentication mode'),
-				authModeName(values.auth_mode) || _('Not reported')),
+			listRow(_('Active Alloc-ID'), values.active_alloc_id),
+			listRow(_('Active GEM-ID'), values.active_gem_id),
 			listRow(_('LOID configured locally'), displayCredential(values),
 				credentialSeverity(values)),
-			listRow(_('OLT vendor ID'), values.olt_vendor_id),
 			listRow(_('OLT equipment ID'), values.olt_equipment_id),
 			listRow(_('OLT version'), values.olt_version),
 			listRow(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
