@@ -345,28 +345,75 @@ function credentialSeverity(values) {
 }
 
 /*
- * The OLT writes the LOID authentication result, and only into the CTC LOID
- * Authentication ME. When the agent does not offer that ME - password
- * authentication, or LOID authentication with no LOID to look up - the OLT has
- * no result to write. Without this the tile would sit on "not reported"
- * forever, which on a line that authenticates by its registration ID reads as
- * an authentication that never completed. An agent too old to report the flag
- * keeps the previous reading.
+ * The result tile answers one question - did this line authenticate - and the
+ * answer depends on the credential, so the tile follows the mode.
+ *
+ * LOID authentication is settled by the OLT: it looks the LOID up and writes
+ * the outcome into the CTC LOID Authentication ME, which is what the tile
+ * prints. An agent that does not offer that ME has no outcome to print, and
+ * saying so beats sitting on "not reported", which reads as an authentication
+ * that never completed. An agent too old to report the flag keeps the old
+ * reading.
+ *
+ * Password authentication is settled earlier, during PLOAM registration: the
+ * OLT validates the registration ID and either assigns the ONU-ID, taking the
+ * ONU to O5, or leaves it unregistered. The ONU state is that outcome, so it
+ * is what the tile prints rather than declaring the question inapplicable.
  */
 function loidAuthenticationAdvertised(values) {
 	return values.ctc_loid_advertised !== false;
 }
 
-function displayAuthenticationResult(values) {
-	if (!loidAuthenticationAdvertised(values))
-		return _('Not applicable');
-	return displayAuthentication(values.authentication_meaning);
+function passwordAuthentication(values) {
+	return !loidAuthenticationAdvertised(values) && values.auth_mode === 'password';
 }
 
-function authenticationResultSeverity(values) {
-	if (!loidAuthenticationAdvertised(values))
-		return '';
-	return authenticationSeverity(values.authentication_meaning);
+function authenticationLabel(values) {
+	return passwordAuthentication(values) ?
+		_('Password authentication', 'PON authentication mode') :
+		_('LOID authentication');
+}
+
+function displayRegistrationResult(registration) {
+	switch (registration ? registration.onu_state : null) {
+	case 'O5': return _('Accepted');
+	case 'O7': return _('Not authenticated');
+	case 'O1':
+	case 'O2_3':
+	case 'O4': return _('Pending');
+	default: return _('Unknown');
+	}
+}
+
+function registrationResultSeverity(registration) {
+	switch (registration ? registration.onu_state : null) {
+	case 'O5': return 'ok';
+	case 'O7': return 'error';
+	case 'O1':
+	case 'O2_3':
+	case 'O4': return 'pending';
+	default: return '';
+	}
+}
+
+function displayAuthenticationResult(values, registration) {
+	if (loidAuthenticationAdvertised(values))
+		return displayAuthentication(values.authentication_meaning);
+
+	if (passwordAuthentication(values))
+		return displayRegistrationResult(registration);
+
+	return _('Not applicable');
+}
+
+function authenticationResultSeverity(values, registration) {
+	if (loidAuthenticationAdvertised(values))
+		return authenticationSeverity(values.authentication_meaning);
+
+	if (passwordAuthentication(values))
+		return registrationResultSeverity(registration);
+
+	return '';
 }
 
 function backendSeverity(value) {
@@ -742,7 +789,7 @@ function renderLine(item) {
 	] };
 }
 
-function renderOmci(item) {
+function renderOmci(item, registration) {
 	var values = item.values;
 	var title = _('OMCI');
 
@@ -761,9 +808,9 @@ function renderOmci(item) {
 		metricGrid([
 			metricTile(_('OMCI channel online'), displayBoolean(values.channel_available),
 				booleanSeverity(values.channel_available)),
-			metricTile(_('LOID authentication'),
-				displayAuthenticationResult(values),
-				authenticationResultSeverity(values)),
+			metricTile(authenticationLabel(values),
+				displayAuthenticationResult(values, registration),
+				authenticationResultSeverity(values, registration)),
 			metricTile(_('Data path state'), displayBackendState(values.backend_state),
 				backendSeverity(values.backend_state)),
 			metricTile(_('Active Alloc-ID'), values.active_alloc_id),
@@ -848,16 +895,19 @@ function renderOam(item) {
 function renderStatus(data) {
 	var nodes = [];
 	var activeModes = {};
+	var registrations = {};
 
 	data.lines.forEach(function(item) {
 		var rendered = renderLine(item);
 
 		activeModes[item.section['.name']] = rendered.mode;
+		/* Where a registration-ID authentication ends up, read by the OMCI card. */
+		registrations[item.section['.name']] = item.registration || {};
 		rendered.nodes.forEach(function(node) { nodes.push(node); });
 	});
 	data.omci.forEach(function(item) {
 		if (!isEponMode(activeModes[item.section.line || '']))
-			nodes.push(renderOmci(item));
+			nodes.push(renderOmci(item, registrations[item.section.line || '']));
 	});
 	data.oam.forEach(function(item) {
 		if (isEponMode(activeModes[item.section.line || '']))

@@ -354,11 +354,19 @@ password-only 场景下 O5 反复掉线的根因。
 `auth_mode` 与 `ctc_loid_advertised` 都进了 OMCI 状态 JSON，所以页面判定的是
 **agent 实际做了什么**，而不是**配置看起来像什么**。
 
-认证**结果**磁贴沿用同一条判据：`ctc_loid_advertised` 为假时（密码认证，或 LOID 认证但
-没有 LOID 可查），OLT 根本不会回写结果，磁贴显示「不适用」而不是「OLT 尚未上报」——
-否则一条用注册 ID 认证的线路上，这个磁贴会永远带着 pending 圆点停在"尚未上报"，
-把"认证方式不是 LOID"误读成"LOID 认证没完成"。只有 ME 确实上报给 OLT 后才显示回写结果
-（收到之前仍是「OLT 尚未上报」，pending）。旧 agent 不报该字段时维持原显示。
+认证**结果**磁贴（OMCI 卡片第二格）随认证方式切换，始终回答"这条线路认证成功了没有"：
+
+| 认证方式 | 判据 | 磁贴标题 | 值 |
+| --- | --- | --- | --- |
+| LOID 认证，ME 已上报 | `ctc_loid_advertised` 为真 | LOID 认证结果 | OLT 回写的 `authentication_meaning`（未收到 → 「OLT 尚未上报」pending） |
+| LOID 认证但无 LOID 可查 | `ctc_loid_advertised` 为假 | LOID 认证结果 | 不适用（中性） |
+| 密码认证 | `auth_mode=password` | **密码认证** | PLOAM 注册结果：O5 → 认证通过（ok）；O7 → 尚未认证（error）；其余 → 等待结果（pending） |
+| 旧 agent 未报 `ctc_loid_advertised` | `!== false` | LOID 认证结果 | 维持原显示，不误伤 |
+
+> ⚠️ **密码认证的结果不在 OMCI 里。** 注册 ID 由 PLOAM 注册阶段校验：OLT 认就分配 ONU-ID
+> 把 ONU 带到 O5，不认就不给注册。所以密码认证线路的认证结果只能取 ONU 状态——显示
+> 「不适用」虽然不算错，却把"认证成功了吗"这个问题原样推给读者，而答案（O5）本来就在
+> 旁边的 PON 卡片上。这里给结论比给"不适用"有用。
 
 
 ### 语音配置页
