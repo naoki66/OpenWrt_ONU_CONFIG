@@ -200,23 +200,22 @@ OMCI / EPON OAM 同为「常显指标网格 + 折叠『协议详情』键值列�
 > 认证结果瓦片：前者答"用哪种凭据"，后者答"认证通过了没有"，标题不同、值也不同，
 > 不会读成同一格。
 
-> **「组播下行 VLAN ID」按 G.988 还原语义，并与本机 IPTV 配置并排呈现。** 下行组播/IGMP 的打标
+> **「组播下行 VLAN ID」按 G.988 还原语义，且只呈现 OMCI 自己给的东西。** 下行组播/IGMP 的打标
 > 由 Class 309 属性 16（Downstream IGMP and multicast TCI，3 字节 = 1 字节动作 + 2 字节 TCI）
 > 决定，只有 2/3/4（添加 / 替换 TCI / 替换 VID）才在 TCI 里给出 VLAN —— 这三种显示 VLAN 号；
-> 0/1（透传 / 剥除外层标签）和 5..7（VID 取自用户侧的组播业务包表）本身不含 VLAN。
+> 0/1（透传 / 剥除外层标签）和 5..7（VID 取自用户侧的组播业务包表）本身不含 VLAN，于是这行写
+> 「OMCI 未下发 · OLT 只下发标签动作」，动作码另起 `Multicast downstream tag action` 一行承载，
+> 不再像"有配置但读不出来"。
 >
 > 两台真机（2026-10-12）都是 `01 0000`（剥除外层标签），且 OMCI 里根本找不到线上真正跑的那个
 > 组播 VLAN：ME 281 的组播地址表行（VPI/Port-ID + VCI/spare + IP 起址 + IP 止址，12 字节）
 > **不含 VLAN**（第 2、3 字节是 VCI/spare，别当 VLAN 读）；ME 84 的 VLAN 白名单里只有单播业务
 > VLAN；30.1 全量 datapath 里搜 `0fc3`(4035) 零命中。**结论：OLT 不通过 OMCI 告知组播 VLAN。**
 >
-> 于是页面把两个视角并排，而不是拿一个冒充另一个：
-> - `Multicast downstream VLAN IDs` —— OMCI 视角。OLT 没给 VLAN 时显示「OMCI 未下发 · OLT 只下发
->   标签动作」，不再让这一行看起来像"有配置但读不出来"。
-> - `Local IPTV unicast / multicast VLAN` —— 本机 `onu-iptv` 配置视角，这才是决定桥接行为的值。
->
-> 两者只有都给出 VLAN 时才可比：OMCI 一旦真给了 VLAN 且与本机不一致，两行一起标红并附 note。
-> **只告警、不改配置** —— 漂移要人看见，不能让页面替用户改业务配置。
+> **这条卡片的信息边界**：OMCI 协议详情里**只放 PON 或 OMCI 读到的值**。本机侧的值（`onu-iptv`
+> 的 `service_vlan` / `multicast_vlan`）属于 IPTV 页面——把它搬进这张卡片，等于用配置去冒充
+> "OLT 说了什么"，会把 PON 信息读坏；因此这里**不读 uci、不做"配置 vs OMCI"比对、不标红**。
+> 想对照就去 IPTV 页面看配置值，本站只负责如实转述 OLT 说了什么。
 >
 > 线上真值只能抓 `pon0`（组播走 GEM 65534，`pondctl datapath` 里 VLAN 全通，所以 OLT 推什么
 > VLAN 都原样落到 `pon0`）：`tcpdump -i pon0 -e -nn -c 80 | grep -o 'vlan [0-9]*' | sort | uniq -c`。

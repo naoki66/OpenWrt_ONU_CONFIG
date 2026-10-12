@@ -239,45 +239,6 @@ function displayMulticastTagAction(values) {
 	return _('Not provisioned');
 }
 
-/*
- * The IPTV page owns the multicast VLAN, so it is the value that actually
- * drives the local bridge, while the OMCI row only reports what the OLT asks
- * for. Reading it here shows both instead of quietly presenting one of them.
- */
-function localIptvVlans() {
-	if (uci.get('onu-iptv', 'config', 'enabled') !== '1')
-		return null;
-
-	return {
-		service: uci.get('onu-iptv', 'config', 'service_vlan'),
-		multicast: uci.get('onu-iptv', 'config', 'multicast_vlan')
-	};
-}
-
-function displayLocalVlan(vlans, key) {
-	if (!vlans)
-		return _('IPTV is disabled');
-
-	var value = vlans[key];
-	return (value != null && value !== '') ? String(value) : _('Not provisioned');
-}
-
-/*
- * Only a VLAN the OLT names can disagree with the local one. When attribute 16
- * carries the stripping code there is nothing to compare, and the page stays
- * quiet instead of inventing a mismatch.
- */
-function multicastVlanMismatch(values, vlans) {
-	var advertised = Array.isArray(values.multicast_vlan_ids)
-		? values.multicast_vlan_ids.map(String) : [];
-
-	if (advertised.length === 0 || !vlans ||
-	    vlans.multicast == null || vlans.multicast === '')
-		return false;
-
-	return advertised.indexOf(String(vlans.multicast)) < 0;
-}
-
 function displayIgmpUpstreamVlanIds(values) {
 	if (Array.isArray(values.igmp_upstream_vlan_ids) && values.igmp_upstream_vlan_ids.length > 0)
 		return values.igmp_upstream_vlan_ids.join(', ');
@@ -880,13 +841,10 @@ function renderOmci(item, registration) {
 		]);
 
 	/*
-	 * The local IPTV VLANs are read once per render: the multicast pair below
-	 * needs the configured value to compare the OLT's answer against, and the
-	 * comparison is what turns a silent row into a visible conflict.
+	 * Everything on this card is what the line reported: the OMCI MIB or the
+	 * PON line itself. Values the operator sets locally belong to the page that
+	 * owns them, so nothing is read back from the configuration here.
 	 */
-	var iptv = localIptvVlans();
-	var mismatch = multicastVlanMismatch(values, iptv);
-
 	return E('div', { 'class': 'cbi-section' }, [
 		cardHeader(title, [
 			badge(_('OMCI')),
@@ -920,19 +878,11 @@ function renderOmci(item, registration) {
 			listRow(_('OLT version'), values.olt_version),
 			listRow(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
 			/*
-			 * The local IPTV VLANs sit next to the multicast rows so the OLT's
-			 * answer and the value the bridge is actually built from are read
-			 * together; a conflict is flagged wherever it is visible.
+			 * The multicast rows stay OMCI-only: the OLT's own tag action, and
+			 * the VLAN it names when it names one. What it does not name is
+			 * said out loud instead of being filled in from local config.
 			 */
-			listRow(_('Local IPTV unicast VLAN'), displayLocalVlan(iptv, 'service')),
-			listRow(_('Local IPTV multicast VLAN'), displayLocalVlan(iptv, 'multicast'),
-				mismatch ? 'error' : ''),
-			listRow(_('Multicast downstream VLAN IDs'),
-				mismatch
-					? notedValue(displayMulticastVlanIds(values),
-						_('Differs from the local multicast VLAN'))
-					: displayMulticastVlanIds(values),
-				mismatch ? 'error' : ''),
+			listRow(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
 			listRow(_('Multicast downstream tag action'), displayMulticastTagAction(values)),
 			listRow(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
 			listRow(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
@@ -1029,15 +979,7 @@ function renderStatus(data) {
 
 return view.extend({
 	load: function() {
-		/*
-		 * The OMCI card compares the OLT's multicast VLAN against the one the
-		 * IPTV page owns, so that config is pulled in as well. A missing
-		 * onu-iptv config only costs the comparison, not the whole page.
-		 */
-		return Promise.all([
-			uci.load('pon'),
-			L.resolveDefault(uci.load('onu-iptv'), null)
-		]).then(loadStatus);
+		return uci.load('pon').then(loadStatus);
 	},
 
 	render: function(data) {

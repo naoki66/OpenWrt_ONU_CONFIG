@@ -2138,17 +2138,5 @@ msgstr "OMCI 未下发"
 msgid "OLT sets the tag action only"
 msgstr "OLT 只下发标签动作"
 
-msgid "IPTV is disabled"
-msgstr "IPTV 未启用"
-
-msgid "Local IPTV unicast VLAN"
-msgstr "本机 IPTV 单播 VLAN"
-
-msgid "Local IPTV multicast VLAN"
-msgstr "本机 IPTV 组播 VLAN"
-
-msgid "Differs from the local multicast VLAN"
-msgstr "与本机组播 VLAN 不一致"
-
 msgid "Multicast downstream tag action"
 msgstr "组播下行标签动作"
