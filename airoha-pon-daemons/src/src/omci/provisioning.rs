@@ -35,6 +35,10 @@ pub struct ProvisioningSnapshot {
     pub vlan_ids: BTreeSet<u16>,
     /// VLANs mapped to Class 281 downstream multicast GEMs.
     pub multicast_vlan_ids: BTreeSet<u16>,
+    /// Class 309 attribute 16: 0 pass through, 1 strip the outer tag, 2 add,
+    /// 3 replace TCI, 4 replace VID, 5..7 as 2..4 with a service package VID.
+    /// Codes 0, 1 and 5..7 name no VID, so they qualify an unprovisioned row.
+    pub multicast_downstream_tag_controls: BTreeSet<u8>,
     /// IGMP upstream VLANs selected by Class 309 profiles referenced from Class 310.
     pub igmp_upstream_vlan_ids: BTreeSet<u16>,
     /// Class 309 attribute 5: 0 transparent, 1 add, 2 replace TCI, 3 replace VID.

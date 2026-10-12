@@ -269,6 +269,13 @@ fn status_json(inner: &Inner) -> String {
         .map(u16::to_string)
         .collect::<Vec<_>>()
         .join(",");
+    let multicast_downstream_tag_controls = inner
+        .provisioning
+        .multicast_downstream_tag_controls
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
     let igmp_upstream_vlan_ids = inner
         .provisioning
         .igmp_upstream_vlan_ids
@@ -325,6 +332,7 @@ fn status_json(inner: &Inner) -> String {
             "\"tcont_count\":{},\"gem_port_count\":{},",
             "\"gem_iwtp_count\":{},\"vlan_rule_count\":{},",
             "\"vlan_ids\":[{}],\"multicast_vlan_ids\":[{}],",
+            "\"multicast_downstream_tag_controls\":[{}],",
             "\"igmp_upstream_vlan_ids\":[{}],",
             "\"igmp_upstream_tag_controls\":[{}],",
             "\"enhanced_security\":{},\"broadcast_key_indexes\":[{}],",
@@ -354,6 +362,7 @@ fn status_json(inner: &Inner) -> String {
         inner.provisioning.vlan_rules,
         vlan_ids,
         multicast_vlan_ids,
+        multicast_downstream_tag_controls,
         igmp_upstream_vlan_ids,
         igmp_upstream_tag_controls,
         inner.provisioning.enhanced_security,

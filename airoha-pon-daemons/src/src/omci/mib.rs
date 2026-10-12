@@ -195,16 +195,18 @@ fn mac_bridge_port_filter_preassign_entity() -> ManagedEntity {
         .expect("filter preassign schema is registered")
 }
 
-fn omci_capability_entity(enhanced_security: bool) -> ManagedEntity {
+fn omci_capability_entity(enhanced_security: bool, ctc_loid_auth: bool) -> ManagedEntity {
     let mut entity = entity_from_definition(CLASS_OMCI, None).expect("OMCI schema is registered");
     let class_table = entity.attributes.get_mut(&1).expect("OMCI class table");
     /*
      * Class 351 lies in the vendor-specific range 350..399. Huawei OLTs create it without
-     * checking this table; advertising it could invite another vendor's layout.
+     * checking this table; advertising it could invite another vendor's layout. The CTC LOID
+     * class is advertised only when the line has a LOID to look up.
      */
     for definition in schema::MANAGED_ENTITIES.iter().filter(|definition| {
         (enhanced_security || definition.class_id != CLASS_ENHANCED_SECURITY_CONTROL)
             && definition.class_id != CLASS_VENDOR_351
+            && (ctc_loid_auth || definition.class_id != CLASS_CTC_LOID_AUTH)
     }) {
         let row = definition.class_id.to_be_bytes().to_vec();
         class_table.table_rows.insert(row.clone(), row);
@@ -487,7 +489,10 @@ impl Mib {
         mib.insert(
             CLASS_OMCI,
             0,
-            omci_capability_entity(!identity.disable_enhanced_security),
+            omci_capability_entity(
+                !identity.disable_enhanced_security,
+                identity.advertise_ctc_loid_auth(),
+            ),
         );
 
         for definition in schema::MANAGED_ENTITIES {
@@ -510,6 +515,16 @@ impl Mib {
     pub fn dispatch(&mut self, request: &Request<'_>) -> Response {
         if request.class_id == CLASS_ENHANCED_SECURITY_CONTROL && !self.enhanced_security {
             /* The disabled class is absent from the MIB and the OMCI class table, so it is an unknown ME. */
+            return Response::new(request, RESULT_UNKNOWN_ME);
+        }
+        if request.class_id == CLASS_CTC_LOID_AUTH
+            && !self.entities.contains_key(&(CLASS_CTC_LOID_AUTH, 0))
+        {
+            /*
+             * The class is offered only when the line has a LOID to look up. Without its
+             * instance it is absent from the MIB and the OMCI class table, so the OLT has
+             * to see an unknown ME rather than an instance that happens to be missing.
+             */
             return Response::new(request, RESULT_UNKNOWN_ME);
         }
         let Some(definition) = schema::managed_entity(request.class_id) else {
@@ -617,7 +632,15 @@ impl Mib {
             return Response::new(request, RESULT_PARAMETER_ERROR);
         }
 
-        let sequence = u16::from_be_bytes([request.content[0], request.content[1]]) as usize;
+        /*
+         * An extended frame can declare a payload of just two bytes, which leaves
+         * the content empty. Indexing it directly panics and takes the OMCI agent
+         * down with it, so a missing sequence is a request error instead.
+         */
+        let Some(sequence) = request.content.get(0..2).and_then(be_u16) else {
+            return Response::new(request, RESULT_PARAMETER_ERROR);
+        };
+        let sequence = sequence as usize;
         let capacity = request.get_next_value_capacity();
         let start = sequence * capacity;
         if start >= snapshot.bytes.len() && !snapshot.bytes.is_empty() {
@@ -1470,8 +1493,9 @@ impl Mib {
 
         /*
          * Class 309 becomes active for a UNI through a Class 310 reference. ACL rows
-         * describe downstream GEM, VLAN, and group ranges; upstream TCI and tag control
-         * describe Report/Leave tagging on the unicast GEM.
+         * describe downstream GEM, VLAN, and group ranges; the downstream TCI names
+         * the multicast VLAN unless it strips or passes tags; upstream TCI and tag
+         * control describe Report/Leave tagging on the unicast GEM.
          */
         for (&(class_id, _), subscriber) in &self.entities {
             if class_id != CLASS_MULTICAST_SUBSCRIBER_CONFIG {
@@ -1490,6 +1514,11 @@ impl Mib {
             else {
                 continue;
             };
+            collect_multicast_downstream_tci(
+                profile,
+                &mut snapshot.multicast_vlan_ids,
+                &mut snapshot.multicast_downstream_tag_controls,
+            );
             for index in [7u8, 8] {
                 let Some(table) = profile.attributes.get(&index) else {
                     continue;
@@ -1628,6 +1657,39 @@ fn collect_multicast_acl_vlan_id(row: &[u8], output: &mut BTreeSet<u16>) {
     }
 }
 
+fn collect_multicast_downstream_tci(
+    profile: &ManagedEntity,
+    vlan_ids: &mut BTreeSet<u16>,
+    tag_controls: &mut BTreeSet<u8>,
+) {
+    /*
+     * G.988 Class 309 attribute 16 is three bytes: the downstream IGMP and
+     * multicast tag control followed by the TCI, whose low 12 bits carry the VID.
+     * Codes 0 and 1 remove the tag, and 5..7 take the VID from the subscriber's
+     * multicast service package table, so only 2..4 name a VID on the wire.
+     */
+    let Some(attribute) = profile.attributes.get(&16) else {
+        return;
+    };
+    let Some(&tag_control) = attribute.value.first() else {
+        return;
+    };
+    if tag_control > 7 {
+        return;
+    }
+    tag_controls.insert(tag_control);
+    if !(2..=4).contains(&tag_control) {
+        return;
+    }
+    let Some(tci) = attribute.value.get(1..3).and_then(be_u16) else {
+        return;
+    };
+    let vlan_id = tci & 0x0fff;
+    if (1..=4094).contains(&vlan_id) {
+        vlan_ids.insert(vlan_id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1696,6 +1758,58 @@ mod tests {
         };
 
         assert_eq!(mib.dispatch(&get).result(), Some(RESULT_UNKNOWN_ME));
+
+        // The OMCI class table must not advertise the class either, while a LOID
+        // operator still gets both the instance and the advertised class.
+        assert!(!mib.entities[&(CLASS_OMCI, 0)].attributes[&1]
+            .table_rows
+            .contains_key(&CLASS_CTC_LOID_AUTH.to_be_bytes().to_vec()));
+
+        let loid_mib = auth_mode_mib(b"operator-user", AuthMode::Loid);
+        assert!(loid_mib.entities[&(CLASS_OMCI, 0)].attributes[&1]
+            .table_rows
+            .contains_key(&CLASS_CTC_LOID_AUTH.to_be_bytes().to_vec()));
+    }
+
+    #[test]
+    fn a_get_next_without_a_sequence_is_rejected_instead_of_panicking() {
+        let mut mib = empty_mib();
+        mib.insert(
+            CLASS_MULTICAST_OPERATIONS_PROFILE,
+            5,
+            Mib::dynamic_entity(CLASS_MULTICAST_OPERATIONS_PROFILE, &[0u8; 26])
+                .expect("valid multicast profile"),
+        );
+
+        /* Reading a table attribute arms the snapshot that GET-NEXT walks. */
+        let empty = [0u8];
+        let mask = attribute_bit(7).expect("table attributes have a bit");
+        let get = Request {
+            encoding: super::super::protocol::Encoding::Extended,
+            tci: 1,
+            message_type: 0x48,
+            action: ACTION_GET,
+            class_id: CLASS_MULTICAST_OPERATIONS_PROFILE,
+            entity_id: 5,
+            attribute_mask: mask,
+            payload: &empty,
+            content: &empty,
+        };
+        assert_eq!(mib.dispatch(&get).result(), Some(RESULT_SUCCESS));
+
+        /* An extended frame may declare two payload bytes, leaving no sequence. */
+        let next = Request {
+            encoding: super::super::protocol::Encoding::Extended,
+            tci: 1,
+            message_type: 0x4a,
+            action: ACTION_GET_NEXT,
+            class_id: CLASS_MULTICAST_OPERATIONS_PROFILE,
+            entity_id: 5,
+            attribute_mask: mask,
+            payload: &empty,
+            content: &[],
+        };
+        assert_eq!(mib.dispatch(&next).result(), Some(RESULT_PARAMETER_ERROR));
     }
 
     #[test]
@@ -2073,6 +2187,51 @@ mod tests {
         assert_eq!(
             mib.provisioning_snapshot().multicast_vlan_ids,
             BTreeSet::from([80])
+        );
+    }
+
+    #[test]
+    fn subscriber_profile_reports_multicast_downstream_tagging() {
+        let mut mib = empty_mib();
+
+        /* Attribute 16 replaces the tag with TCI 0x0388, which carries VLAN 904. */
+        let mut replacing =
+            Mib::dynamic_entity(CLASS_MULTICAST_OPERATIONS_PROFILE, &[0u8; 26])
+                .expect("valid multicast profile");
+        replacing
+            .attributes
+            .get_mut(&16)
+            .expect("downstream IGMP and multicast TCI")
+            .value = vec![0x03, 0x03, 0x88];
+        mib.insert(CLASS_MULTICAST_OPERATIONS_PROFILE, 5, replacing);
+
+        /* Stripping the outer tag removes the tag, so its TCI names no VLAN. */
+        let mut stripping =
+            Mib::dynamic_entity(CLASS_MULTICAST_OPERATIONS_PROFILE, &[0u8; 26])
+                .expect("valid multicast profile");
+        stripping
+            .attributes
+            .get_mut(&16)
+            .expect("downstream IGMP and multicast TCI")
+            .value = vec![0x01, 0x00, 0x05];
+        mib.insert(CLASS_MULTICAST_OPERATIONS_PROFILE, 6, stripping);
+
+        for profile_id in [5u16, 6] {
+            let mut payload = vec![0; 10];
+            payload[1..3].copy_from_slice(&profile_id.to_be_bytes());
+            mib.insert(
+                CLASS_MULTICAST_SUBSCRIBER_CONFIG,
+                profile_id,
+                Mib::dynamic_entity(CLASS_MULTICAST_SUBSCRIBER_CONFIG, &payload)
+                    .expect("valid subscriber config"),
+            );
+        }
+
+        let snapshot = mib.provisioning_snapshot();
+        assert_eq!(snapshot.multicast_vlan_ids, BTreeSet::from([904]));
+        assert_eq!(
+            snapshot.multicast_downstream_tag_controls,
+            BTreeSet::from([1, 3])
         );
     }
 
