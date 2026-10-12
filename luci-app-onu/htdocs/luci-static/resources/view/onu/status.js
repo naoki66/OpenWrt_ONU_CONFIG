@@ -200,9 +200,82 @@ function displayOmciVlanIds(values) {
 	return _('Not provisioned');
 }
 
+function multicastDownstreamTagName(value) {
+	var labels = {
+		0: _('Transparent'),
+		1: _('Strip outer VLAN tag'),
+		2: _('Add tag'),
+		3: _('Replace TCI'),
+		4: _('Replace VID'),
+		5: _('Add tag from service package'),
+		6: _('Replace TCI from service package'),
+		7: _('Replace VID from service package')
+	};
+
+	return labels[value];
+}
+
+/*
+ * Class 309 attribute 16 carries a VLAN only for the add and replace codes.
+ * Carriers commonly provision the stripping code instead, which describes the
+ * tag action and no VLAN at all, so the row has to say that the OLT did not
+ * name a VLAN rather than leaving it looking unprovisioned.
+ */
 function displayMulticastVlanIds(values) {
-	return Array.isArray(values.multicast_vlan_ids) && values.multicast_vlan_ids.length > 0
-		? values.multicast_vlan_ids.join(', ') : _('Not provisioned');
+	if (Array.isArray(values.multicast_vlan_ids) && values.multicast_vlan_ids.length > 0)
+		return values.multicast_vlan_ids.join(', ');
+	return notedValue(_('Not carried in OMCI'), _('OLT sets the tag action only'));
+}
+
+function displayMulticastTagAction(values) {
+	if (Array.isArray(values.multicast_downstream_tag_controls)) {
+		var labels = values.multicast_downstream_tag_controls
+			.map(multicastDownstreamTagName)
+			.filter(function(label) { return !!label; });
+
+		if (labels.length > 0)
+			return labels.join(', ');
+	}
+	return _('Not provisioned');
+}
+
+/*
+ * The IPTV page owns the multicast VLAN, so it is the value that actually
+ * drives the local bridge, while the OMCI row only reports what the OLT asks
+ * for. Reading it here shows both instead of quietly presenting one of them.
+ */
+function localIptvVlans() {
+	if (uci.get('onu-iptv', 'config', 'enabled') !== '1')
+		return null;
+
+	return {
+		service: uci.get('onu-iptv', 'config', 'service_vlan'),
+		multicast: uci.get('onu-iptv', 'config', 'multicast_vlan')
+	};
+}
+
+function displayLocalVlan(vlans, key) {
+	if (!vlans)
+		return _('IPTV is disabled');
+
+	var value = vlans[key];
+	return (value != null && value !== '') ? String(value) : _('Not provisioned');
+}
+
+/*
+ * Only a VLAN the OLT names can disagree with the local one. When attribute 16
+ * carries the stripping code there is nothing to compare, and the page stays
+ * quiet instead of inventing a mismatch.
+ */
+function multicastVlanMismatch(values, vlans) {
+	var advertised = Array.isArray(values.multicast_vlan_ids)
+		? values.multicast_vlan_ids.map(String) : [];
+
+	if (advertised.length === 0 || !vlans ||
+	    vlans.multicast == null || vlans.multicast === '')
+		return false;
+
+	return advertised.indexOf(String(vlans.multicast)) < 0;
 }
 
 function displayIgmpUpstreamVlanIds(values) {
@@ -521,6 +594,21 @@ function badge(text) {
 	return E('span', { 'class': 'ifacebadge' }, text);
 }
 
+/*
+ * A value with a short qualifier behind it. The value stays the row's answer
+ * and the qualifier only explains it, so the row still reads correctly when
+ * the note is skipped.
+ */
+function notedValue(text, note) {
+	if (!note)
+		return text;
+
+	return E('span', {}, [
+		text,
+		E('span', { 'class': 'pon-note' }, note)
+	]);
+}
+
 function tileValue(value) {
 	if (value == null || value === '')
 		return _('Unknown');
@@ -791,6 +879,14 @@ function renderOmci(item, registration) {
 			metricGrid([ metricTile(_('Error'), item.error, 'error') ])
 		]);
 
+	/*
+	 * The local IPTV VLANs are read once per render: the multicast pair below
+	 * needs the configured value to compare the OLT's answer against, and the
+	 * comparison is what turns a silent row into a visible conflict.
+	 */
+	var iptv = localIptvVlans();
+	var mismatch = multicastVlanMismatch(values, iptv);
+
 	return E('div', { 'class': 'cbi-section' }, [
 		cardHeader(title, [
 			badge(_('OMCI')),
@@ -823,7 +919,21 @@ function renderOmci(item, registration) {
 			listRow(_('OLT equipment ID'), values.olt_equipment_id),
 			listRow(_('OLT version'), values.olt_version),
 			listRow(_('OMCI VLAN IDs'), displayOmciVlanIds(values)),
-			listRow(_('Multicast downstream VLAN IDs'), displayMulticastVlanIds(values)),
+			/*
+			 * The local IPTV VLANs sit next to the multicast rows so the OLT's
+			 * answer and the value the bridge is actually built from are read
+			 * together; a conflict is flagged wherever it is visible.
+			 */
+			listRow(_('Local IPTV unicast VLAN'), displayLocalVlan(iptv, 'service')),
+			listRow(_('Local IPTV multicast VLAN'), displayLocalVlan(iptv, 'multicast'),
+				mismatch ? 'error' : ''),
+			listRow(_('Multicast downstream VLAN IDs'),
+				mismatch
+					? notedValue(displayMulticastVlanIds(values),
+						_('Differs from the local multicast VLAN'))
+					: displayMulticastVlanIds(values),
+				mismatch ? 'error' : ''),
+			listRow(_('Multicast downstream tag action'), displayMulticastTagAction(values)),
 			listRow(_('IGMP upstream tag action'), displayIgmpTagControl(values)),
 			listRow(_('IGMP upstream VLAN IDs'), displayIgmpUpstreamVlanIds(values)),
 			listRow(_('OLT broadcast keys'), displayBroadcastKeys(values)),
@@ -919,7 +1029,15 @@ function renderStatus(data) {
 
 return view.extend({
 	load: function() {
-		return uci.load('pon').then(loadStatus);
+		/*
+		 * The OMCI card compares the OLT's multicast VLAN against the one the
+		 * IPTV page owns, so that config is pulled in as well. A missing
+		 * onu-iptv config only costs the comparison, not the whole page.
+		 */
+		return Promise.all([
+			uci.load('pon'),
+			L.resolveDefault(uci.load('onu-iptv'), null)
+		]).then(loadStatus);
 	},
 
 	render: function(data) {

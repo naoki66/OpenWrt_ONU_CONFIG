@@ -1133,6 +1133,18 @@ msgstr "替换 TCI"
 msgid "Replace VID"
 msgstr "替换 VID"
 
+msgid "Strip outer VLAN tag"
+msgstr "剥除外层 VLAN 标签"
+
+msgid "Add tag from service package"
+msgstr "按组播业务包表添加标签"
+
+msgid "Replace TCI from service package"
+msgstr "按组播业务包表替换 TCI"
+
+msgid "Replace VID from service package"
+msgstr "按组播业务包表替换 VID"
+
 msgid "Unknown"
 msgstr "未知"
 
@@ -2119,3 +2131,24 @@ msgstr "ONU PON 状态"
 
 msgid "LAN0 MAC address"
 msgstr "LAN0 MAC 地址"
+
+msgid "Not carried in OMCI"
+msgstr "OMCI 未下发"
+
+msgid "OLT sets the tag action only"
+msgstr "OLT 只下发标签动作"
+
+msgid "IPTV is disabled"
+msgstr "IPTV 未启用"
+
+msgid "Local IPTV unicast VLAN"
+msgstr "本机 IPTV 单播 VLAN"
+
+msgid "Local IPTV multicast VLAN"
+msgstr "本机 IPTV 组播 VLAN"
+
+msgid "Differs from the local multicast VLAN"
+msgstr "与本机组播 VLAN 不一致"
+
+msgid "Multicast downstream tag action"
+msgstr "组播下行标签动作"
