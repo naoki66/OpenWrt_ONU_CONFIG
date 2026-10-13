@@ -243,7 +243,10 @@ fn print_help() {
          \x20 ponctl [--device ponX] mode [show]\n\
          \x20 ponctl [--device ponX] mode set MODE\n\
          \x20 ponctl [--device ponX] identity set [--serial SN] [--registration-id ID]\n\
-         \x20 ponctl [--device ponX] data-path [show]"
+         \x20 ponctl [--device ponX] data-path [show]\n\
+         \x20 ponctl [--device ponX] igmp [show]\n\
+         \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1]\n\
+         \x20 ponctl [--device ponX] igmp fwd"
     );
 }
 
@@ -346,6 +349,85 @@ fn run() -> Result<()> {
                 "{}",
                 fs::read_to_string(device.xpon_path.join("data_path"))?
             );
+        }
+        "igmp" if arguments.len() == 1 || (arguments.len() == 2 && arguments[1] == "show") => {
+            if arguments.len() > 2 {
+                return Err("igmp show accepts no additional arguments".into());
+            }
+            let cfg = netlink::get_igmp(line_ifindex(&device)?)?;
+            println!("enabled={}", cfg.enabled.unwrap_or(false));
+            println!("snooping={}", cfg.snooping.unwrap_or(false));
+            println!("mld={}", cfg.mld.unwrap_or(false));
+            println!("fast_leave={}", cfg.fast_leave.unwrap_or(false));
+            println!("mvlan={}", cfg.mvlan.unwrap_or(false));
+            println!("fwd_count={}", cfg.fwd_count.unwrap_or(0));
+        }
+        "igmp" if arguments.get(1).map(String::as_str) == Some("set") => {
+            let mut config = netlink::IgmpConfig::default();
+            let mut opts = arguments[2..].chunks_exact(2);
+            for opt in &mut opts {
+                let val: u8 = opt[1]
+                    .parse()
+                    .map_err(|_| format!("{} must be 0 or 1", opt[0]))?;
+                let b = val != 0;
+                match opt[0].as_str() {
+                    "--enable" => config.enabled = Some(b),
+                    "--snooping" => config.snooping = Some(b),
+                    "--mld" => config.mld = Some(b),
+                    "--fast-leave" => config.fast_leave = Some(b),
+                    "--mvlan" => config.mvlan = Some(b),
+                    name => return Err(format!("unknown argument '{name}'").into()),
+                }
+            }
+            if let Some(name) = opts.remainder().first() {
+                return Err(format!("{name} requires a value").into());
+            }
+            if config.enabled.is_none()
+                && config.snooping.is_none()
+                && config.mld.is_none()
+                && config.fast_leave.is_none()
+                && config.mvlan.is_none()
+            {
+                return Err(
+                    "igmp set requires at least one of --enable, --snooping, --mld, --fast-leave, --mvlan"
+                        .into(),
+                );
+            }
+            netlink::set_igmp(line_ifindex(&device)?, &config)?;
+            let cfg = netlink::get_igmp(line_ifindex(&device)?)?;
+            println!("enabled={}", cfg.enabled.unwrap_or(false));
+            println!("snooping={}", cfg.snooping.unwrap_or(false));
+            println!("mld={}", cfg.mld.unwrap_or(false));
+            println!("fast_leave={}", cfg.fast_leave.unwrap_or(false));
+            println!("mvlan={}", cfg.mvlan.unwrap_or(false));
+            println!("fwd_count={}", cfg.fwd_count.unwrap_or(0));
+        }
+        "igmp" if arguments.get(1).map(String::as_str) == Some("fwd") => {
+            if arguments.len() != 2 {
+                return Err("igmp fwd accepts no additional arguments".into());
+            }
+            let entries = netlink::get_igmp_fwd(line_ifindex(&device)?)?;
+            if entries.is_empty() {
+                println!("(no forwarding entries)");
+            }
+            for e in &entries {
+                let proto = if e.proto == 4 { "IGMP" } else { "MLD" };
+                let grp = if e.proto == 4 && e.grp.len() == 4 {
+                    format!("{}.{}.{}.{}", e.grp[0], e.grp[1], e.grp[2], e.grp[3])
+                } else if e.grp.len() == 16 {
+                    e.grp
+                        .chunks(2)
+                        .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                } else {
+                    format!("{:02x?}", e.grp)
+                };
+                println!(
+                    "proto={} port={} vid={} ver={} grp={}",
+                    proto, e.port, e.vid, e.ver, grp
+                );
+            }
         }
         _ => {
             return Err(

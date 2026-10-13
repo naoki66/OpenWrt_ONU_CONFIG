@@ -479,3 +479,180 @@ pub fn get_status(ifindex: u32) -> io::Result<crate::status::Snapshot> {
     crate::status::convert_optics(&mut snapshot);
     Ok(snapshot)
 }
+
+// ---- IGMP/MLD snooping ----
+
+const XPON_CMD_GET_IGMP: u8 = 4;
+const XPON_CMD_SET_IGMP: u8 = 5;
+const XPON_CMD_GET_IGMP_FWD: u8 = 6;
+const XPON_ATTR_IGMP_CONFIG: u16 = 9;
+const XPON_ATTR_IGMP_FWD: u16 = 10;
+
+const XPON_IGMP_CFG_ENABLED: u16 = 1;
+const XPON_IGMP_CFG_SNOOPING: u16 = 2;
+const XPON_IGMP_CFG_MLD: u16 = 3;
+const XPON_IGMP_CFG_FAST_LEAVE: u16 = 4;
+const XPON_IGMP_CFG_MVLAN: u16 = 5;
+const XPON_IGMP_CFG_FWD_COUNT: u16 = 6;
+
+const XPON_IGMP_FWD_ENTRIES: u16 = 1;
+const XPON_IGMP_FWD_ENTRY: u16 = 2;
+const XPON_IGMP_FWD_PROTO: u16 = 3;
+const XPON_IGMP_FWD_PORT: u16 = 4;
+const XPON_IGMP_FWD_VID: u16 = 5;
+const XPON_IGMP_FWD_VER: u16 = 6;
+const XPON_IGMP_FWD_GRP: u16 = 7;
+
+#[derive(Clone, Debug, Default)]
+pub struct IgmpConfig {
+    pub enabled: Option<bool>,
+    pub snooping: Option<bool>,
+    pub mld: Option<bool>,
+    pub fast_leave: Option<bool>,
+    pub mvlan: Option<bool>,
+    pub fwd_count: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct IgmpFwdEntry {
+    pub proto: u8,
+    pub port: u8,
+    pub vid: u16,
+    pub ver: u8,
+    pub grp: Vec<u8>,
+}
+
+pub fn get_igmp(ifindex: u32) -> io::Result<IgmpConfig> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+    let payload = socket.request(
+        family,
+        XPON_CMD_GET_IGMP,
+        XPON_VERSION,
+        false,
+        &[(XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes())],
+    )?;
+
+    let mut config = IgmpConfig::default();
+    for (kind, value) in attrs(&payload)? {
+        if kind == XPON_ATTR_IGMP_CONFIG {
+            for (cfg_kind, cfg_value) in attrs(value)? {
+                match cfg_kind {
+                    XPON_IGMP_CFG_ENABLED if cfg_value.len() == 1 => {
+                        config.enabled = Some(cfg_value[0] != 0);
+                    }
+                    XPON_IGMP_CFG_SNOOPING if cfg_value.len() == 1 => {
+                        config.snooping = Some(cfg_value[0] != 0);
+                    }
+                    XPON_IGMP_CFG_MLD if cfg_value.len() == 1 => {
+                        config.mld = Some(cfg_value[0] != 0);
+                    }
+                    XPON_IGMP_CFG_FAST_LEAVE if cfg_value.len() == 1 => {
+                        config.fast_leave = Some(cfg_value[0] != 0);
+                    }
+                    XPON_IGMP_CFG_MVLAN if cfg_value.len() == 1 => {
+                        config.mvlan = Some(cfg_value[0] != 0);
+                    }
+                    XPON_IGMP_CFG_FWD_COUNT if cfg_value.len() == 4 => {
+                        config.fwd_count =
+                            Some(u32::from_ne_bytes(cfg_value.try_into().unwrap()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(config)
+}
+
+pub fn set_igmp(ifindex: u32, config: &IgmpConfig) -> io::Result<()> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+
+    let mut nested = Vec::new();
+    if let Some(v) = config.enabled {
+        append_attr(&mut nested, XPON_IGMP_CFG_ENABLED, &[v as u8]);
+    }
+    if let Some(v) = config.snooping {
+        append_attr(&mut nested, XPON_IGMP_CFG_SNOOPING, &[v as u8]);
+    }
+    if let Some(v) = config.mld {
+        append_attr(&mut nested, XPON_IGMP_CFG_MLD, &[v as u8]);
+    }
+    if let Some(v) = config.fast_leave {
+        append_attr(&mut nested, XPON_IGMP_CFG_FAST_LEAVE, &[v as u8]);
+    }
+    if let Some(v) = config.mvlan {
+        append_attr(&mut nested, XPON_IGMP_CFG_MVLAN, &[v as u8]);
+    }
+
+    socket.request(
+        family,
+        XPON_CMD_SET_IGMP,
+        XPON_VERSION,
+        true,
+        &[
+            (XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes()),
+            (XPON_ATTR_IGMP_CONFIG, &nested),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_igmp_fwd(ifindex: u32) -> io::Result<Vec<IgmpFwdEntry>> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+    let payload = socket.request(
+        family,
+        XPON_CMD_GET_IGMP_FWD,
+        XPON_VERSION,
+        false,
+        &[(XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes())],
+    )?;
+
+    let mut entries = Vec::new();
+    for (kind, value) in attrs(&payload)? {
+        if kind != XPON_ATTR_IGMP_FWD {
+            continue;
+        }
+        for (fwd_kind, fwd_value) in attrs(value)? {
+            if fwd_kind != XPON_IGMP_FWD_ENTRIES {
+                continue;
+            }
+            for (entry_kind, entry_value) in attrs(fwd_value)? {
+                if entry_kind != XPON_IGMP_FWD_ENTRY {
+                    continue;
+                }
+                let mut entry = IgmpFwdEntry {
+                    proto: 0,
+                    port: 0,
+                    vid: 0,
+                    ver: 0,
+                    grp: Vec::new(),
+                };
+                for (field_kind, field_value) in attrs(entry_value)? {
+                    match field_kind {
+                        XPON_IGMP_FWD_PROTO if field_value.len() == 1 => {
+                            entry.proto = field_value[0];
+                        }
+                        XPON_IGMP_FWD_PORT if field_value.len() == 1 => {
+                            entry.port = field_value[0];
+                        }
+                        XPON_IGMP_FWD_VID if field_value.len() == 2 => {
+                            entry.vid = u16::from_ne_bytes(field_value.try_into().unwrap());
+                        }
+                        XPON_IGMP_FWD_VER if field_value.len() == 1 => {
+                            entry.ver = field_value[0];
+                        }
+                        XPON_IGMP_FWD_GRP => {
+                            entry.grp = field_value.to_vec();
+                        }
+                        _ => {}
+                    }
+                }
+                entries.push(entry);
+            }
+        }
+    }
+    Ok(entries)
+}
