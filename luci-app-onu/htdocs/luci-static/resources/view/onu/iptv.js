@@ -2,6 +2,7 @@
 
 'use strict';
 'require form';
+'require fs';
 'require network';
 'require uci';
 'require view';
@@ -272,13 +273,22 @@ return view.extend({
 			uci.load('pon'),
 			uci.load('onu-iptv'),
 			uci.load('onu-internet'),
-			uci.load('onu-voice')
+			uci.load('onu-voice'),
+			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'show']).catch(function() { return { stdout: '' }; }),
+			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'fwd']).catch(function() { return { stdout: '' }; })
 		]).then(function(results) {
-			return results[0];
+			return {
+				devices: results[0],
+				igmpStatus: results[5].stdout || '',
+				igmpFwd: results[6].stdout || ''
+			};
 		});
 	},
 
-	render: function(devices) {
+	render: function(data) {
+		var devices = data.devices;
+		var igmpStatus = data.igmpStatus;
+		var igmpFwd = data.igmpFwd;
 		var m, s, o, currentPort, currentTrunkPort, lanPorts, trunkPorts;
 		var dedicatedTaken, trunkTaken;
 
@@ -432,6 +442,18 @@ return view.extend({
 	o.rmempty = false;
 	o.depends('enabled', '1');
 
+	o = s.taboption('ipv4', form.Flag, 'xpon_fast_leave', _('Fast leave'),
+		_('Drop the forwarding entry immediately on IGMP Leave, without sending a last-member query. Speeds up channel change but may interrupt a stream if the Leave was for the wrong port.'));
+	o.default = '0';
+	o.rmempty = false;
+	o.depends('xpon_snooping', '1');
+
+	o = s.taboption('ipv4', form.Flag, 'xpon_mvlan', _('Multicast VLAN isolation'),
+		_('Restrict multicast forwarding to the configured multicast VLAN, so IGMP joins on other VLANs do not leak into the multicast flow.'));
+	o.default = '0';
+	o.rmempty = false;
+	o.depends('xpon_snooping', '1');
+
 	o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable bridge IGMP snooping'),
 			_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
 		o.default = '1';
@@ -444,11 +466,25 @@ return view.extend({
 		o.rmempty = false;
 		o.depends({ enabled: '1', mode: 'bridge' });
 
-		o = s.taboption('ipv4', form.Flag, 'multicast_querier', _('Enable multicast querier'),
-			_('Recommended together with snooping: the bridge sends its own general queries so group memberships do not time out and interrupt the stream.'));
-		o.default = '0';
-		o.rmempty = false;
-		o.depends('enabled', '1');
+	o = s.taboption('ipv4', form.Flag, 'multicast_querier', _('Enable multicast querier'),
+		_('Recommended together with snooping: the bridge sends its own general queries so group memberships do not time out and interrupt the stream.'));
+	o.default = '0';
+	o.rmempty = false;
+	o.depends('enabled', '1');
+
+	if (igmpStatus) {
+		o = s.taboption('ipv4', form.DummyValue, '_xpon_igmp_status', _('PON IGMP module status'),
+			_('Live state from airoha-ponctl igmp show.'));
+		o.rawhtml = true;
+		o.cfgvalue = function() { return '<pre>' + igmpStatus + '</pre>'; };
+	}
+
+	if (igmpFwd) {
+		o = s.taboption('ipv4', form.DummyValue, '_xpon_igmp_fwd', _('PON multicast forwarding table'),
+			_('Live state from airoha-ponctl igmp fwd.'));
+		o.rawhtml = true;
+		o.cfgvalue = function() { return '<pre>' + igmpFwd + '</pre>'; };
+	}
 
 		/* IPv6 */
 		o = s.taboption('ipv6', form.Flag, 'mld_snooping', _('Enable MLD snooping'),
