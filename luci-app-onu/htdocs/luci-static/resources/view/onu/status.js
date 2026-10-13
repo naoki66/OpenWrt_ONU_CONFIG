@@ -39,9 +39,9 @@ function isEponMode(mode) {
 
 function modeLabel(mode) {
 	switch (mode) {
-	case 'gpon': return _('GPON');
-	case 'xgpon': return _('XG-PON');
-	case 'xgspon': return _('XGS-PON');
+	case 'gpon': return _('GPON 2.5G/1.25G');
+	case 'xgpon': return _('XG-PON 10G/2.5G');
+	case 'xgspon': return _('XGS-PON 10G/10G');
 	case 'epon-1g': return _('EPON 1G/1G');
 	case 'epon-10g-1g': return _('10G-EPON 10G/1G');
 	case 'epon-10g-10g': return _('10G-EPON 10G/10G');
