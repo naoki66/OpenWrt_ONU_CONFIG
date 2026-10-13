@@ -49,7 +49,7 @@ luci-app-onu 只补充主题没有提供的东西，全部集中在 `view/onu/on
 | 状态点 | 触发条件（例） |
 | --- | --- |
 | 绿 `ok` | `operational` / `in-sync` / `O5` / `registered` / `accepted` / `applied` / 布尔为真 |
-| 橙 `pending` | `wait-line-sync` / `hunt` / `O1`–`O4` / `pending` / 等待 CTC 发现 |
+| 橙 `pending` | `wait-line-sync` / `hunt` / `O1`–`O4` / `O6` / `pending` / 等待 CTC 发现 |
 | 红 `error` | `error` / `O7` / `denied` / `password-mismatch` / `apply-failed` / 布尔为假 |
 | 灰 | `stopped` / `not-applicable` / `Unknown` |
 
@@ -185,6 +185,15 @@ IPTV 页始终显示；如果配置或后端组件尚未就绪，页面内报告
 > 即设备状态（ONU state / MPCP state）和实时光功率这类会随链路变化的量。
 > ONU-ID / LLID0 这类**分配下来的编号**只在注册成功后才有意义、且不随链路状态变化，
 > 一律放在「线路详情」里。
+
+> **ONU 状态瓦片用 ITU-T 的七个状态名，且不翻译。** `displayOnuState()` 展开 G.987.3 的
+> O1 Initial / O2 Standby / O3 Serial-Number / O4 Ranging / O5 Operation / O6 POPUP /
+> O7 Emergency-Stop，全部按英文原样输出（**不套 `_()`**，`.po` 里那五条旧译文已删除）——
+> 它们是协议标识符，不是界面文案。取值由驱动给：O2/O3 靠 SN 请求/已发中断区分（MAC 的
+> `ACTIVATION_ST` 把两者并成一个值）、O6 是丢下行又还持有 ONU-ID 时的软件状态、
+> O7 来自 `Disable_Serial_Number` 的 disable 选项。**旧驱动只报 O2_3，页面会原样显示
+> `O2_3`**；要看到 O1–O7 需要 `airoha-xpon` 的“报告七个 ONU 状态”改动
+> （`naoki66/openwrt-pon-drivers`，commit `e19bde0`）。
 
 > **GTC/XGTC 状态属于线路详情，不属于瓦片。** 它只是 ONU 状态之下的那一层帧同步，
 > 同一信息在 EPON 侧就是详情里的「PCS synchronized」；做进瓦片会让 ITU-T 比 EPON 多一块，

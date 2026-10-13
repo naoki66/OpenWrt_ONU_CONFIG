@@ -944,21 +944,6 @@ msgstr "已注册"
 msgid "Registration denied"
 msgstr "注册被拒绝"
 
-msgid "O1 — Initial"
-msgstr "O1 — 初始状态"
-
-msgid "O2-3 — Serial number"
-msgstr "O2-3 — 序列号状态"
-
-msgid "O4 — Ranging"
-msgstr "O4 — 测距状态"
-
-msgid "O5 — Operation"
-msgstr "O5 — 运行状态"
-
-msgid "O7 — Emergency stop"
-msgstr "O7 — 紧急停止"
-
 msgid "Hunt"
 msgstr "正在搜索同步"
 

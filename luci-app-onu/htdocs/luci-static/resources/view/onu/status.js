@@ -115,13 +115,21 @@ function displayMpcpState(value) {
 	}
 }
 
+/*
+ * The seven ONU states are ITU-T protocol identifiers, so they print verbatim
+ * in every locale: the tile reads "O5 — Operation" in English and in Chinese
+ * alike. They are deliberately not wrapped in _(), which is what keeps a
+ * translation catalog from turning them into prose.
+ */
 function displayOnuState(value) {
 	switch (value) {
-	case 'O1': return _('O1 — Initial');
-	case 'O2_3': return _('O2-3 — Serial number');
-	case 'O4': return _('O4 — Ranging');
-	case 'O5': return _('O5 — Operation');
-	case 'O7': return _('O7 — Emergency stop');
+	case 'O1': return 'O1 — Initial';
+	case 'O2': return 'O2 — Standby';
+	case 'O3': return 'O3 — Serial-Number';
+	case 'O4': return 'O4 — Ranging';
+	case 'O5': return 'O5 — Operation';
+	case 'O6': return 'O6 — POPUP';
+	case 'O7': return 'O7 — Emergency-Stop';
 	default: return value || _('Unknown');
 	}
 }
@@ -408,13 +416,23 @@ function authenticationLabel(values) {
 		_('LOID authentication');
 }
 
+/*
+ * Everything below O5 is an authentication that has not finished yet, and O7 is
+ * one that came back refused. O2_3 is still accepted here even though the state
+ * tile no longer prints it: the driver merges O2 and O3 into that single value
+ * (hardware ACTIVATION_ST has neither 3 nor 6), so every line passes through it
+ * while registering, and dropping it would report "Unknown" mid-startup.
+ */
 function displayRegistrationResult(registration) {
 	switch (registration ? registration.onu_state : null) {
 	case 'O5': return _('Accepted');
 	case 'O7': return _('Not authenticated');
 	case 'O1':
+	case 'O2':
+	case 'O3':
 	case 'O2_3':
-	case 'O4': return _('Pending');
+	case 'O4':
+	case 'O6': return _('Pending');
 	default: return _('Unknown');
 	}
 }
@@ -424,8 +442,11 @@ function registrationResultSeverity(registration) {
 	case 'O5': return 'ok';
 	case 'O7': return 'error';
 	case 'O1':
+	case 'O2':
+	case 'O3':
 	case 'O2_3':
-	case 'O4': return 'pending';
+	case 'O4':
+	case 'O6': return 'pending';
 	default: return '';
 	}
 }
