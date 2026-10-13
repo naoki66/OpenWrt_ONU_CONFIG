@@ -425,8 +425,14 @@ return view.extend({
 		o.rmempty = true;
 		o.depends({ enabled: '1', mode: 'bridge' });
 
-		/* IPv4 */
-		o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable IGMP snooping'),
+	/* IPv4 */
+	o = s.taboption('ipv4', form.Flag, 'xpon_snooping', _('Enable PON hardware IGMP snooping'),
+		_('The PON MAC learns IGMP joins/leaves through a netfilter hook and programs the PPE multicast flow table, so downstream multicast only crosses the PON when a group has members. This runs in parallel with bridge-level snooping and does not interfere with the IGMP proxy.'));
+	o.default = '0';
+	o.rmempty = false;
+	o.depends('enabled', '1');
+
+	o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable bridge IGMP snooping'),
 			_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
 		o.default = '1';
 		o.rmempty = false;

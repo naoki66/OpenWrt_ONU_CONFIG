@@ -75,6 +75,7 @@ load_iptv_config() {
 	config_get MULTICAST_VLAN config multicast_vlan
 	config_get IGMP_VLAN config igmp_vlan
 	config_get_bool IGMP_SNOOPING config igmp_snooping 1
+	config_get_bool XPON_SNOOPING config xpon_snooping 0
 	config_get_bool MLD_SNOOPING config mld_snooping 0
 	config_get_bool IGMP_PROXY config igmp_proxy 0
 	config_get_bool MLD_PROXY config mld_proxy 0
@@ -933,6 +934,19 @@ reload_runtime() {
 
 	restart_daemon "$PROXY_INIT" "$PROXY_ACTIVE"
 	restart_daemon "$UNICAST_INIT" "$UNICAST_ACTIVE"
+
+	# PON MAC-level IGMP/MLD snooping (kmod-airoha-xpon netfilter hook + PPE
+	# multicast flow).  Runs in parallel with bridge snooping; does not steal
+	# IGMP reports from the proxy (hook returns NF_ACCEPT).
+	if [ -x /usr/sbin/airoha-ponctl ]; then
+		if [ "$ENABLED" -eq 1 ] && [ "$XPON_SNOOPING" -eq 1 ]; then
+			airoha-ponctl igmp set --enable 1 --snooping 1 \
+				$([ "$MLD_SNOOPING" -eq 1 ] && echo '--mld 1') \
+				>/dev/null 2>&1 || warn "PON IGMP snooping enable failed"
+		else
+			airoha-ponctl igmp set --enable 0 >/dev/null 2>&1 || true
+		fi
+	fi
 }
 
 load_iptv_config
