@@ -3,3 +3,5 @@
 
 # WorkBuddy workspace data (memory, notes) - not part of the tree
 /.workbuddy/
+# Local analysis reports kept out of the tree
+/docs
