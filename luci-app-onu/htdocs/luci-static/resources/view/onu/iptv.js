@@ -208,6 +208,16 @@ function relayFallbackVlan() {
 }
 
 /*
+ * True when either multicast proxy is enabled. The proxies terminate the
+ * multicast VLAN themselves and deliver the groups to the LAN untagged, which
+ * is what makes VID 0 the meaningful whitelist entry in that topology.
+ */
+function proxyMode() {
+	return uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
+		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
+}
+
+/*
  * The device the multicast-to-unicast relay listens on. This mirrors
  * resolve_unicast() in iptv-apply and must stay in step with it: the relay has
  * to listen on a bridge, never on one of its member ports, because frames
@@ -248,17 +258,8 @@ function unicastUpstream() {
 	return 'br-iptv';
 }
 
-/*
- * True when either multicast proxy is enabled. The proxies terminate the
- * multicast VLAN themselves and deliver the groups to the LAN untagged, which
- * is what makes VID 0 the meaningful whitelist entry in that topology.
- */
-function proxyMode() {
-	return uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
-		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
-}
-
-function relayButton(label, node) {	return '<a class="cbi-button cbi-button-action" href="' + L.url(node) + '">' + label + '</a>';
+function relayButton(label, node) {
+	return '<a class="cbi-button cbi-button-action" href="' + L.url(node) + '">' + label + '</a>';
 }
 
 /*
