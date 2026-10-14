@@ -67,10 +67,27 @@ impl Default for IdentityConfig {
 impl IdentityConfig {
     pub fn from_section(section: &Section) -> Self {
         let mut config = Self::default();
-        config.omcc_version = match section.option("omcc_version") {
-            Some("0x86") => 0x86,
-            _ => 0xb0,
-        };
+        /*
+         * The OMCC version is the OMCI baseline advertised to the OLT, so it is
+         * an opaque byte rather than a boolean: 0x86 has to stay selectable even
+         * though it is also an unrelated CTC result code elsewhere. The value is
+         * normalised to lower case first, because the constants are written both
+         * ways by hand, and it is printed back as 0x{:02x}.
+         */
+        if let Some(value) = section.option("omcc_version") {
+            let normalised = value.to_ascii_lowercase();
+
+            match normalised.as_str() {
+                "0x86" => config.omcc_version = 0x86,
+                "0xa0" => config.omcc_version = 0xa0,
+                "0xa8" => config.omcc_version = 0xa8,
+                "0xb4" => config.omcc_version = 0xb4,
+                "0xb0" => config.omcc_version = 0xb0,
+                /* An empty or unknown value keeps the default. */
+                "" => {}
+                _ => println!("Invalid OMCI omcc_version {value:?}; using 0xb0"),
+            }
+        }
         config.disable_enhanced_security = section.option("disable_enhanced_security") == Some("1");
         if let Some(value) = section
             .option("alloc_id_timeout")
@@ -255,6 +272,41 @@ mod tests {
         assert_eq!(IdentityConfig::default().omcc_version, 0xb0);
         assert!(!IdentityConfig::default().disable_enhanced_security);
         assert_eq!(IdentityConfig::default().alloc_id_timeout, 30);
+    }
+
+    fn omcc_version_with(value: &str) -> u8 {
+        let config = PonConfig::parse(&format!(
+            "config omci 'line0_omci'\
+             \n\toption line 'line0'\
+             \n\toption omcc_version '{value}'\n"
+        ))
+        .unwrap();
+
+        IdentityConfig::from_section(config.linked_section("omci", "line0").unwrap()).omcc_version
+    }
+
+    #[test]
+    fn every_offered_omcc_version_round_trips() {
+        // The UI offers these five baselines; each one has to survive parsing
+        // unchanged instead of collapsing onto the default.
+        assert_eq!(omcc_version_with("0x86"), 0x86);
+        assert_eq!(omcc_version_with("0xa0"), 0xa0);
+        assert_eq!(omcc_version_with("0xa8"), 0xa8);
+        assert_eq!(omcc_version_with("0xb0"), 0xb0);
+        assert_eq!(omcc_version_with("0xb4"), 0xb4);
+    }
+
+    #[test]
+    fn an_omcc_version_is_case_insensitive() {
+        // The constants are written both ways by hand in comments and notes.
+        assert_eq!(omcc_version_with("0xA8"), 0xa8);
+        assert_eq!(omcc_version_with("0xB4"), 0xb4);
+    }
+
+    #[test]
+    fn an_unknown_omcc_version_keeps_the_default() {
+        assert_eq!(omcc_version_with("0xff"), 0xb0);
+        assert_eq!(omcc_version_with(""), 0xb0);
     }
 
     fn identity_with(options: &str) -> IdentityConfig {

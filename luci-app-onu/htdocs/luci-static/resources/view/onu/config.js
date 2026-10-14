@@ -202,12 +202,20 @@ return view.extend({
 	};
 	o.description = _('Optional; sent as all zeros when empty.');
 
+	/*
+	 * The OMCC version tells the OLT which OMCI baseline the ONU speaks. The
+	 * list is ordered oldest to newest so the "when to try something else"
+	 * reading follows the dropdown top to bottom; the default stays 0xb0.
+	 */
 	o = s.taboption('compatibility', form.ListValue, 'omcc_version', _('OMCC version'));
-	o.value('0xb0', '0xb0');
 	o.value('0x86', '0x86');
+	o.value('0xa0', '0xa0');
+	o.value('0xa8', '0xa8');
+	o.value('0xb0', '0xb0');
+	o.value('0xb4', '0xb4');
 	o.default = '0xb0';
 	o.rmempty = false;
-	o.description = _('If the ONU cannot register with a Huawei OLT, try OMCC version 0x86.');
+	o.description = _('0x86: Huawei OLT incompatible with old or third-party ONUs | 0xA0: early GPON baseline | 0xA8: G.984 evolution, common on ZTE and Fiberhome | 0xB0: Huawei new-firmware default | 0xB4: enhanced version for newer Huawei and Nokia OLTs.');
 
 	o = s.taboption('compatibility', form.Flag, 'disable_enhanced_security', _('Disable enhanced security (Class 332)'));
 	o.default = '0';

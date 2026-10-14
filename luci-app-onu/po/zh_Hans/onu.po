@@ -1187,8 +1187,8 @@ msgstr "PON 接口的线路模式、注册与认证设置。校准数据在「�
 msgid "OMCC version"
 msgstr "OMCC 版本"
 
-msgid "If the ONU cannot register with a Huawei OLT, try OMCC version 0x86."
-msgstr "使用华为 OLT 且 ONU 无法注册上线时，建议尝试 OMCC 版本 0x86。"
+msgid "0x86: Huawei OLT incompatible with old or third-party ONUs | 0xA0: early GPON baseline | 0xA8: G.984 evolution, common on ZTE and Fiberhome | 0xB0: Huawei new-firmware default | 0xB4: enhanced version for newer Huawei and Nokia OLTs."
+msgstr "0x86: 华为OLT兼容老旧/第三方ONU首选 | 0xA0: 早期GPON标准版本 | 0xA8: G.984演进版(中兴/烽火常用) | 0xB0: 华为新固件默认值 | 0xB4: 新版华为/诺基亚OLT增强版。"
 
 msgid "Disable enhanced security (Class 332)"
 msgstr "禁用增强安全（Class 332）"

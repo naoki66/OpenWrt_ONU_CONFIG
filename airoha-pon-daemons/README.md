@@ -50,9 +50,9 @@ config oam 'line0_oam'
 	option ge_ports '1'
 ```
 
-`mode` accepts `xgpon`, `xgspon`, `epon-10g-1g` and `epon-10g-10g`. An empty value keeps the current driver mode. `omcc_version` accepts `0xb0` and `0x86`.
+`mode` accepts `xgpon`, `xgspon`, `epon-10g-1g` and `epon-10g-10g`. An empty value keeps the current driver mode. `omcc_version` accepts `0x86`, `0xa0`, `0xa8`, `0xb0` and `0xb4`, in either case, and defaults to `0xb0`.
 
-`mode` 支持 `xgpon`、`xgspon`、`epon-10g-1g` 和 `epon-10g-10g`。空值使用驱动当前模式。`omcc_version` 支持 `0xb0` 和 `0x86`。
+`mode` 支持 `xgpon`、`xgspon`、`epon-10g-1g` 和 `epon-10g-10g`。空值使用驱动当前模式。`omcc_version` 支持 `0x86`、`0xa0`、`0xa8`、`0xb0` 和 `0xb4`（大小写不限），默认 `0xb0`。
 
 `alloc_id_timeout` is the number of seconds an OMCI data path may wait for PLOAM to assign its Alloc-ID before the data path state becomes `alloc-id-timeout`. The kernel keeps the request, so a later assignment still applies it. `0` disables the timeout.
 
