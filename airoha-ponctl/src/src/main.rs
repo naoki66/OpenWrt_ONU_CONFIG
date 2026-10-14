@@ -287,7 +287,7 @@ fn print_help() {
          \x20 ponctl [--device ponX] identity set [--serial SN] [--registration-id ID]\n\
          \x20 ponctl [--device ponX] data-path [show]\n\
          \x20 ponctl [--device ponX] igmp [show]\n\
-         \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1]\n\
+         \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1] [--mvlan-strict 0|1]\n\
          \x20 ponctl [--device ponX] igmp fwd\n\
          \x20 ponctl [--device ponX] igmp mvlan [list]\n\
          \x20 ponctl [--device ponX] igmp mvlan add|del VID\n\
@@ -405,6 +405,7 @@ fn run() -> Result<()> {
             println!("mld={}", cfg.mld.unwrap_or(false));
             println!("fast_leave={}", cfg.fast_leave.unwrap_or(false));
             println!("mvlan={}", cfg.mvlan.unwrap_or(false));
+            println!("mvlan_strict={}", cfg.mvlan_strict.unwrap_or(false));
             println!("fwd_count={}", cfg.fwd_count.unwrap_or(0));
         }
         "igmp" if arguments.get(1).map(String::as_str) == Some("set") => {
@@ -421,6 +422,7 @@ fn run() -> Result<()> {
                     "--mld" => config.mld = Some(b),
                     "--fast-leave" => config.fast_leave = Some(b),
                     "--mvlan" => config.mvlan = Some(b),
+                    "--mvlan-strict" => config.mvlan_strict = Some(b),
                     name => return Err(format!("unknown argument '{name}'").into()),
                 }
             }
@@ -432,9 +434,10 @@ fn run() -> Result<()> {
                 && config.mld.is_none()
                 && config.fast_leave.is_none()
                 && config.mvlan.is_none()
+                && config.mvlan_strict.is_none()
             {
                 return Err(
-                    "igmp set requires at least one of --enable, --snooping, --mld, --fast-leave, --mvlan"
+                    "igmp set requires at least one of --enable, --snooping, --mld, --fast-leave, --mvlan, --mvlan-strict"
                         .into(),
                 );
             }
@@ -445,6 +448,7 @@ fn run() -> Result<()> {
             println!("mld={}", cfg.mld.unwrap_or(false));
             println!("fast_leave={}", cfg.fast_leave.unwrap_or(false));
             println!("mvlan={}", cfg.mvlan.unwrap_or(false));
+            println!("mvlan_strict={}", cfg.mvlan_strict.unwrap_or(false));
             println!("fwd_count={}", cfg.fwd_count.unwrap_or(0));
         }
         "igmp" if arguments.get(1).map(String::as_str) == Some("fwd") => {

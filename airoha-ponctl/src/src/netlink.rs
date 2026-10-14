@@ -533,6 +533,7 @@ pub struct IgmpConfig {
     pub mld: Option<bool>,
     pub fast_leave: Option<bool>,
     pub mvlan: Option<bool>,
+    pub mvlan_strict: Option<bool>,
     pub fwd_count: Option<u32>,
 }
 
@@ -576,6 +577,9 @@ pub fn get_igmp(ifindex: u32) -> io::Result<IgmpConfig> {
                     XPON_IGMP_CFG_MVLAN if cfg_value.len() == 1 => {
                         config.mvlan = Some(cfg_value[0] != 0);
                     }
+                    XPON_IGMP_CFG_MVLAN_STRICT if cfg_value.len() == 1 => {
+                        config.mvlan_strict = Some(cfg_value[0] != 0);
+                    }
                     XPON_IGMP_CFG_FWD_COUNT if cfg_value.len() == 4 => {
                         config.fwd_count =
                             Some(u32::from_ne_bytes(cfg_value.try_into().unwrap()));
@@ -607,6 +611,9 @@ pub fn set_igmp(ifindex: u32, config: &IgmpConfig) -> io::Result<()> {
     }
     if let Some(v) = config.mvlan {
         append_attr(&mut nested, XPON_IGMP_CFG_MVLAN, &[v as u8]);
+    }
+    if let Some(v) = config.mvlan_strict {
+        append_attr(&mut nested, XPON_IGMP_CFG_MVLAN_STRICT, &[v as u8]);
     }
 
     socket.request(
