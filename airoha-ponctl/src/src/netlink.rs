@@ -485,8 +485,19 @@ pub fn get_status(ifindex: u32) -> io::Result<crate::status::Snapshot> {
 const XPON_CMD_GET_IGMP: u8 = 4;
 const XPON_CMD_SET_IGMP: u8 = 5;
 const XPON_CMD_GET_IGMP_FWD: u8 = 6;
+const XPON_CMD_SET_IGMP_MVLAN: u8 = 7;
+const XPON_CMD_GET_IGMP_MVLAN: u8 = 8;
 const XPON_ATTR_IGMP_CONFIG: u16 = 9;
 const XPON_ATTR_IGMP_FWD: u16 = 10;
+const XPON_ATTR_IGMP_MVLAN: u16 = 11;
+
+const XPON_IGMP_MVLAN_OP: u16 = 1;
+const XPON_IGMP_MVLAN_VID: u16 = 2;
+const XPON_IGMP_MVLAN_ENTRY: u16 = 3;
+const XPON_IGMP_MVLAN_PORT_MASK: u16 = 4;
+
+const XPON_IGMP_MVLAN_OP_ADD: u8 = 1;
+const XPON_IGMP_MVLAN_OP_DEL: u8 = 2;
 
 const XPON_IGMP_CFG_ENABLED: u16 = 1;
 const XPON_IGMP_CFG_SNOOPING: u16 = 2;
@@ -652,6 +663,79 @@ pub fn get_igmp_fwd(ifindex: u32) -> io::Result<Vec<IgmpFwdEntry>> {
                 }
                 entries.push(entry);
             }
+        }
+    }
+    Ok(entries)
+}
+
+#[derive(Clone, Debug)]
+pub struct IgmpMvlanEntry {
+    pub vid: u16,
+    pub port_mask: u8,
+}
+
+pub fn set_igmp_mvlan(ifindex: u32, add: bool, vid: u16) -> io::Result<()> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+
+    let op = if add {
+        XPON_IGMP_MVLAN_OP_ADD
+    } else {
+        XPON_IGMP_MVLAN_OP_DEL
+    };
+    let mut nested = Vec::new();
+    append_attr(&mut nested, XPON_IGMP_MVLAN_OP, &[op]);
+    append_attr(&mut nested, XPON_IGMP_MVLAN_VID, &vid.to_ne_bytes());
+
+    socket.request(
+        family,
+        XPON_CMD_SET_IGMP_MVLAN,
+        XPON_VERSION,
+        true,
+        &[
+            (XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes()),
+            (XPON_ATTR_IGMP_MVLAN, &nested),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_igmp_mvlan(ifindex: u32) -> io::Result<Vec<IgmpMvlanEntry>> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+    let payload = socket.request(
+        family,
+        XPON_CMD_GET_IGMP_MVLAN,
+        XPON_VERSION,
+        false,
+        &[(XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes())],
+    )?;
+
+    let mut entries = Vec::new();
+    for (kind, value) in attrs(&payload)? {
+        if kind != XPON_ATTR_IGMP_MVLAN {
+            continue;
+        }
+        for (mv_kind, mv_value) in attrs(value)? {
+            if mv_kind != XPON_IGMP_MVLAN_ENTRY {
+                continue;
+            }
+            let mut entry = IgmpMvlanEntry {
+                vid: 0,
+                port_mask: 0,
+            };
+            for (field_kind, field_value) in attrs(mv_value)? {
+                match field_kind {
+                    XPON_IGMP_MVLAN_VID if field_value.len() == 2 => {
+                        entry.vid = u16::from_ne_bytes(field_value.try_into().unwrap());
+                    }
+                    XPON_IGMP_MVLAN_PORT_MASK if field_value.len() == 1 => {
+                        entry.port_mask = field_value[0];
+                    }
+                    _ => {}
+                }
+            }
+            entries.push(entry);
         }
     }
     Ok(entries)

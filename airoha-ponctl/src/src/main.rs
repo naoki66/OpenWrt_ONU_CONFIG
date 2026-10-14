@@ -246,7 +246,9 @@ fn print_help() {
          \x20 ponctl [--device ponX] data-path [show]\n\
          \x20 ponctl [--device ponX] igmp [show]\n\
          \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1]\n\
-         \x20 ponctl [--device ponX] igmp fwd"
+         \x20 ponctl [--device ponX] igmp fwd\n\
+         \x20 ponctl [--device ponX] igmp mvlan [list]\n\
+         \x20 ponctl [--device ponX] igmp mvlan add|del VID"
     );
 }
 
@@ -426,6 +428,39 @@ fn run() -> Result<()> {
                 println!(
                     "proto={} port={} vid={} ver={} grp={}",
                     proto, e.port, e.vid, e.ver, grp
+                );
+            }
+        }
+        "igmp" if arguments.get(1).map(String::as_str) == Some("mvlan") => {
+            if arguments.len() == 2 || (arguments.len() == 3 && arguments[2] == "list") {
+                let entries = netlink::get_igmp_mvlan(line_ifindex(&device)?)?;
+                if entries.is_empty() {
+                    println!("(no mvlan entries; table empty = no filter)");
+                }
+                for e in &entries {
+                    println!("vid={} port_mask={:#04x}", e.vid, e.port_mask);
+                }
+            } else if arguments.len() == 4
+                && matches!(arguments[2].as_str(), "add" | "del")
+            {
+                let add = arguments[2] == "add";
+                let vid: u16 = arguments[3]
+                    .parse()
+                    .map_err(|_| "VID must be an integer between 1 and 4094")?;
+                if vid == 0 || vid > 4094 {
+                    return Err("VID must be between 1 and 4094".into());
+                }
+                netlink::set_igmp_mvlan(line_ifindex(&device)?, add, vid)?;
+                let entries = netlink::get_igmp_mvlan(line_ifindex(&device)?)?;
+                if entries.is_empty() {
+                    println!("(no mvlan entries; table empty = no filter)");
+                }
+                for e in &entries {
+                    println!("vid={} port_mask={:#04x}", e.vid, e.port_mask);
+                }
+            } else {
+                return Err(
+                    "usage: ponctl igmp mvlan [list] | igmp mvlan add|del <vid>".into(),
                 );
             }
         }
