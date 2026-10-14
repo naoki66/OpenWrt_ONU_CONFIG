@@ -20,9 +20,17 @@ LUCI_TITLE:=LuCI ONU configuration
 # The internet page needs pppd for the dialling mode, the bridge family of
 # nftables for its EtherType filter and the netfilter flowtable for hardware
 # offloading: without kmod-nft-offload the PPE never sees a flow.
+#
+# kmod-nf-conntrack-bridge is the bridge-offload companion: the bridge family
+# flowtable only produces a hardware entry when the bridge conntrack has parsed
+# the frame, and it only parses an inner PPPoE / 802.1q encapsulation when the
+# flow sits in a non-default conntrack zone. internet-apply sets that zone on
+# every frame crossing br-wanup; without this package the `nft -c` probe fails
+# and the bridge silently stays in the software path.
 LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
-	+firewall4 +kmod-nft-bridge +kmod-nft-offload +omcproxy +ppp-mod-pppoe
+	+firewall4 +kmod-nft-bridge +kmod-nft-offload +kmod-nf-conntrack-bridge \
+	+omcproxy +ppp-mod-pppoe
 PKG_VERSION:=0.1.0
 # 10: the shipped voice configuration drops the two line sections - the board has
 # a single FXS port, so its parameters moved into the voice profile.
