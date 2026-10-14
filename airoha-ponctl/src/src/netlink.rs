@@ -495,9 +495,20 @@ const XPON_IGMP_MVLAN_OP: u16 = 1;
 const XPON_IGMP_MVLAN_VID: u16 = 2;
 const XPON_IGMP_MVLAN_ENTRY: u16 = 3;
 const XPON_IGMP_MVLAN_PORT_MASK: u16 = 4;
+const XPON_IGMP_MVLAN_ENABLED: u16 = 5;
+const XPON_IGMP_MVLAN_STRICT: u16 = 6;
+const XPON_IGMP_MVLAN_ALLOW_UNTAGGED: u16 = 7;
+const XPON_IGMP_MVLAN_COUNT: u16 = 8;
+const XPON_IGMP_MVLAN_VIDS: u16 = 9;
+const XPON_IGMP_MVLAN_VIDS_LEN: u16 = 10;
+const XPON_IGMP_MVLAN_ALLOW_CNT: u16 = 11;
+const XPON_IGMP_MVLAN_DENY_CNT: u16 = 12;
+const XPON_IGMP_MVLAN_LL_EXEMPT_CNT: u16 = 13;
+const XPON_IGMP_MVLAN_COMMIT_CNT: u16 = 14;
 
 const XPON_IGMP_MVLAN_OP_ADD: u8 = 1;
 const XPON_IGMP_MVLAN_OP_DEL: u8 = 2;
+const XPON_IGMP_MVLAN_OP_COMMIT: u8 = 3;
 
 const XPON_IGMP_CFG_ENABLED: u16 = 1;
 const XPON_IGMP_CFG_SNOOPING: u16 = 2;
@@ -505,6 +516,7 @@ const XPON_IGMP_CFG_MLD: u16 = 3;
 const XPON_IGMP_CFG_FAST_LEAVE: u16 = 4;
 const XPON_IGMP_CFG_MVLAN: u16 = 5;
 const XPON_IGMP_CFG_FWD_COUNT: u16 = 6;
+const XPON_IGMP_CFG_MVLAN_STRICT: u16 = 7;
 
 const XPON_IGMP_FWD_ENTRIES: u16 = 1;
 const XPON_IGMP_FWD_ENTRY: u16 = 2;
@@ -674,6 +686,19 @@ pub struct IgmpMvlanEntry {
     pub port_mask: u8,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct IgmpMvlanState {
+    pub enabled: Option<bool>,
+    pub strict: Option<bool>,
+    pub allow_untagged: Option<bool>,
+    pub count: Option<u32>,
+    pub allow_cnt: Option<u64>,
+    pub deny_cnt: Option<u64>,
+    pub ll_exempt_cnt: Option<u64>,
+    pub commit_cnt: Option<u64>,
+    pub entries: Vec<IgmpMvlanEntry>,
+}
+
 pub fn set_igmp_mvlan(ifindex: u32, add: bool, vid: u16) -> io::Result<()> {
     let socket = NetlinkSocket::open()?;
     let family = socket.family_id(XPON_FAMILY_NAME)?;
@@ -700,7 +725,42 @@ pub fn set_igmp_mvlan(ifindex: u32, add: bool, vid: u16) -> io::Result<()> {
     Ok(())
 }
 
-pub fn get_igmp_mvlan(ifindex: u32) -> io::Result<Vec<IgmpMvlanEntry>> {
+/// Replace the whole whitelist and set the enable flag in one atomic step.
+/// Sending the list in one message closes the window where "enabled" is
+/// already on but the table is still empty, during which every VLAN passes.
+pub fn commit_igmp_mvlan(ifindex: u32, enable: bool, vids: &[u16]) -> io::Result<()> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+
+    let mut nested = Vec::new();
+    append_attr(&mut nested, XPON_IGMP_MVLAN_OP, &[XPON_IGMP_MVLAN_OP_COMMIT]);
+    append_attr(&mut nested, XPON_IGMP_MVLAN_ENABLED, &[enable as u8]);
+    append_attr(
+        &mut nested,
+        XPON_IGMP_MVLAN_VIDS_LEN,
+        &(vids.len() as u16).to_ne_bytes(),
+    );
+
+    let mut payload = Vec::with_capacity(vids.len() * 2);
+    for v in vids {
+        payload.extend_from_slice(&v.to_ne_bytes());
+    }
+    append_attr(&mut nested, XPON_IGMP_MVLAN_VIDS, &payload);
+
+    socket.request(
+        family,
+        XPON_CMD_SET_IGMP_MVLAN,
+        XPON_VERSION,
+        true,
+        &[
+            (XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes()),
+            (XPON_ATTR_IGMP_MVLAN, &nested),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_igmp_mvlan(ifindex: u32) -> io::Result<IgmpMvlanState> {
     let socket = NetlinkSocket::open()?;
     let family = socket.family_id(XPON_FAMILY_NAME)?;
     let payload = socket.request(
@@ -711,32 +771,61 @@ pub fn get_igmp_mvlan(ifindex: u32) -> io::Result<Vec<IgmpMvlanEntry>> {
         &[(XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes())],
     )?;
 
-    let mut entries = Vec::new();
+    let mut state = IgmpMvlanState::default();
     for (kind, value) in attrs(&payload)? {
         if kind != XPON_ATTR_IGMP_MVLAN {
             continue;
         }
         for (mv_kind, mv_value) in attrs(value)? {
-            if mv_kind != XPON_IGMP_MVLAN_ENTRY {
-                continue;
-            }
-            let mut entry = IgmpMvlanEntry {
-                vid: 0,
-                port_mask: 0,
-            };
-            for (field_kind, field_value) in attrs(mv_value)? {
-                match field_kind {
-                    XPON_IGMP_MVLAN_VID if field_value.len() == 2 => {
-                        entry.vid = u16::from_ne_bytes(field_value.try_into().unwrap());
-                    }
-                    XPON_IGMP_MVLAN_PORT_MASK if field_value.len() == 1 => {
-                        entry.port_mask = field_value[0];
-                    }
-                    _ => {}
+            match mv_kind {
+                XPON_IGMP_MVLAN_ENABLED if mv_value.len() == 1 => {
+                    state.enabled = Some(mv_value[0] != 0);
                 }
+                XPON_IGMP_MVLAN_STRICT if mv_value.len() == 1 => {
+                    state.strict = Some(mv_value[0] != 0);
+                }
+                XPON_IGMP_MVLAN_ALLOW_UNTAGGED if mv_value.len() == 1 => {
+                    state.allow_untagged = Some(mv_value[0] != 0);
+                }
+                XPON_IGMP_MVLAN_COUNT if mv_value.len() == 4 => {
+                    state.count = Some(u32::from_ne_bytes(mv_value.try_into().unwrap()));
+                }
+                XPON_IGMP_MVLAN_ALLOW_CNT if mv_value.len() == 8 => {
+                    state.allow_cnt = Some(u64::from_ne_bytes(mv_value.try_into().unwrap()));
+                }
+                XPON_IGMP_MVLAN_DENY_CNT if mv_value.len() == 8 => {
+                    state.deny_cnt = Some(u64::from_ne_bytes(mv_value.try_into().unwrap()));
+                }
+                XPON_IGMP_MVLAN_LL_EXEMPT_CNT if mv_value.len() == 8 => {
+                    state.ll_exempt_cnt =
+                        Some(u64::from_ne_bytes(mv_value.try_into().unwrap()));
+                }
+                XPON_IGMP_MVLAN_COMMIT_CNT if mv_value.len() == 8 => {
+                    state.commit_cnt = Some(u64::from_ne_bytes(mv_value.try_into().unwrap()));
+                }
+                XPON_IGMP_MVLAN_ENTRY => {
+                    let mut entry = IgmpMvlanEntry {
+                        vid: 0,
+                        port_mask: 0,
+                    };
+                    for (field_kind, field_value) in attrs(mv_value)? {
+                        match field_kind {
+                            XPON_IGMP_MVLAN_VID if field_value.len() == 2 => {
+                                entry.vid =
+                                    u16::from_ne_bytes(field_value.try_into().unwrap());
+                            }
+                            XPON_IGMP_MVLAN_PORT_MASK if field_value.len() == 1 => {
+                                entry.port_mask = field_value[0];
+                            }
+                            _ => {}
+                        }
+                    }
+                    state.entries.push(entry);
+                }
+                _ => {}
             }
-            entries.push(entry);
         }
     }
-    Ok(entries)
+    state.entries.sort_by_key(|e| e.vid);
+    Ok(state)
 }

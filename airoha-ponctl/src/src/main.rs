@@ -212,6 +212,48 @@ fn line_ifindex(device: &PonDevice) -> Result<u32> {
     Ok(read_trimmed(&device.net_path.join("ifindex"))?.parse()?)
 }
 
+/// Shared VID validation.  vid 0 is accepted on purpose: a fully-routed ONU
+/// hands multicast to the LAN untagged, and the kernel reports that as 0.
+/// Whether 0 is honoured depends on the kernel's mvlan_allow_untagged flag,
+/// which the driver enforces; the CLI only rejects values that are never
+/// valid on the wire.
+fn parse_vid(text: &str) -> Result<u16> {
+    let vid: u16 = text
+        .parse()
+        .map_err(|_| format!("'{text}' is not a valid VID"))?;
+    if vid > 4094 {
+        return Err(format!("VID {vid} is out of range (0-4094)").into());
+    }
+    Ok(vid)
+}
+
+fn print_mvlan_state(state: &netlink::IgmpMvlanState) {
+    println!("enabled={}", state.enabled.unwrap_or(false));
+    println!("strict={}", state.strict.unwrap_or(false));
+    println!("allow_untagged={}", state.allow_untagged.unwrap_or(true));
+    println!("count={}", state.count.unwrap_or(0));
+    println!(
+        "allow_cnt={} deny_cnt={} ll_exempt_cnt={} commit_cnt={}",
+        state.allow_cnt.unwrap_or(0),
+        state.deny_cnt.unwrap_or(0),
+        state.ll_exempt_cnt.unwrap_or(0),
+        state.commit_cnt.unwrap_or(0)
+    );
+    if state.entries.is_empty() {
+        println!(
+            "(no mvlan entries; table empty = {})",
+            if state.strict.unwrap_or(false) {
+                "deny all"
+            } else {
+                "no filter"
+            }
+        );
+    }
+    for e in &state.entries {
+        println!("vid={} port_mask={:#04x}", e.vid, e.port_mask);
+    }
+}
+
 fn show_mode(device: &PonDevice) -> Result<()> {
     let state = netlink::get_line(line_ifindex(device)?)?;
     println!("configured={}", state.configured.name());
@@ -248,7 +290,8 @@ fn print_help() {
          \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1]\n\
          \x20 ponctl [--device ponX] igmp fwd\n\
          \x20 ponctl [--device ponX] igmp mvlan [list]\n\
-         \x20 ponctl [--device ponX] igmp mvlan add|del VID"
+         \x20 ponctl [--device ponX] igmp mvlan add|del VID\n\
+         \x20 ponctl [--device ponX] igmp mvlan commit [--enable 0|1] [VID...]"
     );
 }
 
@@ -432,35 +475,61 @@ fn run() -> Result<()> {
             }
         }
         "igmp" if arguments.get(1).map(String::as_str) == Some("mvlan") => {
-            if arguments.len() == 2 || (arguments.len() == 3 && arguments[2] == "list") {
-                let entries = netlink::get_igmp_mvlan(line_ifindex(&device)?)?;
-                if entries.is_empty() {
-                    println!("(no mvlan entries; table empty = no filter)");
+            let ifindex = line_ifindex(&device)?;
+            let sub = arguments.get(2).map(String::as_str);
+
+            if sub.is_none() || sub == Some("list") || sub == Some("show") {
+                if arguments.len() > 3 {
+                    return Err("igmp mvlan list accepts no additional arguments".into());
                 }
-                for e in &entries {
-                    println!("vid={} port_mask={:#04x}", e.vid, e.port_mask);
+                print_mvlan_state(&netlink::get_igmp_mvlan(ifindex)?);
+            } else if sub == Some("add") || sub == Some("del") {
+                if arguments.len() != 4 {
+                    return Err(format!(
+                        "igmp mvlan {} requires a VID",
+                        sub.expect("checked")
+                    )
+                    .into());
                 }
-            } else if arguments.len() == 4
-                && matches!(arguments[2].as_str(), "add" | "del")
-            {
-                let add = arguments[2] == "add";
-                let vid: u16 = arguments[3]
-                    .parse()
-                    .map_err(|_| "VID must be an integer between 1 and 4094")?;
-                if vid == 0 || vid > 4094 {
-                    return Err("VID must be between 1 and 4094".into());
+                let vid = parse_vid(&arguments[3])?;
+                netlink::set_igmp_mvlan(ifindex, sub == Some("add"), vid)?;
+                print_mvlan_state(&netlink::get_igmp_mvlan(ifindex)?);
+            } else if sub == Some("commit") {
+                /*
+                 * ponctl igmp mvlan commit --enable 1 45 47
+                 * Replaces the whitelist and sets the enable flag in one
+                 * round trip, so no VLAN sneaks through while the table is
+                 * still being filled.
+                 */
+                let mut enable = true;
+                let mut vids: Vec<u16> = Vec::new();
+                let rest = &arguments[3..];
+                let mut i = 0;
+
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--enable" => {
+                            i += 1;
+                            let v = rest.get(i).ok_or("--enable requires 0 or 1")?;
+                            enable = match v.as_str() {
+                                "1" | "true" | "yes" | "on" => true,
+                                "0" | "false" | "no" | "off" => false,
+                                _ => return Err("--enable must be 0 or 1".into()),
+                            };
+                        }
+                        "--disable" => enable = false,
+                        other => vids.push(parse_vid(other)?),
+                    }
+                    i += 1;
                 }
-                netlink::set_igmp_mvlan(line_ifindex(&device)?, add, vid)?;
-                let entries = netlink::get_igmp_mvlan(line_ifindex(&device)?)?;
-                if entries.is_empty() {
-                    println!("(no mvlan entries; table empty = no filter)");
-                }
-                for e in &entries {
-                    println!("vid={} port_mask={:#04x}", e.vid, e.port_mask);
-                }
+
+                netlink::commit_igmp_mvlan(ifindex, enable, &vids)?;
+                print_mvlan_state(&netlink::get_igmp_mvlan(ifindex)?);
             } else {
                 return Err(
-                    "usage: ponctl igmp mvlan [list] | igmp mvlan add|del <vid>".into(),
+                    "usage: ponctl igmp mvlan [list] | add|del <vid> | \
+                     commit [--enable 0|1] [vid...]"
+                        .into(),
                 );
             }
         }
