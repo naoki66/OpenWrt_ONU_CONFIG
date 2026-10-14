@@ -395,6 +395,29 @@ write_offload_defaults() {
 #
 # These rules only ever see what the CPU forwards: slow path and first packet.
 #
+# The table also carries a bridge-family flowtable so that the frames the
+# downstream router forwards through br-wanup can be offloaded into the Airoha
+# PPE as native L2B entries. Two kernel-side prerequisites are easy to miss and
+# are handled here:
+#
+#   1. The bridge family needs CONFIG_BRIDGE_NETFILTER / NF_CONNTRACK_BRIDGE /
+#      NF_FLOW_TABLE / NFT_FLOW_OFFLOAD. Without them `nft -c` below fails and
+#      this whole table is not installed, so the bridge silently stays in the
+#      software path. The check is therefore not optional.
+#
+#   2. A PPPoE session inside a bridge is only tracked (and therefore only
+#      offloadable) when the flow sits in a non-default conntrack zone. The
+#      bridge conntrack code resolves the inner PPPoE/802.1q encapsulation only
+#      when nf_ct_zone_id() != NF_CT_DEFAULT_ZONE_ID - it refuses to mix
+#      differently-tagged L2 encapsulations in one zone. So every frame on this
+#      bridge gets `ct zone set` first; the offload then carries the PPPoE
+#      Session-ID into the hardware entry, and the driver turns it into
+#      FLOW_ACTION_PPPOE_PUSH with ib1.PPPOE / pppoe_id in the FOE.
+#
+# ZONE_ID has to stay distinct from any zone another bridge uses, hence it is a
+# fixed, documented constant (1) rather than the default zone 0.
+BRIDGE_CT_ZONE=1
+
 write_nft_rules() {
 	local tmp port
 	# UNTAG bridge references the raw uplink (ct-wanup does not exist there);
@@ -415,10 +438,29 @@ table bridge wanup
 flush table bridge wanup
 
 table bridge wanup {
+	# Bridge flowtable for the downstream router's own sessions. Being in the
+	# bridge family (not inet) is what lets a pure L2-forwarded PPPoE session
+	# reach the PPE without a local L3 stack participating.
+	flowtable wanup_ft {
+		hook ingress priority 0;
+		devices = { "$uplink_ref"$(for port in $PORTS; do printf ', "%s"' "$port"; done) };
+		counter;
+		flags offload;
+	}
+
 	chain wanup_forward {
+EOF
+		# Every frame entering the bridge is pinned into the dedicated
+		# conntrack zone first: the bridge conntrack only parses an inner
+		# PPPoE/802.1q encapsulation when the zone is not the default one.
+		cat >>"$tmp" <<EOF
+		# Put the flow in its own zone so the bridge conntrack resolves the
+		# PPPoE header (required for the hardware PPPoE_PUSH action).
+		ct zone set $BRIDGE_CT_ZONE counter comment "internet-bridge-ct-zone"
 EOF
 		for port in $PORTS; do
 			cat >>"$tmp" <<EOF
+
 		# Session of the router plugged into $port.
 		iifname "$port" oifname "$uplink_ref" ether type { 0x8863, 0x8864 } \
 			counter accept comment "pppoe-to-uplink-$port"
@@ -430,6 +472,7 @@ EOF
 		if [ "$IPOE" -eq 1 ]; then
 			for port in $PORTS; do
 				cat >>"$tmp" <<EOF
+
 		# IPoE operators carry native IPv4/IPv6 instead of a PPPoE session.
 		iifname "$port" oifname "$uplink_ref" ether type { arp, ip, ip6 } \
 			counter accept comment "ipoe-to-uplink-$port"
@@ -440,6 +483,7 @@ EOF
 		fi
 
 		cat >>"$tmp" <<EOF
+
 		# Everything else is local: it must not reach the operator path.
 		iifname "$uplink_ref" counter drop comment "drop-non-pppoe-from-uplink"
 		oifname "$uplink_ref" counter drop comment "drop-non-pppoe-to-uplink"
@@ -447,10 +491,12 @@ EOF
 	}
 
 	chain forward {
-		type filter hook forward priority filter; policy accept;
+		type filter hook forward priority filter - 1; policy accept;
 
 		# The bridge hook sees every bridge; this match scopes the filter.
 		meta ibrname "$BRIDGE_DEV" jump wanup_forward
+		meta ibrname "$BRIDGE_DEV" meta l4proto { tcp, udp } \
+			flow offload @wanup_ft comment "internet-bridge-hw-offload"
 	}
 }
 EOF
