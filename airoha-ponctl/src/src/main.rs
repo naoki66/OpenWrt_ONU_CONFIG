@@ -528,7 +528,18 @@ fn run() -> Result<()> {
             }
             let (proto, grp) = parse_group(&arguments[2])?;
             let ifindex = line_ifindex(&device)?;
-            let state = netlink::get_igmp_ppe(ifindex, proto, &grp)?;
+            let state = netlink::get_igmp_ppe(ifindex, proto, &grp).map_err(|e| {
+                /* ENODEV(19) means the kernel has no PPE provider here, which is
+                   a build-time gate rather than a bad group; say so plainly. */
+                if e.raw_os_error() == Some(19) {
+                    "this kernel has no PPE multicast provider: CONFIG_AIROHA_PON_COMPAT \
+                     is not enabled for this board, so there is no hardware flow table \
+                     to read back"
+                        .to_owned()
+                } else {
+                    e.to_string()
+                }
+            })?;
 
             let label = match state.state {
                 netlink::PpeFlowState::Absent => "absent",
