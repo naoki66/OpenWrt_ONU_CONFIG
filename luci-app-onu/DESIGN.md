@@ -624,8 +624,8 @@ table bridge wanup {
 | 场景 | 能否进 PPE | 原因 |
 | --- | --- | --- |
 | 系统拨号（PPPoE 本机终结，路由） | ✅ 可以 | 路由路径上有 conntrack → netfilter flowtable → `airoha_eth` → PPE |
-| 桥接模式 + PPPoE | ❌ 主线不行 | 纯二层转发不产生 conntrack 表项，flowtable 无流可卸 |
-| 桥接模式 + IPoE（原生 IP） | ⚠️ 有条件 | 需要 `br_netfilter`（`nf_call_iptables=1`）让桥上的 IPv4 帧进 ip forward 钩子才行 |
+| 桥接模式 + PPPoE（下游拨号） | ✅ 可以（**需内核配置 + conntrack zone**） | 本仓库内核树已带 `generic/pending-6.18/675-0x` 桥卸载补丁系列（明确标注 "Adapted for Airoha AN7581 PPE offload"）：桥 conntrack 能解析内层 PPPoE（`675-07`），flowtable 在桥家族里生成 `FLOW_ACTION_PPPOE_PUSH`。前提是 `CONFIG_BRIDGE_NETFILTER` / `NF_CONNTRACK_BRIDGE` / `NF_FLOW_TABLE` / `NFT_FLOW_OFFLOAD` 全开，且帧进非默认 conntrack zone |
+| 桥接模式 + IPoE（原生 IP） | ⚠️ 有条件 | 同上；IPoE 无需 conntrack zone（无内层封装），但仍需 `br_netfilter` |
 | 组播 | ❌ | 见上一节，flowtable 不卸组播 |
 
 依据（不是推测）：
@@ -633,12 +633,32 @@ table bridge wanup {
 - `airoha_eth` 的 `ndo_setup_tc`（`airoha_dev_tc_setup`）只接受 `TC_SETUP_CLSFLOWER`、`TC_SETUP_CLSMATCHALL`、`TC_SETUP_QDISC_*`、**`TC_SETUP_FT`**——
   `TC_SETUP_FT` 就是 flowtable 走的那一类，所以本平台唯一的卸载入口还是 netfilter flowtable，与上一节的结论一致；
 - `airoha_ppe_setup_tc_block_cb()` 里三种 `addr_type`：`IPV4_ADDRS` → `IPv4 5T`、`IPV6_ADDRS` → `IPv6 5T`、
-  **`addr_type == 0` + `ETH_ADDRS` → `PPE_PKT_TYPE_BRIDGE`（L2B）**。也就是 PPE 硬件本身支持纯二层表项，
-  但**主线没有任何东西自动喂它**：自动来源只有 conntrack，而桥上的 PPPoE 帧没有 conntrack 表项
-  （`nftables` 侧曾有 "L2 bridge offload" 补丁能补上这条路，源自 MediaTek SDK，**截至写作时尚未进主线**）；
-- 5.13 起 flowtable 会自己解析 VLAN/PPPoE 之下**真实设备**，因此要把真实设备（`lan1`、`pon0`）放进 flowtable，
-  而不是 `ct-wanup` / `pppoe-wan`；
+  **`addr_type == 0` + `ETH_ADDRS` → `PPE_PKT_TYPE_BRIDGE`（L2B）**。PPE 硬件本身支持纯二层表项；
+- **桥接 PPPoE 的喂流路径已在本仓库内核树里**（`target/linux/generic/pending-6.18/675-01..675-07`）：
+  `675-02` 提供 `nft_flow_offload_is_bridging()` + FDB 选路，`675-07` 在 `nf_conntrack_bridge.c` 里
+  增加 `nf_ct_bridge_inner()`，把 `ETH_P_PPP_SES → PPP_IP/PPP_IPV6` 剥开建 conntrack。
+  有了桥 conntrack，`nf_flow_table_ip.c` 的 `nf_flow_tuple_encap()` 才能填 `encap[].proto = ETH_P_PPP_SES`，
+  进而 `nf_flow_table_offload.c:720-733` 才生成 **`FLOW_ACTION_PPPOE_PUSH`**（携带 Session-ID）；
+- ⚠️ **`675-07` 明确声明 "Using a conntrack zone is a hard requirement"**：桥 conntrack 只在
+  `nf_ct_zone_id() != NF_CT_DEFAULT_ZONE_ID` 时才解析内层 PPPoE/802.1q（`nf_conntrack_bridge.c:336`）。
+  所以 `internet-apply` 生成的桥规则第一条就是 `ct zone set 1`；
+- 5.13 起 flowtable 会自己解析 VLAN/PPPoE 之下**真实设备**，因此桥上要把真实设备（`lan1`、`pon0`/`ct-wanup`）放进 flowtable；
 - PPE 计数可由 `airoha_ppe_debugfs` 读出：`/sys/kernel/debug/ppe/entries`（全部表项）、`/sys/kernel/debug/ppe/bind`（仅已绑定）。
+
+> ⚠️ **驱动侧的硬限制仍在**（`airoha_ppe.c` `FLOW_ACTION_PPPOE_PUSH` 分支）：
+> `if (data.pppoe.num == 1 || data.vlan.num == 2) return -EOPNOTSUPP;`
+> —— 单个 FOE 最多 **1 层 PPPoE + 1 层 VLAN**。双层 VLAN + PPPoE 的拨号方式会被判不支持下发，
+> 必然回落软件转发。这是设计限制，不要当成 bug 去修。
+
+> ⚠️ **内核配置是这条路的真正开关。** `generic/config-6.18` 里
+> `BRIDGE_NETFILTER` / `NF_FLOW_TABLE` / `NFT_FLOW_OFFLOAD` / `NF_CONNTRACK_BRIDGE` 默认**全 off**。
+> 本仓库已在 `target/linux/airoha/{an7581,an7583,en7523}/config-6.18` 里打开它们。
+> 若换 target，必须自行确认；否则 `nft -c` 探测失败，firewall4 与 `internet-apply` 都会静默降级到纯软件路径。
+>
+> ⚠️ **MTU 也要跟着改**：PPE egress MTU / WAN MTU 寄存器按「不含 FCS 的 L2 帧长」比较，
+> PPPoE 会话帧比裸 IP 多 `PPPOE_SES_HLEN`(8) 字节。补丁 `920-16` 只加了 `VLAN_ETH_HLEN`，
+> 本仓库新增 `920-17` 在 uplink GDM（`AIROHA_PRIV_F_PON`）上再 `+ PPPOE_SES_HLEN`；
+> 不加的话 VLAN+PPPoE 满帧（1518）会超出寄存器判据（1510）而被硬件丢弃——表现为「大包不通、小包通」。
 
 > ⚠️ **原版 fw4 只按 zone 成员推导 flowtable 设备，而且只认 `zone.network`，不认 `zone.device`。**
 > 这条来自 fw4 源码本身：`related_physdevs` 只用 option `network`（`fw4.uc`），`list device` 只进 `match_devices`；
