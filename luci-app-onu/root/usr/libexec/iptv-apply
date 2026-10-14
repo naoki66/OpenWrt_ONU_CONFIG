@@ -964,12 +964,30 @@ reload_runtime() {
 # Sending the list also covers the delete side, which a naive "add the
 # configured vids" loop would miss: a VLAN the operator removed from the UI
 # would otherwise keep passing multicast.
+#
+# VID 0 is legal and meaningful: an enabled multicast proxy terminates the
+# multicast VLAN and hands the groups to the LAN untagged, which the driver
+# reports as VID 0. When the proxy runs and the operator listed no VLAN, that
+# untagged delivery is what the whitelist has to allow, so 0 is filled in
+# rather than left to fail the filter closed.
 apply_mvlan_entries() {
 	local vids=""
 	local vid
 
 	if [ "$XPON_MVLAN" -eq 1 ]; then
 		vids="$XPON_MVLAN_LIST"
+
+		if [ -z "$vids" ] && { [ "$IGMP_PROXY" -eq 1 ] || [ "$MLD_PROXY" -eq 1 ]; }; then
+			vids='0'
+		fi
+
+		for vid in $vids; do
+			case "$vid" in
+				''|*[!0-9]*) fail "MVLAN entry '$vid' is not a VLAN ID" ;;
+			esac
+			[ "$vid" -eq 0 ] || [ "$vid" -le 4094 ] ||
+				fail "MVLAN entry $vid is out of range (0 for untagged, else 1-4094)"
+		done
 	fi
 
 	# shellcheck disable=SC2086

@@ -227,6 +227,41 @@ fn parse_vid(text: &str) -> Result<u16> {
     Ok(vid)
 }
 
+/// Parse a multicast group address into (IP protocol number, raw bytes).
+///
+/// `239.1.2.3` yields (4, 4 bytes) and `ff02::1` yields (6, 16 bytes). The
+/// zone suffix of a scoped IPv6 literal (`%eth0`) is rejected rather than
+/// silently dropped, because the kernel lookup ignores interfaces.
+fn parse_group(text: &str) -> Result<(u8, Vec<u8>)> {
+    if let Ok(v4) = text.parse::<std::net::Ipv4Addr>() {
+        if !v4.is_multicast() {
+            return Err(format!("{v4} is not a multicast group").into());
+        }
+        return Ok((4, v4.octets().to_vec()));
+    }
+    if text.contains('%') {
+        return Err(format!("'{text}': scoped IPv6 literals are not supported").into());
+    }
+    match text.parse::<std::net::Ipv6Addr>() {
+        Ok(v6) if v6.is_multicast() => Ok((6, v6.octets().to_vec())),
+        Ok(v6) => Err(format!("{v6} is not a multicast group").into()),
+        Err(_) => Err(format!("'{text}' is not an IPv4 or IPv6 multicast group").into()),
+    }
+}
+
+/// Render a raw group address back to text for display.
+fn format_group(proto: u8, grp: &[u8]) -> String {
+    if proto == 4 && grp.len() == 4 {
+        format!("{}.{}.{}.{}", grp[0], grp[1], grp[2], grp[3])
+    } else if grp.len() == 16 {
+        let mut octets = [0u8; 16];
+        octets.copy_from_slice(grp);
+        std::net::Ipv6Addr::from(octets).to_string()
+    } else {
+        format!("{grp:02x?}")
+    }
+}
+
 fn print_mvlan_state(state: &netlink::IgmpMvlanState) {
     println!("enabled={}", state.enabled.unwrap_or(false));
     println!("strict={}", state.strict.unwrap_or(false));
@@ -289,6 +324,7 @@ fn print_help() {
          \x20 ponctl [--device ponX] igmp [show]\n\
          \x20 ponctl [--device ponX] igmp set [--enable 0|1] [--snooping 0|1] [--mld 0|1] [--fast-leave 0|1] [--mvlan 0|1] [--mvlan-strict 0|1]\n\
          \x20 ponctl [--device ponX] igmp fwd\n\
+         \x20 ponctl [--device ponX] igmp ppe GROUP\n\
          \x20 ponctl [--device ponX] igmp mvlan [list]\n\
          \x20 ponctl [--device ponX] igmp mvlan add|del VID\n\
          \x20 ponctl [--device ponX] igmp mvlan commit [--enable 0|1] [VID...]"
@@ -476,6 +512,44 @@ fn run() -> Result<()> {
                     "proto={} port={} vid={} ver={} grp={}",
                     proto, e.port, e.vid, e.ver, grp
                 );
+            }
+        }
+        "igmp" if arguments.get(1).map(String::as_str) == Some("ppe") => {
+            /*
+             * ponctl igmp ppe 239.1.2.3
+             * ponctl igmp ppe ff02::1
+             *
+             * Reads back the PPE hardware multicast flow for a group. The
+             * provider keys the lookup on the derived multicast MAC only, so
+             * the VLAN the flow was programmed with is irrelevant here.
+             */
+            if arguments.len() != 3 {
+                return Err("usage: ponctl igmp ppe <group>".into());
+            }
+            let (proto, grp) = parse_group(&arguments[2])?;
+            let ifindex = line_ifindex(&device)?;
+            let state = netlink::get_igmp_ppe(ifindex, proto, &grp)?;
+
+            let label = match state.state {
+                netlink::PpeFlowState::Absent => "absent",
+                netlink::PpeFlowState::Present => "present",
+                netlink::PpeFlowState::Probed => "probed",
+            };
+            println!(
+                "proto={} grp={} ppe_state={} port_mask=0x{:x}",
+                if state.proto == 4 { "IGMP" } else { "MLD" },
+                format_group(state.proto, &state.grp),
+                label,
+                state.port_mask
+            );
+            match state.state {
+                netlink::PpeFlowState::Absent => {
+                    println!("hint: no PPE flow; the group is not hardware-offloaded")
+                }
+                netlink::PpeFlowState::Probed => {
+                    println!("hint: flow offloaded but aggregates no LAN port")
+                }
+                netlink::PpeFlowState::Present => {}
             }
         }
         "igmp" if arguments.get(1).map(String::as_str) == Some("mvlan") => {

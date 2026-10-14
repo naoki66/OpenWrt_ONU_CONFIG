@@ -487,9 +487,11 @@ const XPON_CMD_SET_IGMP: u8 = 5;
 const XPON_CMD_GET_IGMP_FWD: u8 = 6;
 const XPON_CMD_SET_IGMP_MVLAN: u8 = 7;
 const XPON_CMD_GET_IGMP_MVLAN: u8 = 8;
+const XPON_CMD_GET_IGMP_PPE: u8 = 9;
 const XPON_ATTR_IGMP_CONFIG: u16 = 9;
 const XPON_ATTR_IGMP_FWD: u16 = 10;
 const XPON_ATTR_IGMP_MVLAN: u16 = 11;
+const XPON_ATTR_IGMP_PPE: u16 = 12;
 
 const XPON_IGMP_MVLAN_OP: u16 = 1;
 const XPON_IGMP_MVLAN_VID: u16 = 2;
@@ -525,6 +527,23 @@ const XPON_IGMP_FWD_PORT: u16 = 4;
 const XPON_IGMP_FWD_VID: u16 = 5;
 const XPON_IGMP_FWD_VER: u16 = 6;
 const XPON_IGMP_FWD_GRP: u16 = 7;
+/// FOE index of the flow. Kept for ABI completeness; the current provider
+/// resolves the flow itself and does not report an index back.
+#[allow(dead_code)]
+const XPON_IGMP_FWD_PPE_INDEX: u16 = 8;
+const XPON_IGMP_FWD_PPE_PORTMASK: u16 = 9;
+const XPON_IGMP_FWD_PPE_STATE: u16 = 10;
+
+/// PPE flow lookup outcome (mirrors XPON_IGMP_PPE_* in the kernel header).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PpeFlowState {
+    /// No hardware flow exists for this group.
+    Absent,
+    /// Flow exists and aggregates at least one LAN port.
+    Present,
+    /// Flow exists but aggregates no port (offloaded, nobody subscribed).
+    Probed,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct IgmpConfig {
@@ -835,4 +854,67 @@ pub fn get_igmp_mvlan(ifindex: u32) -> io::Result<IgmpMvlanState> {
     }
     state.entries.sort_by_key(|e| e.vid);
     Ok(state)
+}
+
+/// Result of a PPE hardware-flow read-back for one multicast group.
+#[derive(Clone, Debug)]
+pub struct IgmpPpeState {
+    pub proto: u8,
+    pub grp: Vec<u8>,
+    pub state: PpeFlowState,
+    /// PPE port bitmap (bit 0 = LAN port 0, ...). Zero when absent.
+    pub port_mask: u32,
+}
+
+/// Look up the hardware multicast flow installed in the PPE for `grp`.
+///
+/// The provider matches flows on the derived multicast MAC alone, so no VLAN
+/// information is needed. A missing flow is reported as `PpeFlowState::Absent`
+/// rather than as an error, which keeps this usable as a scripted check.
+pub fn get_igmp_ppe(ifindex: u32, proto: u8, grp: &[u8]) -> io::Result<IgmpPpeState> {
+    let socket = NetlinkSocket::open()?;
+    let family = socket.family_id(XPON_FAMILY_NAME)?;
+
+    let mut nested = Vec::new();
+    append_attr(&mut nested, XPON_IGMP_FWD_PROTO, &[proto]);
+    append_attr(&mut nested, XPON_IGMP_FWD_GRP, grp);
+
+    let payload = socket.request(
+        family,
+        XPON_CMD_GET_IGMP_PPE,
+        XPON_VERSION,
+        false,
+        &[
+            (XPON_ATTR_IFINDEX, &ifindex.to_ne_bytes()),
+            (XPON_ATTR_IGMP_PPE, &nested),
+        ],
+    )?;
+
+    let mut out = IgmpPpeState {
+        proto,
+        grp: grp.to_vec(),
+        state: PpeFlowState::Absent,
+        port_mask: 0,
+    };
+    for (kind, value) in attrs(&payload)? {
+        if kind != XPON_ATTR_IGMP_PPE {
+            continue;
+        }
+        for (f_kind, f_value) in attrs(value)? {
+            match f_kind {
+                XPON_IGMP_FWD_PPE_STATE if f_value.len() == 1 => {
+                    out.state = match f_value[0] {
+                        1 => PpeFlowState::Present,
+                        2 => PpeFlowState::Probed,
+                        _ => PpeFlowState::Absent,
+                    };
+                }
+                XPON_IGMP_FWD_PPE_PORTMASK if f_value.len() == 4 => {
+                    out.port_mask = u32::from_ne_bytes(f_value.try_into().unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(out)
 }

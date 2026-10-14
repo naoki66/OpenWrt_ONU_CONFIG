@@ -225,8 +225,7 @@ function unicastUpstream() {
 	var service = uci.get('onu-iptv', 'config', 'service_vlan');
 	var multicast = uci.get('onu-iptv', 'config', 'multicast_vlan');
 	var igmp = uci.get('onu-iptv', 'config', 'igmp_vlan');
-	var proxy = uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
-		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
+	var proxy = proxyMode();
 	var vid, idx;
 
 	if (mode === 'trunk') {
@@ -249,8 +248,17 @@ function unicastUpstream() {
 	return 'br-iptv';
 }
 
-function relayButton(label, node) {
-	return '<a class="cbi-button cbi-button-action" href="' + L.url(node) + '">' + label + '</a>';
+/*
+ * True when either multicast proxy is enabled. The proxies terminate the
+ * multicast VLAN themselves and deliver the groups to the LAN untagged, which
+ * is what makes VID 0 the meaningful whitelist entry in that topology.
+ */
+function proxyMode() {
+	return uci.get('onu-iptv', 'config', 'igmp_proxy') === '1' ||
+		uci.get('onu-iptv', 'config', 'mld_proxy') === '1';
+}
+
+function relayButton(label, node) {	return '<a class="cbi-button cbi-button-action" href="' + L.url(node) + '">' + label + '</a>';
 }
 
 /*
@@ -461,11 +469,16 @@ return view.extend({
 	 * The isolation flag alone is a no-op: with the table empty every VLAN
 	 * passes. The entries therefore belong right under it, and the field is a
 	 * plain list so the operator can see exactly what is programmed.
+	 *
+	 * 0 is accepted on purpose. With the IGMP proxy on, the ONU terminates
+	 * the multicast VLAN and hands multicast to the LAN untagged, so the
+	 * driver reports VID 0 for those frames; whitelisting anything else would
+	 * filter out the very traffic the proxy just delivered.
 	 */
 	o = s.taboption('ipv4', form.DynamicList, 'xpon_mvlan_list', _('Isolated multicast VLANs'),
-		_('Service VLAN IDs whose multicast traffic may pass the PON. While the list is empty no filtering happens, so at least one entry is needed for isolation to take effect.'));
-	o.datatype = 'range(1,4094)';
-	o.placeholder = '40';
+		_('Service VLAN IDs whose multicast traffic may pass the PON. Use 0 for the untagged multicast an enabled IGMP proxy delivers to the LAN. While the list is empty no filtering happens, so at least one entry is needed for isolation to take effect.'));
+	o.datatype = 'or("0",range(1,4094))';
+	o.placeholder = proxyMode() ? '0' : '40';
 	o.rmempty = true;
 	o.depends('xpon_mvlan', '1');
 
@@ -477,16 +490,16 @@ return view.extend({
 	}
 
 	o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable bridge IGMP snooping'),
-			_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
-		o.default = '1';
-		o.rmempty = false;
-		o.depends('enabled', '1');
+		_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
+	o.default = '1';
+	o.rmempty = false;
+	o.depends('enabled', '1');
 
-		o = s.taboption('ipv4', form.Flag, 'igmp_proxy', _('Enable IGMP proxy'),
-			_('The ONU joins the groups on behalf of the set-top box instead of bridging the reports. Set-top box mode only: a proxy has to terminate the VLAN, which single cable mode does not do.'));
-		o.default = '0';
-		o.rmempty = false;
-		o.depends({ enabled: '1', mode: 'bridge' });
+	o = s.taboption('ipv4', form.Flag, 'igmp_proxy', _('Enable IGMP proxy'),
+		_('The ONU joins the groups on behalf of the set-top box instead of bridging the reports. Set-top box mode only: a proxy has to terminate the VLAN, which single cable mode does not do.'));
+	o.default = '0';
+	o.rmempty = false;
+	o.depends({ enabled: '1', mode: 'bridge' });
 
 	o = s.taboption('ipv4', form.Flag, 'multicast_querier', _('Enable multicast querier'),
 		_('Recommended together with snooping: the bridge sends its own general queries so group memberships do not time out and interrupt the stream.'));
