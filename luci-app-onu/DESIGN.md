@@ -367,6 +367,40 @@ OMCI 区块里 `model` 紧挨在 `equipment_id` 之下、`hardware_version` 之�
 原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页**最下面一块**（名字沿用
 "PON board data"：它就是写进 Flash 的板级身份文件，与身份字段同类；config 页只留一行指向说明）。
 
+### ONUCAPA（ONU 大类型）放在「PON 模式」而不是「OMCI 设置」
+
+OLT 读 ONU2-G（ME 257）属性 3 的**高字节**判断 ONU 大类型，据此选择开局模板。
+取值 `0` SFU / `1` HGU / `2` SBU，默认 `1`。
+
+它与线路模式同为**线路注册属性**（描述这条线以什么身份注册），而非 OMCI 自身的协商参数，
+所以 UI 放在「PON 模式」板块、线路模式**上方**，UCI 落在 `xpon` 段（`onu_capa`），
+而不是 `omci` 段。这也是它与 `omcc_version`、`disable_enhanced_security` 等兼容性选项分属
+两处的原因。后端读取走 `agent.rs` 显式跨段：`identity.set_onu_capa(line.option("onu_capa"))`。
+
+| 来源 | 编码 |
+| --- | --- |
+| 属性 3 高字节 | `ONUCAPA`：0 SFU / 1 HGU / 2 SBU |
+| 属性 3 低字节 | 子能力位，本用户态不声明，保持 0 |
+
+#### ONUCAPA 是最终裁决，但**不**拿它去裁剪上报实体
+
+> ⚠️ **不要因为 `ONUCAPA != HGU` 就摘掉 VEIP，也不要因为 `ONUCAPA == HGU` 就摘掉 PPTP。**
+> 这个结论我一开始写反了（原注释称两者并存是「类型混淆」），实际正相反。
+
+HGU 同时上报 PPTP(11) 与 VEIP(329) **是功能完整的体现，不是类型混淆**：PPTP 描述设备具备的
+物理 LAN 口，VEIP 描述承载网关业务的虚拟管理接口，二者是同一台设备的两类不同对象，类似一块
+网卡既要报物理端口也要报逻辑管理接口。成熟 OLT 的识别顺序是**优先级判断**，而不是「有 PPTP
+就等于 SFU」：
+
+1. **以 `ONUCAPA` 为最终裁决** —— `0x01`(HGU) 就是 HGU，无论是否上报 PPTP；上报的 PPTP 被
+   理解为「该 HGU 具备的物理 LAN 口」，VEIP 承载其网关业务。反之 `0x00`(SFU) 即使误报了
+   VEIP，OLT 仍按 SFU 处理。
+2. 业务实体（PPTP/VEIP）只作**佐证与补充描述**，用于 OLT 了解设备形态，不用于推翻类型。
+
+所以本仓库的 `mib.rs` 同时 `insert` 两类实体是**正确行为**，无需与 `onu_capa` 联动裁剪。
+现有实现保持不变；切到严格校验的 OLT 时也**不应**按类型摘实体——那会让 OLT 失去对物理口或
+网关口的可见性。
+
 ### 认证方式：LOID 与 Password 是二选一，不是"LOID 是否配置"
 
 **运营商发什么凭据，就用哪种认证方式**，这是运营商的属性而不是 ONU 的偏好：

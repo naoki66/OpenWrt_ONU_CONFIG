@@ -392,6 +392,21 @@ msgstr "已配置"
 msgid "ONU"
 msgstr "ONU"
 
+msgid "ONU type"
+msgstr "ONU 类型"
+
+msgid "SFU"
+msgstr "SFU（单家庭单元）"
+
+msgid "HGU"
+msgstr "HGU（家庭网关单元）"
+
+msgid "SBU"
+msgstr "SBU（单商业单元）"
+
+msgid "Broad ONU class reported to the OLT as ONUCAPA: 0 SFU, 1 HGU (default), 2 SBU."
+msgstr "以 ONUCAPA 上报给 OLT 的 ONU 大类型：0 为 SFU，1 为 HGU（默认），2 为 SBU。"
+
 msgid "OMCI VLAN IDs"
 msgstr "OMCI VLAN ID"
 

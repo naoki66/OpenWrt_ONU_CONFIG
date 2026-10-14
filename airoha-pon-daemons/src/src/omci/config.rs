@@ -25,9 +25,21 @@ impl AuthMode {
     }
 }
 
+/// ONUCAPA code points offered by the interface, in G.988 order.
+///
+/// The OLT reads this field to decide which MEs it may create, so the values are
+/// fixed by the standard rather than chosen here: an SFU is managed through
+/// PPTP UNIs, an HGU through a VEIP, and an SBU is the business-line variant of
+/// the SFU service model.
+pub const ONU_CAPA_SFU: u8 = 0;
+pub const ONU_CAPA_HGU: u8 = 1;
+pub const ONU_CAPA_SBU: u8 = 2;
+
 #[derive(Clone, Debug)]
 pub struct IdentityConfig {
     pub omcc_version: u8,
+    /// ONUCAPA, the broad ONU class the OLT reads to pick a provisioning template.
+    pub onu_capa: u8,
     pub disable_enhanced_security: bool,
     /// Seconds a data path may wait for PLOAM Alloc-IDs before it is reported as failed; 0 never fails.
     pub alloc_id_timeout: u32,
@@ -48,6 +60,7 @@ impl Default for IdentityConfig {
     fn default() -> Self {
         Self {
             omcc_version: 0xb0,
+            onu_capa: ONU_CAPA_HGU,
             disable_enhanced_security: false,
             alloc_id_timeout: 30,
             vendor_id: b"OWRT".to_vec(),
@@ -140,6 +153,26 @@ impl IdentityConfig {
         };
 
         config
+    }
+
+    /// Read the ONUCAPA option that lives on the line section.
+    ///
+    /// The value is kept out of `from_section` on purpose: the interface groups
+    /// it with the line mode, so it is stored on the `xpon` section while every
+    /// other identity field lives on the linked `omci` one. An unset or unknown
+    /// value keeps the default rather than failing the line, because a wrong code
+    /// point here costs the OLT its provisioning template, not the registration.
+    pub fn set_onu_capa(&mut self, value: Option<&str>) {
+        match value {
+            Some("0") => self.onu_capa = ONU_CAPA_SFU,
+            Some("1") => self.onu_capa = ONU_CAPA_HGU,
+            Some("2") => self.onu_capa = ONU_CAPA_SBU,
+            Some("") | None => {}
+            Some(other) => println!(
+                "Invalid OMCI onu_capa {other:?}; using {}",
+                self.onu_capa
+            ),
+        }
     }
 
     /// Whether to expose the vendor CTC LOID Authentication ME to the OLT.
@@ -283,6 +316,40 @@ mod tests {
         .unwrap();
 
         IdentityConfig::from_section(config.linked_section("omci", "line0").unwrap()).omcc_version
+    }
+
+    fn onu_capa_with(value: Option<&str>) -> u8 {
+        let mut identity = IdentityConfig::default();
+
+        identity.set_onu_capa(value);
+
+        identity.onu_capa
+    }
+
+    #[test]
+    fn every_offered_onu_capa_round_trips() {
+        // The interface offers these three classes; each has to survive parsing
+        // unchanged instead of collapsing onto the default.
+        assert_eq!(onu_capa_with(Some("0")), ONU_CAPA_SFU);
+        assert_eq!(onu_capa_with(Some("1")), ONU_CAPA_HGU);
+        assert_eq!(onu_capa_with(Some("2")), ONU_CAPA_SBU);
+    }
+
+    #[test]
+    fn an_unset_onu_capa_stays_an_hgu() {
+        // A line written before this option existed still has to register, and
+        // the home gateway is the class this userspace actually implements.
+        assert_eq!(onu_capa_with(None), ONU_CAPA_HGU);
+        assert_eq!(onu_capa_with(Some("")), ONU_CAPA_HGU);
+        assert_eq!(IdentityConfig::default().onu_capa, ONU_CAPA_HGU);
+    }
+
+    #[test]
+    fn an_unknown_onu_capa_keeps_the_default() {
+        // Code points past the offered set are a different MIB model, not a
+        // typo to guess at, so the line keeps registering as an HGU.
+        assert_eq!(onu_capa_with(Some("3")), ONU_CAPA_HGU);
+        assert_eq!(onu_capa_with(Some("hgu")), ONU_CAPA_HGU);
     }
 
     #[test]

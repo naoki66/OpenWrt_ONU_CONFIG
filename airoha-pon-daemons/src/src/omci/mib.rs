@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::config::{fixed_width, IdentityConfig};
+use super::config::{fixed_width, IdentityConfig, ONU_CAPA_HGU, ONU_CAPA_SBU, ONU_CAPA_SFU};
 use super::protocol::{
     attribute_bit, Request, Response, ACTION_CREATE, ACTION_DELETE, ACTION_GET,
     ACTION_GET_ALL_ALARMS, ACTION_GET_ALL_ALARMS_NEXT, ACTION_GET_CURRENT_DATA, ACTION_GET_NEXT,
@@ -325,10 +325,18 @@ impl Mib {
         } else {
             identity.model.clone()
         };
+        /*
+         * Attribute 3 is the two-octet ONU capability. The high octet is
+         * ONUCAPA, the broad ONU class the OLT provisions from; the low octet is
+         * the finer sub-capability field and stays zero, since this userspace
+         * claims no vendor-specific capability bits. Every class the interface
+         * offers is below 8, so the value goes in as a bare octet.
+         */
+        let onu_capability = [identity.onu_capa, 0u8];
         let onu2_g = ManagedEntity::default()
             .read_only(1, fixed_width(&model_name, 20))
             .read_only(2, vec![identity.omcc_version])
-            .read_only(3, vec![0, 0])
+            .read_only(3, onu_capability.to_vec())
             .read_only(4, vec![1])
             .read_write(5, vec![1])
             .read_only(6, TOTAL_PRIORITY_QUEUE_COUNT.to_be_bytes().to_vec())
@@ -1945,6 +1953,28 @@ mod tests {
             mib.entities[&(CLASS_ONU2_G, 0)].attributes[&1].value,
             fixed_width(b"EQID", 20)
         );
+    }
+
+    #[test]
+    fn the_onu_capa_reaches_the_capability_attribute() {
+        // The OLT provisions from ONUCAPA in the high octet, so the class has to
+        // land there rather than in the low sub-capability octet.
+        for (capa, expected) in [
+            (ONU_CAPA_SFU, vec![0x00, 0x00]),
+            (ONU_CAPA_HGU, vec![0x01, 0x00]),
+            (ONU_CAPA_SBU, vec![0x02, 0x00]),
+        ] {
+            let identity = IdentityConfig {
+                onu_capa: capa,
+                ..IdentityConfig::default()
+            };
+            let mut mib = Mib::from_identity(&identity);
+
+            assert_eq!(
+                mib.entities[&(CLASS_ONU2_G, 0)].attributes[&3].value,
+                expected
+            );
+        }
     }
 
     #[test]

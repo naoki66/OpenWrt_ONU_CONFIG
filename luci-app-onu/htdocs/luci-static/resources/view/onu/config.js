@@ -132,6 +132,26 @@ return view.extend({
 		s.addremove = false;
 		s.description = _('Line mode and registration identity take effect after the PON interface restarts.');
 
+		/*
+		 * ONUCAPA tells the OLT which broad ONU class this is, and the OLT picks
+		 * the provisioning template from it: an SFU is driven through PPTP UNIs,
+		 * an HGU through a VEIP. It sits with the line mode above it rather than
+		 * in the OMCI compatibility tab because it describes how the line
+		 * registers, not how OMCI itself negotiates.
+		 *
+		 * The wire value is the high octet of ONU2-G attribute 3; the low octet
+		 * is the finer sub-capability field, which this userspace leaves clear.
+		 * All three offered classes are below 8, so each encodes as a bare
+		 * octet.
+		 */
+		o = s.option(form.ListValue, 'onu_capa', _('ONU type'));
+		o.default = '1';
+		o.rmempty = false;
+		o.value('0', _('SFU'));
+		o.value('1', _('HGU'));
+		o.value('2', _('SBU'));
+		o.description = _('Broad ONU class reported to the OLT as ONUCAPA: 0 SFU, 1 HGU (default), 2 SBU.');
+
 		o = s.option(form.ListValue, 'mode', _('Line mode'));
 		o.default = 'xgpon';
 		o.rmempty = false;

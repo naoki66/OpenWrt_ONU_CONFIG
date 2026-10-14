@@ -14,6 +14,7 @@ Configuration is stored in `/etc/config/pon`.
 config xpon 'line0'
 	option device 'pon0'
 	option mode 'xgpon'
+	option onu_capa '1'
 	option serial_number 'ABCD12345678'
 	option registration_id ''
 
@@ -52,7 +53,11 @@ config oam 'line0_oam'
 
 `mode` accepts `xgpon`, `xgspon`, `epon-10g-1g` and `epon-10g-10g`. An empty value keeps the current driver mode. `omcc_version` accepts `0x86`, `0xa0`, `0xa8`, `0xb0` and `0xb4`, in either case, and defaults to `0xb0`.
 
+`onu_capa` is ONUCAPA, the broad ONU class carried in the high octet of ONU2-G attribute 3: `0` SFU, `1` HGU, `2` SBU. It defaults to `1` (HGU), which is the class this userspace implements; an empty or unknown value keeps that default. The OLT picks its provisioning template from this field, so it lives on the `xpon` section beside `mode` rather than with the `omci` identity options.
+
 `mode` 支持 `xgpon`、`xgspon`、`epon-10g-1g` 和 `epon-10g-10g`。空值使用驱动当前模式。`omcc_version` 支持 `0x86`、`0xa0`、`0xa8`、`0xb0` 和 `0xb4`（大小写不限），默认 `0xb0`。
+
+`onu_capa` 即 ONUCAPA，是 ONU2-G 属性 3 高字节中的 ONU 大类型：`0` 为 SFU、`1` 为 HGU、`2` 为 SBU，默认 `1`（HGU，即本用户态实际实现的类型）；空值或未知值保持该默认值。OLT 依此字段选择开局模板，因此它与 `mode` 同放在 `xpon` 段，而不放进 `omci` 的身份字段中。
 
 `alloc_id_timeout` is the number of seconds an OMCI data path may wait for PLOAM to assign its Alloc-ID before the data path state becomes `alloc-id-timeout`. The kernel keeps the request, so a later assignment still applies it. `0` disables the timeout.
 

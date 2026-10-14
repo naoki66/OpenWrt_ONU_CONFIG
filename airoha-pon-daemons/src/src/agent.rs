@@ -40,7 +40,9 @@ fn run_line(config_path: &Path, line_name: &str) -> io::Result<()> {
         Protocol::Omci => {
             let section = config.linked_section("omci", line_name)?;
             let interface = required_option(section, "device")?;
-            let identity = omci::IdentityConfig::from_section(section);
+            let mut identity = omci::IdentityConfig::from_section(section);
+            /* ONUCAPA is stored beside the line mode, not with the OMCI options. */
+            identity.set_onu_capa(line.option("onu_capa"));
             println!(
                 "PON agent selected OMCI: line={} interface={} mode={}",
                 line_name,
