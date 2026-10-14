@@ -33,6 +33,8 @@ pub struct IdentityConfig {
     pub alloc_id_timeout: u32,
     pub vendor_id: Vec<u8>,
     pub equipment_id: Vec<u8>,
+    /// Equipment model name from the nameplate, reported with the equipment ID.
+    pub model: Vec<u8>,
     pub hardware_version: Vec<u8>,
     pub software_version: Vec<u8>,
     pub loid: Vec<u8>,
@@ -50,6 +52,7 @@ impl Default for IdentityConfig {
             alloc_id_timeout: 30,
             vendor_id: b"OWRT".to_vec(),
             equipment_id: b"AN7581-XG-PON-ONU".to_vec(),
+            model: b"AN7581-XG-PON-ONU".to_vec(),
             hardware_version: b"AN7581".to_vec(),
             software_version: b"OpenWrt".to_vec(),
             loid: Vec::new(),
@@ -85,6 +88,7 @@ impl IdentityConfig {
         for (name, destination) in [
             ("vendor_id", &mut config.vendor_id),
             ("equipment_id", &mut config.equipment_id),
+            ("model", &mut config.model),
             ("hardware_version", &mut config.hardware_version),
             ("software_version", &mut config.software_version),
             ("loid", &mut config.loid),

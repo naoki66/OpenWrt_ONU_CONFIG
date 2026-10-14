@@ -604,6 +604,16 @@ return view.extend({
 	o.rmempty = true;
 	o.validate = asciiLength(1, 20);
 
+	/*
+	 * The device model is the human-readable equipment name, distinct from the
+	 * EPON OAM short model further down: that one is the four-byte CTC code,
+	 * while this is the full nameplate designation the operator provisions.
+	 */
+	o = s.option(form.Value, 'model', _('Device model'));
+	o.rmempty = true;
+	o.validate = asciiLength(1, 20);
+	o.description = _('Equipment model name from the nameplate, reported to the OLT as the equipment ID.');
+
 	o = s.option(form.Value, 'hardware_version', _('Hardware version'));
 	o.rmempty = true;
 	o.validate = asciiLength(1, 14);
@@ -635,6 +645,7 @@ return view.extend({
 	o = s.option(form.Value, 'model', _('ONU short model'));
 	o.rmempty = true;
 	o.validate = asciiLength(4, 4);
+	o.description = _('Four-character short model code defined by CTC; this is not the nameplate device model.');
 
 	o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
 	o.rmempty = true;

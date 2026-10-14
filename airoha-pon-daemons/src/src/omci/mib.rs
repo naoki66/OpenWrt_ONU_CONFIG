@@ -317,8 +317,16 @@ impl Mib {
         mib.insert(CLASS_ONU_G, 0, onu_g);
 
         // ONU2-G capabilities mirror the autonomous T-CONT, queue, and GEM capacity below.
+        // The equipment ID attribute carries the model name when one is configured,
+        // falling back to the equipment ID so an unset model keeps the previous wire
+        // value instead of advertising an empty name.
+        let model_name = if identity.model.is_empty() {
+            identity.equipment_id.clone()
+        } else {
+            identity.model.clone()
+        };
         let onu2_g = ManagedEntity::default()
-            .read_only(1, fixed_width(&identity.equipment_id, 20))
+            .read_only(1, fixed_width(&model_name, 20))
             .read_only(2, vec![identity.omcc_version])
             .read_only(3, vec![0, 0])
             .read_only(4, vec![1])
@@ -1906,6 +1914,36 @@ mod tests {
         assert_eq!(
             mib.entities[&(CLASS_ETHERNET_PM_HISTORY_DATA, 1)].attributes[&2].value,
             payload
+        );
+    }
+
+    /*
+     * The equipment ID attribute of ONU2-G carries the model name when one is
+     * configured. It must never end up empty: an ONU that advertises a blank
+     * model name is reported as broken by OLT inventory collection, so an
+     * unset model falls back to the equipment ID.
+     */
+    #[test]
+    fn the_model_name_is_reported_as_the_equipment_id() {
+        let mut identity = IdentityConfig {
+            equipment_id: b"EQID".to_vec(),
+            model: b"MY-MODEL".to_vec(),
+            ..IdentityConfig::default()
+        };
+        let mut mib = Mib::from_identity(&identity);
+
+        assert_eq!(
+            mib.entities[&(CLASS_ONU2_G, 0)].attributes[&1].value,
+            fixed_width(b"MY-MODEL", 20)
+        );
+
+        // An unset model keeps the equipment ID instead of advertising blanks.
+        identity.model = Vec::new();
+        let mut mib = Mib::from_identity(&identity);
+
+        assert_eq!(
+            mib.entities[&(CLASS_ONU2_G, 0)].attributes[&1].value,
+            fixed_width(b"EQID", 20)
         );
     }
 

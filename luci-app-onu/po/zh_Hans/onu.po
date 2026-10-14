@@ -845,11 +845,17 @@ msgstr "OAM 接口"
 msgid "IEEE 802.3ah + CTC"
 msgstr "IEEE 802.3ah + CTC"
 
-msgid "ONU model"
-msgstr "ONU 型号"
+msgid "Device model"
+msgstr "设备型号"
+
+msgid "Equipment model name from the nameplate, reported to the OLT as the equipment ID."
+msgstr "铭牌上的设备型号名称，作为 Equipment ID 上报给 OLT。"
 
 msgid "ONU short model"
 msgstr "ONU 短型号"
+
+msgid "Four-character short model code defined by CTC; this is not the nameplate device model."
+msgstr "CTC 定义的 4 字符短型号代码，并非铭牌上的设备型号。"
 
 msgid "Chipset ID"
 msgstr "芯片 ID"

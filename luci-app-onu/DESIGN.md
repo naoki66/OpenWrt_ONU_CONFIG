@@ -326,6 +326,25 @@ LuCI 的 `form.js` 在 `renderTabContainers()` 里只为 **section 内注册的 
 EPON 与 GPON 的字段集合不同（EPON 多了 ONU 短型号、固件版本、芯片 ID、以太网口数量，
 且各字段长度上限不同），因此分两个 section 而不是合并成一个。
 
+#### 设备型号（model）的位置与两义性
+
+OMCI 区块里 `model` 紧挨在 `equipment_id` 之下、`hardware_version` 之上，**顺序与上游
+`luci-app-pon` 的 config.js 一致**（上游 EPON/OAM 侧为 `vendor_id` → `model` →
+`equipment_id` → `hardware_version`）。这里放的是铭牌上的设备型号名称（1–20 字节）。
+
+> ⚠️ **两个区块的 `model` 是两个不同的现场，标签与备注必须区分开。**
+>
+> | 区块 | UI 标签 | 长度 | 备注（`description`） | 上报位置 |
+> | --- | --- | --- | --- | --- |
+> | OMCI | 设备型号 `Device model` | 1–20 | 铭牌上的设备型号名称，作为 Equipment ID 上报给 OLT | ONU2-G equipment ID 属性（属性 1，20 字节） |
+> | EPON OAM | ONU 短型号 `ONU short model` | 严格 4 | CTC 定义的 4 字符短型号代码，并非铭牌上的设备型号 | CTC OAM 短型号（`oam/ctc.rs` 固定 4 字节） |
+>
+> 早期两个 option 共用 `ONU model` / 「ONU 型号」一个标签，用户与维护者都会以为它们
+> 是同一字段的两处展示。**改文案时不要把它们再合并**：长度上限（20 与 4）是二者的硬判据，
+> 备注也必须各自说明「上报到哪」与「不是什么」。
+>
+> OMCI 的 `model` 为空时回落到 `equipment_id`，因此不填不会把 equipment ID 属性打成全零。
+
 #### 序列号（SN）从「PON 线路」移到这里
 
 序列号是**ONU 向 OLT 注册用的身份**，与板级身份同属一类，因此放在 ONU 身份—OMCI 区块，
