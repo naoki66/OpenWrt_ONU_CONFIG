@@ -955,38 +955,26 @@ reload_runtime() {
 	fi
 }
 
-# The MVLAN table is a plain list, and reprogramming it needs both halves:
-# entries that were removed have to be deleted, otherwise an old VLAN keeps
-# passing multicast after the operator took it out of the UI.  The kernel
-# reports the configured table in the same vid=N form, so a naive
-# "add everything, delete nothing" loop would leak.  Delete from the live
-# set, then add from the configuration.
+# The MVLAN table is a plain list, so a change is a replacement, not a patch.
+# Everything goes out as one atomic commit: the kernel fills the table and
+# only then raises the enable flag, so no window exists where the flag is on
+# but the table is still empty (which would let every VLAN through) or the
+# table is filled but the flag is off (no filter at all).
+#
+# Sending the list also covers the delete side, which a naive "add the
+# configured vids" loop would miss: a VLAN the operator removed from the UI
+# would otherwise keep passing multicast.
 apply_mvlan_entries() {
-	local wanted="$XPON_MVLAN_LIST"
-	local live vid
+	local vids=""
+	local vid
 
-	if [ "$XPON_MVLAN" -ne 1 ]; then
-		# Isolation off: drop every entry so the empty table means "no filter".
-		live=$(airoha-ponctl igmp mvlan 2>/dev/null | sed -n 's/^vid=\([0-9]*\).*/\1/p')
-		for vid in $live; do
-			airoha-ponctl igmp mvlan del "$vid" >/dev/null 2>&1 || true
-		done
-		return 0
+	if [ "$XPON_MVLAN" -eq 1 ]; then
+		vids="$XPON_MVLAN_LIST"
 	fi
 
-	live=$(airoha-ponctl igmp mvlan 2>/dev/null | sed -n 's/^vid=\([0-9]*\).*/\1/p')
-	for vid in $live; do
-		case " $wanted " in
-			*" $vid "*) ;;
-			*) airoha-ponctl igmp mvlan del "$vid" >/dev/null 2>&1 || \
-				warn "PON MVLAN delete $vid failed" ;;
-		esac
-	done
-
-	for vid in $wanted; do
-		airoha-ponctl igmp mvlan add "$vid" >/dev/null 2>&1 || \
-			warn "PON MVLAN add $vid failed"
-	done
+	# shellcheck disable=SC2086
+	airoha-ponctl igmp mvlan commit --enable "$XPON_MVLAN" $vids \
+		>/dev/null 2>&1 || warn "PON MVLAN commit failed"
 }
 
 load_iptv_config
