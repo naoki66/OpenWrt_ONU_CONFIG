@@ -78,6 +78,7 @@ load_iptv_config() {
 	config_get_bool XPON_SNOOPING config xpon_snooping 0
 	config_get_bool XPON_FAST_LEAVE config xpon_fast_leave 0
 	config_get_bool XPON_MVLAN config xpon_mvlan 0
+	config_get XPON_MVLAN_LIST config xpon_mvlan_list
 	config_get_bool MLD_SNOOPING config mld_snooping 0
 	config_get_bool IGMP_PROXY config igmp_proxy 0
 	config_get_bool MLD_PROXY config mld_proxy 0
@@ -947,10 +948,45 @@ reload_runtime() {
 				$([ "$XPON_FAST_LEAVE" -eq 1 ] && echo '--fast-leave 1') \
 				$([ "$XPON_MVLAN" -eq 1 ] && echo '--mvlan 1') \
 				>/dev/null 2>&1 || warn "PON IGMP snooping enable failed"
+			apply_mvlan_entries
 		else
 			airoha-ponctl igmp set --enable 0 >/dev/null 2>&1 || true
 		fi
 	fi
+}
+
+# The MVLAN table is a plain list, and reprogramming it needs both halves:
+# entries that were removed have to be deleted, otherwise an old VLAN keeps
+# passing multicast after the operator took it out of the UI.  The kernel
+# reports the configured table in the same vid=N form, so a naive
+# "add everything, delete nothing" loop would leak.  Delete from the live
+# set, then add from the configuration.
+apply_mvlan_entries() {
+	local wanted="$XPON_MVLAN_LIST"
+	local live vid
+
+	if [ "$XPON_MVLAN" -ne 1 ]; then
+		# Isolation off: drop every entry so the empty table means "no filter".
+		live=$(airoha-ponctl igmp mvlan 2>/dev/null | sed -n 's/^vid=\([0-9]*\).*/\1/p')
+		for vid in $live; do
+			airoha-ponctl igmp mvlan del "$vid" >/dev/null 2>&1 || true
+		done
+		return 0
+	fi
+
+	live=$(airoha-ponctl igmp mvlan 2>/dev/null | sed -n 's/^vid=\([0-9]*\).*/\1/p')
+	for vid in $live; do
+		case " $wanted " in
+			*" $vid "*) ;;
+			*) airoha-ponctl igmp mvlan del "$vid" >/dev/null 2>&1 || \
+				warn "PON MVLAN delete $vid failed" ;;
+		esac
+	done
+
+	for vid in $wanted; do
+		airoha-ponctl igmp mvlan add "$vid" >/dev/null 2>&1 || \
+			warn "PON MVLAN add $vid failed"
+	done
 }
 
 load_iptv_config

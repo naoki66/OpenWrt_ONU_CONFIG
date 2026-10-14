@@ -275,12 +275,14 @@ return view.extend({
 			uci.load('onu-internet'),
 			uci.load('onu-voice'),
 			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'show']).catch(function() { return { stdout: '' }; }),
-			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'fwd']).catch(function() { return { stdout: '' }; })
+			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'fwd']).catch(function() { return { stdout: '' }; }),
+			fs.exec('/usr/sbin/airoha-ponctl', ['igmp', 'mvlan']).catch(function() { return { stdout: '' }; })
 		]).then(function(results) {
 			return {
 				devices: results[0],
 				igmpStatus: results[5].stdout || '',
-				igmpFwd: results[6].stdout || ''
+				igmpFwd: results[6].stdout || '',
+				igmpMvlan: results[7].stdout || ''
 			};
 		});
 	},
@@ -289,6 +291,7 @@ return view.extend({
 		var devices = data.devices;
 		var igmpStatus = data.igmpStatus;
 		var igmpFwd = data.igmpFwd;
+		var igmpMvlan = data.igmpMvlan;
 		var m, s, o, currentPort, currentTrunkPort, lanPorts, trunkPorts;
 		var dedicatedTaken, trunkTaken;
 
@@ -453,6 +456,25 @@ return view.extend({
 	o.default = '0';
 	o.rmempty = false;
 	o.depends('xpon_snooping', '1');
+
+	/*
+	 * The isolation flag alone is a no-op: with the table empty every VLAN
+	 * passes. The entries therefore belong right under it, and the field is a
+	 * plain list so the operator can see exactly what is programmed.
+	 */
+	o = s.taboption('ipv4', form.DynamicList, 'xpon_mvlan_list', _('Isolated multicast VLANs'),
+		_('Service VLAN IDs whose multicast traffic may pass the PON. While the list is empty no filtering happens, so at least one entry is needed for isolation to take effect.'));
+	o.datatype = 'range(1,4094)';
+	o.placeholder = '40';
+	o.rmempty = true;
+	o.depends('xpon_mvlan', '1');
+
+	if (igmpMvlan) {
+		o = s.taboption('ipv4', form.DummyValue, '_xpon_igmp_mvlan', _('PON multicast VLAN table'),
+			_('Live state from airoha-ponctl igmp mvlan.'));
+		o.rawhtml = true;
+		o.cfgvalue = function() { return '<pre>' + igmpMvlan + '</pre>'; };
+	}
 
 	o = s.taboption('ipv4', form.Flag, 'igmp_snooping', _('Enable bridge IGMP snooping'),
 			_('The bridge learns which port joined a group and stops flooding multicast to the remaining ports.'));
