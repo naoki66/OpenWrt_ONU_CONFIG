@@ -501,10 +501,13 @@ return view.extend({
 		o = s.option(form.ListValue, 'mode', _('Line mode'));
 		o.default = 'xgpon';
 		o.rmempty = false;
-		o.value('gpon', _('GPON 2.5G/1.25G'));
+		/*
+		 * GPON 2.5G/1.25G and EPON 1G/1G are masked out of this build: only the
+		 * 10G line modes are offered. Both values stay valid in the daemons, so a
+		 * board configured with either one still runs.
+		 */
 		o.value('xgpon', _('XG-PON 10G/2.5G'));
 		o.value('xgspon', _('XGS-PON 10G/10G'));
-		o.value('epon-1g', _('EPON 1G/1G'));
 		o.value('epon-10g-1g', _('10G-EPON 10G/1G'));
 		o.value('epon-10g-10g', _('10G-EPON 10G/10G'));
 		o.description = _('Choose the mode according to the carrier\'s requirements.');
