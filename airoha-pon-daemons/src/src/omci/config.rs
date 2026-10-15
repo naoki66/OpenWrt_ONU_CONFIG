@@ -25,21 +25,128 @@ impl AuthMode {
     }
 }
 
-/// ONUCAPA code points offered by the interface, in G.988 order.
+/// ONU type code points, in the order the carrier specs define them.
 ///
-/// The OLT reads this field to decide which MEs it may create, so the values are
-/// fixed by the standard rather than chosen here: an SFU is managed through
-/// PPTP UNIs, an HGU through a VEIP, and an SBU is the business-line variant of
-/// the SFU service model.
-pub const ONU_CAPA_SFU: u8 = 0;
-pub const ONU_CAPA_HGU: u8 = 1;
-pub const ONU_CAPA_SBU: u8 = 2;
+/// The OLT reads this to decide which provisioning template it applies: an SFU
+/// is managed through PPTP UNIs, an HGU through a VEIP, and an SBU is the
+/// business-line variant of the SFU service model. The code points are fixed by
+/// the carrier specifications rather than chosen here.
+pub const ONU_TYPE_SFU: u8 = 0;
+pub const ONU_TYPE_HGU: u8 = 1;
+pub const ONU_TYPE_SBU: u8 = 2;
+
+/// Tx power supply control code point reported by the capability ME.
+///
+/// 0 is "no independent power control". This userspace implements none, so the
+/// line does not claim any: the vendor stacks default to 2 (independent Tx and
+/// Rx power control) because their driver implements it.
+pub const ONU_TX_POWER_CONTROL_NONE: u8 = 0;
+
+/// One carrier's ONU capability ME.
+///
+/// Both Chinese carrier specs carry the same four attributes in the same order
+/// - operator ID, spec version, ONU type, Tx power supply control - and differ
+/// in the class and in the operator ID string, so one shape with a few
+/// constants describes either of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CapabilityMe {
+    pub class_id: u16,
+    pub operator_id: &'static [u8],
+    /// Spec version reported when the line does not name one.
+    pub spec_version: u8,
+}
+
+/// China Telecom ONU capability, class 0xFFF9.
+///
+/// Telecom's spec-version field is left at the baseline the reference stack
+/// ships (0), and the operator ID is the one the reference writes.
+pub const CTC_ONU_CAPABILITY: CapabilityMe = CapabilityMe {
+    class_id: 0xfff9,
+    operator_id: b"CTC",
+    spec_version: 0,
+};
+
+/// China Unicom ONU capability, class 0xFFB1.
+///
+/// Unicom numbers its spec versions V3 through V6; the reference stack reports
+/// V6, which is the code point 3.
+pub const CUC_ONU_CAPABILITY: CapabilityMe = CapabilityMe {
+    class_id: 0xffb1,
+    operator_id: b"CUC",
+    spec_version: 3,
+};
+
+/// Which carrier capability ME, if any, a line offers.
+///
+/// The capability ME is where an OLT learns the ONU class, and the carriers do
+/// not share one. Both equipment-side references available here - the Realtek
+/// OMCI source and the Airoha OMCI adapter - implement a capability ME for
+/// Telecom (0xFFF9) and a second one for Unicom (0xFFB1), and neither
+/// implements a China Mobile one, so Mobile lines keep the standard MIB and the
+/// OLT its own template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CarrierProfile {
+    /// Every capability ME this userspace knows. Each OLT reads its own class
+    /// and ignores the other, so one image serves all of them.
+    Auto,
+    Ctc,
+    Cuc,
+    /// China Mobile: no capability ME, because no reference defines one here.
+    Cmcc,
+}
+
+impl CarrierProfile {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Ctc => "ctc",
+            Self::Cuc => "cuc",
+            Self::Cmcc => "cmcc",
+        }
+    }
+
+    /// Parse the `carrier` option. An unset or unknown value keeps the default
+    /// rather than failing the line: a profile only decides which capability ME
+    /// is offered, so guessing wrong costs a template, not the registration.
+    pub fn from_option(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some("ctc") => Self::Ctc,
+            Some("cuc") => Self::Cuc,
+            Some("cmcc") => Self::Cmcc,
+            Some("") | Some("auto") | None => Self::Auto,
+            Some(other) => {
+                println!("Invalid OMCI carrier {other:?}; using {}", Self::Auto.name());
+                Self::Auto
+            }
+        }
+    }
+
+    /// The capability MEs this profile offers.
+    pub fn capabilities(self) -> &'static [CapabilityMe] {
+        match self {
+            Self::Auto => &[CTC_ONU_CAPABILITY, CUC_ONU_CAPABILITY],
+            Self::Ctc => &[CTC_ONU_CAPABILITY],
+            Self::Cuc => &[CUC_ONU_CAPABILITY],
+            Self::Cmcc => &[],
+        }
+    }
+
+    pub fn advertises(self, class_id: u16) -> bool {
+        self.capabilities()
+            .iter()
+            .any(|capability| capability.class_id == class_id)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct IdentityConfig {
     pub omcc_version: u8,
-    /// ONUCAPA, the broad ONU class the OLT reads to pick a provisioning template.
-    pub onu_capa: u8,
+    /// ONU type reported in the carrier capability ME.
+    pub onu_type: u8,
+    /// Which carrier capability ME the line offers.
+    pub carrier: CarrierProfile,
+    /// Spec version byte for that ME; unset follows the carrier's default.
+    pub carrier_spec: Option<u8>,
     pub disable_enhanced_security: bool,
     /// Seconds a data path may wait for PLOAM Alloc-IDs before it is reported as failed; 0 never fails.
     pub alloc_id_timeout: u32,
@@ -60,7 +167,9 @@ impl Default for IdentityConfig {
     fn default() -> Self {
         Self {
             omcc_version: 0xb0,
-            onu_capa: ONU_CAPA_HGU,
+            onu_type: ONU_TYPE_HGU,
+            carrier: CarrierProfile::Auto,
+            carrier_spec: None,
             disable_enhanced_security: false,
             alloc_id_timeout: 30,
             vendor_id: b"OWRT".to_vec(),
@@ -155,24 +264,55 @@ impl IdentityConfig {
         config
     }
 
-    /// Read the ONUCAPA option that lives on the line section.
+    /// Read the ONU type reported in the carrier capability ME.
     ///
     /// The value is kept out of `from_section` on purpose: the interface groups
     /// it with the line mode, so it is stored on the `xpon` section while every
     /// other identity field lives on the linked `omci` one. An unset or unknown
     /// value keeps the default rather than failing the line, because a wrong code
     /// point here costs the OLT its provisioning template, not the registration.
-    pub fn set_onu_capa(&mut self, value: Option<&str>) {
-        match value {
-            Some("0") => self.onu_capa = ONU_CAPA_SFU,
-            Some("1") => self.onu_capa = ONU_CAPA_HGU,
-            Some("2") => self.onu_capa = ONU_CAPA_SBU,
+    pub fn set_onu_type(&mut self, value: Option<&str>) {
+        match value.map(str::trim) {
+            Some("0") => self.onu_type = ONU_TYPE_SFU,
+            Some("1") => self.onu_type = ONU_TYPE_HGU,
+            Some("2") => self.onu_type = ONU_TYPE_SBU,
             Some("") | None => {}
-            Some(other) => println!(
-                "Invalid OMCI onu_capa {other:?}; using {}",
-                self.onu_capa
-            ),
+            Some(other) => println!("Invalid OMCI onu_type {other:?}; using {}", self.onu_type),
         }
+    }
+
+    /// Read which carrier capability ME the line offers.
+    ///
+    /// Like the ONU type it lives on the line section, because it describes how
+    /// the line registers with the operator rather than how OMCI negotiates.
+    pub fn set_carrier(&mut self, value: Option<&str>) {
+        self.carrier = CarrierProfile::from_option(value);
+    }
+
+    /// Read the operator spec version byte, when the line names one.
+    ///
+    /// Operators revise their capability ME between spec versions, so the value
+    /// is a byte rather than a boolean; an unset option keeps the default each
+    /// carrier ships, and an unparsable one is reported and ignored.
+    pub fn set_carrier_spec(&mut self, value: Option<&str>) {
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let parsed = value
+            .strip_prefix("0x")
+            .or_else(|| value.strip_prefix("0X"))
+            .map(|hex| u8::from_str_radix(hex, 16))
+            .unwrap_or_else(|| value.parse());
+
+        match parsed {
+            Ok(spec) => self.carrier_spec = Some(spec),
+            Err(_) => println!("Invalid OMCI carrier_spec {value:?}; using the carrier default"),
+        }
+    }
+
+    /// The spec version byte to report for one capability ME.
+    pub fn spec_version_for(&self, capability: &CapabilityMe) -> u8 {
+        self.carrier_spec.unwrap_or(capability.spec_version)
     }
 
     /// Whether to expose the vendor CTC LOID Authentication ME to the OLT.
@@ -318,38 +458,128 @@ mod tests {
         IdentityConfig::from_section(config.linked_section("omci", "line0").unwrap()).omcc_version
     }
 
-    fn onu_capa_with(value: Option<&str>) -> u8 {
+    fn onu_type_with(value: Option<&str>) -> u8 {
         let mut identity = IdentityConfig::default();
 
-        identity.set_onu_capa(value);
+        identity.set_onu_type(value);
 
-        identity.onu_capa
+        identity.onu_type
     }
 
     #[test]
-    fn every_offered_onu_capa_round_trips() {
-        // The interface offers these three classes; each has to survive parsing
+    fn every_offered_onu_type_round_trips() {
+        // The interface offers these three types; each has to survive parsing
         // unchanged instead of collapsing onto the default.
-        assert_eq!(onu_capa_with(Some("0")), ONU_CAPA_SFU);
-        assert_eq!(onu_capa_with(Some("1")), ONU_CAPA_HGU);
-        assert_eq!(onu_capa_with(Some("2")), ONU_CAPA_SBU);
+        assert_eq!(onu_type_with(Some("0")), ONU_TYPE_SFU);
+        assert_eq!(onu_type_with(Some("1")), ONU_TYPE_HGU);
+        assert_eq!(onu_type_with(Some("2")), ONU_TYPE_SBU);
     }
 
     #[test]
-    fn an_unset_onu_capa_stays_an_hgu() {
+    fn an_unset_onu_type_stays_an_hgu() {
         // A line written before this option existed still has to register, and
         // the home gateway is the class this userspace actually implements.
-        assert_eq!(onu_capa_with(None), ONU_CAPA_HGU);
-        assert_eq!(onu_capa_with(Some("")), ONU_CAPA_HGU);
-        assert_eq!(IdentityConfig::default().onu_capa, ONU_CAPA_HGU);
+        assert_eq!(onu_type_with(None), ONU_TYPE_HGU);
+        assert_eq!(onu_type_with(Some("")), ONU_TYPE_HGU);
+        assert_eq!(IdentityConfig::default().onu_type, ONU_TYPE_HGU);
     }
 
     #[test]
-    fn an_unknown_onu_capa_keeps_the_default() {
+    fn an_unknown_onu_type_keeps_the_default() {
         // Code points past the offered set are a different MIB model, not a
         // typo to guess at, so the line keeps registering as an HGU.
-        assert_eq!(onu_capa_with(Some("3")), ONU_CAPA_HGU);
-        assert_eq!(onu_capa_with(Some("hgu")), ONU_CAPA_HGU);
+        assert_eq!(onu_type_with(Some("3")), ONU_TYPE_HGU);
+        assert_eq!(onu_type_with(Some("hgu")), ONU_TYPE_HGU);
+    }
+
+    fn carrier_with(value: Option<&str>) -> CarrierProfile {
+        let mut identity = IdentityConfig::default();
+
+        identity.set_carrier(value);
+
+        identity.carrier
+    }
+
+    #[test]
+    fn every_offered_carrier_round_trips() {
+        assert_eq!(carrier_with(Some("ctc")), CarrierProfile::Ctc);
+        assert_eq!(carrier_with(Some("cuc")), CarrierProfile::Cuc);
+        assert_eq!(carrier_with(Some("cmcc")), CarrierProfile::Cmcc);
+        assert_eq!(carrier_with(Some(" auto ")), CarrierProfile::Auto);
+    }
+
+    #[test]
+    fn an_unset_carrier_offers_every_capability_me() {
+        // No decision means the line works on any of the operators this
+        // userspace has a capability ME for.
+        assert_eq!(carrier_with(None), CarrierProfile::Auto);
+        assert_eq!(carrier_with(Some("")), CarrierProfile::Auto);
+        assert_eq!(IdentityConfig::default().carrier, CarrierProfile::Auto);
+        assert_eq!(
+            CarrierProfile::Auto.capabilities(),
+            &[CTC_ONU_CAPABILITY, CUC_ONU_CAPABILITY]
+        );
+    }
+
+    #[test]
+    fn a_named_carrier_offers_only_its_own_capability_me() {
+        assert_eq!(
+            CarrierProfile::Ctc.capabilities(),
+            &[CTC_ONU_CAPABILITY]
+        );
+        assert_eq!(
+            CarrierProfile::Cuc.capabilities(),
+            &[CUC_ONU_CAPABILITY]
+        );
+        // No reference here defines a China Mobile capability ME, so the line
+        // keeps the standard MIB rather than claiming one it cannot fill in.
+        assert!(CarrierProfile::Cmcc.capabilities().is_empty());
+        assert!(!CarrierProfile::Cmcc.advertises(CTC_ONU_CAPABILITY.class_id));
+        assert!(CarrierProfile::Auto.advertises(CUC_ONU_CAPABILITY.class_id));
+    }
+
+    #[test]
+    fn an_unknown_carrier_keeps_every_capability_me() {
+        // A typo must not strand the line without a capability ME: the OLT would
+        // fall back to its own template, which is the behaviour this option
+        // exists to fix.
+        assert_eq!(carrier_with(Some("telecom")), CarrierProfile::Auto);
+    }
+
+    #[test]
+    fn the_capability_me_carries_its_carrier_identity() {
+        assert_eq!(CTC_ONU_CAPABILITY.class_id, 0xfff9);
+        assert_eq!(CTC_ONU_CAPABILITY.operator_id, b"CTC");
+        assert_eq!(CUC_ONU_CAPABILITY.class_id, 0xffb1);
+        assert_eq!(CUC_ONU_CAPABILITY.operator_id, b"CUC");
+    }
+
+    #[test]
+    fn the_spec_version_follows_the_line_then_the_carrier() {
+        let mut identity = IdentityConfig::default();
+
+        assert_eq!(identity.spec_version_for(&CTC_ONU_CAPABILITY), 0);
+        assert_eq!(identity.spec_version_for(&CUC_ONU_CAPABILITY), 3);
+
+        identity.set_carrier_spec(Some("2"));
+
+        assert_eq!(identity.spec_version_for(&CTC_ONU_CAPABILITY), 2);
+        assert_eq!(identity.spec_version_for(&CUC_ONU_CAPABILITY), 2);
+    }
+
+    #[test]
+    fn an_unknown_spec_version_keeps_the_carrier_default() {
+        let mut identity = IdentityConfig::default();
+
+        identity.set_carrier_spec(Some(""));
+        assert_eq!(identity.spec_version_for(&CUC_ONU_CAPABILITY), 3);
+
+        identity.set_carrier_spec(Some("0x21"));
+        assert_eq!(identity.spec_version_for(&CUC_ONU_CAPABILITY), 0x21);
+
+        identity.set_carrier_spec(Some("v6"));
+        assert_eq!(identity.spec_version_for(&CUC_ONU_CAPABILITY), 0x21);
+        assert_eq!(identity.carrier_spec, Some(0x21));
     }
 
     #[test]

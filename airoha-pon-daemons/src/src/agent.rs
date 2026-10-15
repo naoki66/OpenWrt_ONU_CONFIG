@@ -41,8 +41,20 @@ fn run_line(config_path: &Path, line_name: &str) -> io::Result<()> {
             let section = config.linked_section("omci", line_name)?;
             let interface = required_option(section, "device")?;
             let mut identity = omci::IdentityConfig::from_section(section);
-            /* ONUCAPA is stored beside the line mode, not with the OMCI options. */
-            identity.set_onu_capa(line.option("onu_capa"));
+            /*
+             * The reported ONU class and the carrier it is reported to are
+             * stored beside the line mode, not with the OMCI options, because
+             * they describe how the line registers rather than how OMCI
+             * negotiates. A line written before `onu_type` existed still
+             * carries the old `onu_capa` name, so that is read as a fallback.
+             */
+            identity.set_carrier(line.option("carrier"));
+            identity.set_carrier_spec(line.option("carrier_spec"));
+            identity.set_onu_type(
+                line.option("onu_type")
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| line.option("onu_capa")),
+            );
             println!(
                 "PON agent selected OMCI: line={} interface={} mode={}",
                 line_name,

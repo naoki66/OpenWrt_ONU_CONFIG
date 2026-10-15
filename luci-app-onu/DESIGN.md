@@ -367,39 +367,87 @@ OMCI 区块里 `model` 紧挨在 `equipment_id` 之下、`hardware_version` 之�
 原 configuration 页末尾的「PON board data」上传卡片也已移入硬件身份页**最下面一块**（名字沿用
 "PON board data"：它就是写进 Flash 的板级身份文件，与身份字段同类；config 页只留一行指向说明）。
 
-### ONUCAPA（ONU 大类型）放在「PON 模式」而不是「OMCI 设置」
+#### 身份字段留空 = 按设备自报，不是占位常量
 
-OLT 读 ONU2-G（ME 257）属性 3 的**高字节**判断 ONU 大类型，据此选择开局模板。
-取值 `0` SFU / `1` HGU / `2` SBU，默认 `1`。
+硬件身份页的身份字段（`vendor_id` / `equipment_id` / `model` / `hardware_version` /
+`software_version`）留空时**不是**写死成占位值，而是由守护进程按这台设备本身补齐，因此页面上的
+空框读作「按设备真实身份上报」：
 
-它与线路模式同为**线路注册属性**（描述这条线以什么身份注册），而非 OMCI 自身的协商参数，
-所以 UI 放在「PON 模式」板块、线路模式**上方**，UCI 落在 `xpon` 段（`onu_capa`），
-而不是 `omci` 段。这也是它与 `omcc_version`、`disable_enhanced_security` 等兼容性选项分属
-两处的原因。后端读取走 `agent.rs` 显式跨段：`identity.set_onu_capa(line.option("onu_capa"))`。
+| 字段 | 留空时的取值 | 为什么 |
+| --- | --- | --- |
+| `vendor_id`（厂商 ID） | 注册所用序列号的前四个字节（`xpon/active_serial_number`） | G.988 就把 ONU-G 属性 1 定义为序列号的厂商字节；上报别的值会和 OLT 刚注册的 SN 自相矛盾 |
+| `equipment_id` / `model`（设备标识 / 设备型号） | 板型名称（`/tmp/sysinfo/model`，如 `Gemtek XG2010G`） | 铭牌型号是 OLT 台账要的名字，`AN7581-XG-PON-ONU` 这类占位串不是 |
+| `hardware_version`（硬件版本） | 板型名称 | 上报 SoC 名（`AN7581`）对 OLT 台账没有意义 |
+| `software_version`（软件版本，即主/备软件版本） | 当前镜像的发布版本（`/etc/openwrt_release`，如 `23.05.4`；开发版取 `DISTRIB_REVISION`） | ME 7 的两个 image 报同一个版本，占位写 `OpenWrt` 等于没有版本信息 |
 
-| 来源 | 编码 |
-| --- | --- |
-| 属性 3 高字节 | `ONUCAPA`：0 SFU / 1 HGU / 2 SBU |
-| 属性 3 低字节 | 子能力位，本用户态不声明，保持 0 |
+显式填写的值始终优先；只有连系统也答不上来时，才回落到 `OWRT` / `AN7581-XG-PON-ONU` /
+`AN7581` / `OpenWrt`。OAM 侧同理只补 `vendor_id`、`software_version`、`firmware_version`，
+CTC 的 `model`、`hardware_version`、`chipset_id` 是定长编码，保持各自默认值。
 
-#### ONUCAPA 是最终裁决，但**不**拿它去裁剪上报实体
+### ONU 类型与运营商制式：走「ONU 能力」ME，不走 ONU2-G 属性 3
 
-> ⚠️ **不要因为 `ONUCAPA != HGU` 就摘掉 VEIP，也不要因为 `ONUCAPA == HGU` 就摘掉 PPTP。**
-> 这个结论我一开始写反了（原注释称两者并存是「类型混淆」），实际正相反。
+> ⚠️ **ONU2-G（ME 257）属性 3 不是 ONU 类型。** 它是 **vendor product code**（厂商产品码，
+> 2 字节）：G.988 的定义（本地 `omci-lib-go` 生成代码）与厂商参考实现（`_omci_ref` 的
+> `mib_Ont2g.h` 把该属性命名为 `VPCode`，`omci_PonResetOntGOnt2G()` 也只填设备号、队列数与
+> GEM 数）都这么写。曾经把 SFU/HGU/SBU 写进该属性高字节的 `onu_capa` 实现**已经删除**：
+> OLT 不会从那里读类型，改它不会有任何效果（真机现象就是「下拉框怎么改都还是 SFU」）。
+
+OLT 判断 ONU 大类型读的是运营商规范的 **「ONU 能力」（ONU capability）ME**，三家的类号与
+规范版本各不相同：
+
+| 运营商 | ME 类号 | 属性（顺序） |
+| --- | --- | --- |
+| 中国电信 CTC | `0xFFF9` | operator ID(`CTC`) / 规范版本 / ONU 类型 / Tx 供电控制 |
+| 中国联通 CUC | `0xFFB1` | operator ID(`CUC`) / 规范版本 / ONU 类型 / Tx 供电控制 |
+| 中国移动 CMCC | **无** | 两份厂商参考（Realtek OMCI 源码、Airoha OMCI 适配库）都没有移动的能力 ME |
+
+ONU 类型取值三家一致：`0` SFU / `1` HGU / `2` SBU（电信另有 CBU/MDU/MTU/RSD 的扩展取值）。
+
+#### 落点：`carrier` + `onu_type` 放在「PON 模式」，`carrier_spec` 只走配置文件
+
+它们与线路模式同为**线路注册属性**（描述这条线以什么身份注册），因此 UI 放在「PON 模式」
+板块、线路模式之上，UCI 落在 `xpon` 段，而不是 `omci` 段。后端读取走 `agent.rs` 显式跨段：
+
+```rust
+identity.set_carrier(line.option("carrier"));
+identity.set_carrier_spec(line.option("carrier_spec"));
+identity.set_onu_type(line.option("onu_type").or_else(|| line.option("onu_capa")));
+```
+
+最后一行保留 `onu_capa` 作为**旧名的回落值**，让已经写好的配置继续生效。
+
+| 选项 | 含义 | 默认 |
+| --- | --- | --- |
+| `carrier` | `auto` / `ctc` / `cuc` / `cmcc`：提供哪家的能力 ME | `auto`（两家都提供） |
+| `onu_type` | 能力 ME 中上报的类别：0 SFU / 1 HGU / 2 SBU | `1`（HGU） |
+| `carrier_spec` | 规范版本字节覆盖（配置文件选项，未进 UI） | 空 = 电信 `0`、联通 `3` |
+
+`auto` 同时上报电信与联通的能力 ME：各 OLT 只读自己那一类，读不到就当未知 ME，所以一份固件
+可以同时兼容两家。`cmcc` 不额外上报任何能力 ME，保持标准 MIB，类型由移动 OLT 自己的模板
+决定——**这一条是当前实现的边界**：如果移动侧实际要求某个能力 ME，只需要在
+`config.rs` 的 `CarrierProfile::capabilities()` 里补一行（类号 + operator ID + 规范版本），
+`schema.rs` 再补对应的 ME 定义即可，其余逻辑（class table 广告、实体的插入与「未知 ME」应答）
+都已按数据表驱动写好了。
+
+确认移动侧到底读哪个类号的办法：在移动 OLT 上删掉这台 ONU 后重新注册，同时
+`pondctl events --line line0` 抓 OLT 的请求，看有没有对某个 `class=` 的 GET。
+
+重建后同样可以验证电信/联通这条链路：OLT 侧删掉 ONU 重新注册，`pondctl events --line line0`
+里应出现 `class=65529`（0xFFF9，电信）或 `class=65457`（0xFFB1，联通）的 GET，并且 OLT 侧
+的 ONU 类型应从 SFU 变成能力 ME 里声明的那一类。**类型是开局属性**：OLT 只在注册/MIB upload
+时读一次并缓存，所以改完必须让 OLT 重新识别，只重启 ONU 不会刷新 OLT 的显示。
+
+> EPON 侧的同类信息在 CTC OAM 的 ONU 能力叶子里（`oam/ctc.rs`）。那一侧目前仍按 HGU 写死，
+> 本次只改 OMCI 侧；EPON 线路要跟 `onu_type` 联动，需要按 CTC OAM 的叶子布局另做一次。
+
+#### 不按类型裁剪上报实体
+
+> ⚠️ **不要因为 `onu_type != HGU` 就摘掉 VEIP，也不要因为 `onu_type == HGU` 就摘掉 PPTP。**
 
 HGU 同时上报 PPTP(11) 与 VEIP(329) **是功能完整的体现，不是类型混淆**：PPTP 描述设备具备的
-物理 LAN 口，VEIP 描述承载网关业务的虚拟管理接口，二者是同一台设备的两类不同对象，类似一块
-网卡既要报物理端口也要报逻辑管理接口。成熟 OLT 的识别顺序是**优先级判断**，而不是「有 PPTP
-就等于 SFU」：
-
-1. **以 `ONUCAPA` 为最终裁决** —— `0x01`(HGU) 就是 HGU，无论是否上报 PPTP；上报的 PPTP 被
-   理解为「该 HGU 具备的物理 LAN 口」，VEIP 承载其网关业务。反之 `0x00`(SFU) 即使误报了
-   VEIP，OLT 仍按 SFU 处理。
-2. 业务实体（PPTP/VEIP）只作**佐证与补充描述**，用于 OLT 了解设备形态，不用于推翻类型。
-
-所以本仓库的 `mib.rs` 同时 `insert` 两类实体是**正确行为**，无需与 `onu_capa` 联动裁剪。
-现有实现保持不变；切到严格校验的 OLT 时也**不应**按类型摘实体——那会让 OLT 失去对物理口或
-网关口的可见性。
+物理 LAN 口，VEIP 描述承载网关业务的虚拟管理接口，二者是同一台设备的两类不同对象。业务实体
+（PPTP/VEIP）只作佐证与补充描述，不用来推翻能力 ME 里声明的类型；本仓库 `mib.rs` 同时
+`insert` 两类实体是**正确行为**，无需与 `onu_type` 联动裁剪。
 
 ### 认证方式：LOID 与 Password 是二选一，不是"LOID 是否配置"
 

@@ -50,6 +50,8 @@ pub const CLASS_VEIP: u16 = 329;
 pub const CLASS_ENHANCED_SECURITY_CONTROL: u16 = 332;
 pub const CLASS_ETHERNET_FRAME_EXTENDED_PM: u16 = 334;
 pub const CLASS_VENDOR_351: u16 = 351;
+pub const CLASS_CUC_ONU_CAPABILITY: u16 = 0xffb1;
+pub const CLASS_CTC_ONU_CAPABILITY: u16 = 0xfff9;
 pub const CLASS_CTC_LOID_AUTH: u16 = 0xfffa;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -546,6 +548,22 @@ const CTC_LOID_ATTRIBUTES: &[AttributeDefinition] = &[
     AttributeDefinition::read_write(4, 1),
 ];
 
+/*
+ * The carrier ONU capability MEs (CTC 0xFFF9, CUC 0xFFB1) carry the same four
+ * attributes in the same order: the operator ID, the operator's spec version,
+ * the ONU type and the Tx power supply control. They are read-only and only
+ * ever read, so the shape is shared and the values come from the line's own
+ * configuration. The Realtek reference adds a fifth, private "customized ONU
+ * type" attribute; the Airoha adapter that this hardware comes with does not,
+ * and nothing here needs it, so the line does not advertise it.
+ */
+const ONU_CAPABILITY_ATTRIBUTES: &[AttributeDefinition] = &[
+    AttributeDefinition::read_only(1, 4),
+    AttributeDefinition::read_only(2, 1),
+    AttributeDefinition::read_only(3, 1),
+    AttributeDefinition::read_only(4, 1),
+];
+
 const THRESHOLD_ATTRIBUTES: &[AttributeDefinition] = &[
     AttributeDefinition::read_write(1, 4).required(0),
     AttributeDefinition::read_write(2, 4).required(4),
@@ -938,6 +956,20 @@ pub static MANAGED_ENTITIES: &[ManagedEntityDefinition] = &[
         origin: ManagedEntityOrigin::Olt,
         actions: ACTIONS_PM,
         attributes: VENDOR_351_ATTRIBUTES,
+    },
+    ManagedEntityDefinition {
+        class_id: CLASS_CUC_ONU_CAPABILITY,
+        name: "CUC ONU capability",
+        origin: ManagedEntityOrigin::Onu,
+        actions: ACTIONS_GET,
+        attributes: ONU_CAPABILITY_ATTRIBUTES,
+    },
+    ManagedEntityDefinition {
+        class_id: CLASS_CTC_ONU_CAPABILITY,
+        name: "CTC ONU capability",
+        origin: ManagedEntityOrigin::Onu,
+        actions: ACTIONS_GET,
+        attributes: ONU_CAPABILITY_ATTRIBUTES,
     },
     ManagedEntityDefinition {
         class_id: CLASS_CTC_LOID_AUTH,

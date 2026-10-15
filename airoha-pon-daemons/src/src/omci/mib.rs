@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::config::{fixed_width, IdentityConfig, ONU_CAPA_HGU, ONU_CAPA_SBU, ONU_CAPA_SFU};
+use super::config::{
+    fixed_width, CarrierProfile, IdentityConfig, ONU_TX_POWER_CONTROL_NONE,
+};
 use super::protocol::{
     attribute_bit, Request, Response, ACTION_CREATE, ACTION_DELETE, ACTION_GET,
     ACTION_GET_ALL_ALARMS, ACTION_GET_ALL_ALARMS_NEXT, ACTION_GET_CURRENT_DATA, ACTION_GET_NEXT,
@@ -21,6 +23,7 @@ use super::security;
 #[allow(unused_imports)]
 pub use super::schema::{
     CLASS_ANI_G, CLASS_CARDHOLDER, CLASS_CIRCUIT_PACK, CLASS_CTC_LOID_AUTH,
+    CLASS_CTC_ONU_CAPABILITY, CLASS_CUC_ONU_CAPABILITY,
     CLASS_ENHANCED_SECURITY_CONTROL, CLASS_ETHERNET_FRAME_EXTENDED_PM,
     CLASS_ETHERNET_PM_HISTORY_DATA, CLASS_ETHERNET_PM_HISTORY_DATA_2,
     CLASS_ETHERNET_PM_HISTORY_DATA_3, CLASS_EXTENDED_VLAN_TAGGING, CLASS_FEC_PM_HISTORY_DATA,
@@ -195,7 +198,16 @@ fn mac_bridge_port_filter_preassign_entity() -> ManagedEntity {
         .expect("filter preassign schema is registered")
 }
 
-fn omci_capability_entity(enhanced_security: bool, ctc_loid_auth: bool) -> ManagedEntity {
+/// Whether a class is one of the carrier ONU capability MEs.
+fn is_onu_capability(class_id: u16) -> bool {
+    class_id == CLASS_CTC_ONU_CAPABILITY || class_id == CLASS_CUC_ONU_CAPABILITY
+}
+
+fn omci_capability_entity(
+    enhanced_security: bool,
+    ctc_loid_auth: bool,
+    carrier: CarrierProfile,
+) -> ManagedEntity {
     let mut entity = entity_from_definition(CLASS_OMCI, None).expect("OMCI schema is registered");
     let class_table = entity.attributes.get_mut(&1).expect("OMCI class table");
     /*
@@ -207,6 +219,8 @@ fn omci_capability_entity(enhanced_security: bool, ctc_loid_auth: bool) -> Manag
         (enhanced_security || definition.class_id != CLASS_ENHANCED_SECURITY_CONTROL)
             && definition.class_id != CLASS_VENDOR_351
             && (ctc_loid_auth || definition.class_id != CLASS_CTC_LOID_AUTH)
+            && (!is_onu_capability(definition.class_id)
+                || carrier.advertises(definition.class_id))
     }) {
         let row = definition.class_id.to_be_bytes().to_vec();
         class_table.table_rows.insert(row.clone(), row);
@@ -326,17 +340,17 @@ impl Mib {
             identity.model.clone()
         };
         /*
-         * Attribute 3 is the two-octet ONU capability. The high octet is
-         * ONUCAPA, the broad ONU class the OLT provisions from; the low octet is
-         * the finer sub-capability field and stays zero, since this userspace
-         * claims no vendor-specific capability bits. Every class the interface
-         * offers is below 8, so the value goes in as a bare octet.
+         * Attribute 3 is the vendor product code, a vendor-specific product
+         * identifier that has nothing to say about the ONU class. The class
+         * travels in the carrier ONU capability ME below, which is the entity an
+         * OLT reads to tell an SFU from an HGU; writing it here instead leaves
+         * the OLT with whatever template it had.
          */
-        let onu_capability = [identity.onu_capa, 0u8];
+        let vendor_product_code = 0u16.to_be_bytes();
         let onu2_g = ManagedEntity::default()
             .read_only(1, fixed_width(&model_name, 20))
             .read_only(2, vec![identity.omcc_version])
-            .read_only(3, onu_capability.to_vec())
+            .read_only(3, vendor_product_code.to_vec())
             .read_only(4, vec![1])
             .read_write(5, vec![1])
             .read_only(6, TOTAL_PRIORITY_QUEUE_COUNT.to_be_bytes().to_vec())
@@ -392,6 +406,22 @@ impl Mib {
                 .read_write(11, 0u16.to_be_bytes().to_vec())
                 .read_only(12, vec![0]),
         );
+
+        /*
+         * The carrier capability ME is where an OLT learns the ONU class, so a
+         * line that names its operator offers that operator's ME and no other.
+         * An operator without one - China Mobile, in every reference available
+         * here - keeps the standard MIB rather than claiming a class it has no
+         * way to report.
+         */
+        for capability in identity.carrier.capabilities() {
+            let capability_me = ManagedEntity::default()
+                .read_only(1, fixed_width(capability.operator_id, 4))
+                .read_only(2, vec![identity.spec_version_for(capability)])
+                .read_only(3, vec![identity.onu_type])
+                .read_only(4, vec![ONU_TX_POWER_CONTROL_NONE]);
+            mib.insert(capability.class_id, 0, capability_me);
+        }
 
         /*
          * Only offer CTC LOID authentication when there is a LOID to look up.
@@ -508,6 +538,7 @@ impl Mib {
             omci_capability_entity(
                 !identity.disable_enhanced_security,
                 identity.advertise_ctc_loid_auth(),
+                identity.carrier,
             ),
         );
 
@@ -540,6 +571,16 @@ impl Mib {
              * The class is offered only when the line has a LOID to look up. Without its
              * instance it is absent from the MIB and the OMCI class table, so the OLT has
              * to see an unknown ME rather than an instance that happens to be missing.
+             */
+            return Response::new(request, RESULT_UNKNOWN_ME);
+        }
+        if is_onu_capability(request.class_id)
+            && !self.entities.contains_key(&(request.class_id, 0))
+        {
+            /*
+             * Same rule for the carrier capability MEs: a line offers its own
+             * carrier's class only, and an OLT that asks for another carrier's
+             * must see an unknown ME rather than an empty instance.
              */
             return Response::new(request, RESULT_UNKNOWN_ME);
         }
@@ -1709,7 +1750,7 @@ fn collect_multicast_downstream_tci(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::config::AuthMode;
+    use super::super::config::{AuthMode, ONU_TYPE_HGU, ONU_TYPE_SBU, ONU_TYPE_SFU};
 
     fn empty_mib() -> Mib {
         Mib {
@@ -1956,25 +1997,105 @@ mod tests {
     }
 
     #[test]
-    fn the_onu_capa_reaches_the_capability_attribute() {
-        // The OLT provisions from ONUCAPA in the high octet, so the class has to
-        // land there rather than in the low sub-capability octet.
-        for (capa, expected) in [
-            (ONU_CAPA_SFU, vec![0x00, 0x00]),
-            (ONU_CAPA_HGU, vec![0x01, 0x00]),
-            (ONU_CAPA_SBU, vec![0x02, 0x00]),
-        ] {
+    fn the_onu_type_does_not_reach_the_vendor_product_code() {
+        // ONU2-G attribute 3 is the vendor product code, which says nothing about
+        // the ONU class. The class travels in the carrier capability ME, so
+        // changing it must not move this field.
+        for onu_type in [ONU_TYPE_SFU, ONU_TYPE_HGU, ONU_TYPE_SBU] {
             let identity = IdentityConfig {
-                onu_capa: capa,
+                onu_type,
                 ..IdentityConfig::default()
             };
-            let mut mib = Mib::from_identity(&identity);
+            let mib = Mib::from_identity(&identity);
 
             assert_eq!(
                 mib.entities[&(CLASS_ONU2_G, 0)].attributes[&3].value,
-                expected
+                vec![0x00, 0x00]
             );
         }
+    }
+
+    #[test]
+    fn the_onu_type_reaches_each_carrier_capability_me() {
+        // The class, the operator identity and the spec version all land on the
+        // capability ME, in the attribute order both carrier specs use.
+        for (carrier, class_id, operator_id, spec_version) in [
+            (CarrierProfile::Ctc, CLASS_CTC_ONU_CAPABILITY, b"CTC", 0u8),
+            (CarrierProfile::Cuc, CLASS_CUC_ONU_CAPABILITY, b"CUC", 3u8),
+        ] {
+            let identity = IdentityConfig {
+                carrier,
+                onu_type: ONU_TYPE_SBU,
+                ..IdentityConfig::default()
+            };
+            let mib = Mib::from_identity(&identity);
+            let entity = &mib.entities[&(class_id, 0)];
+
+            assert_eq!(entity.attributes[&1].value, fixed_width(operator_id, 4));
+            assert_eq!(entity.attributes[&2].value, vec![spec_version]);
+            assert_eq!(entity.attributes[&3].value, vec![ONU_TYPE_SBU]);
+            assert_eq!(
+                entity.attributes[&4].value,
+                vec![ONU_TX_POWER_CONTROL_NONE]
+            );
+        }
+    }
+
+    #[test]
+    fn the_carrier_profile_decides_which_capability_me_exists() {
+        // The MIB and the class table an OLT reads during MIB upload have to
+        // agree: every offered class is there, and no other one is.
+        for (carrier, offered) in [
+            (
+                CarrierProfile::Auto,
+                vec![CLASS_CTC_ONU_CAPABILITY, CLASS_CUC_ONU_CAPABILITY],
+            ),
+            (CarrierProfile::Ctc, vec![CLASS_CTC_ONU_CAPABILITY]),
+            (CarrierProfile::Cuc, vec![CLASS_CUC_ONU_CAPABILITY]),
+            (CarrierProfile::Cmcc, Vec::new()),
+        ] {
+            let identity = IdentityConfig {
+                carrier,
+                ..IdentityConfig::default()
+            };
+            let mib = Mib::from_identity(&identity);
+            let class_table = &mib.entities[&(CLASS_OMCI, 0)].attributes[&1].table_rows;
+
+            for class_id in [CLASS_CTC_ONU_CAPABILITY, CLASS_CUC_ONU_CAPABILITY] {
+                assert_eq!(
+                    mib.entities.contains_key(&(class_id, 0)),
+                    offered.contains(&class_id)
+                );
+                assert_eq!(
+                    class_table.contains_key(&class_id.to_be_bytes().to_vec()),
+                    offered.contains(&class_id)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_capability_me_of_another_carrier_reads_as_unknown() {
+        // A carrier line must not expose another carrier's class: an OLT that
+        // asks for it has to see an unknown ME rather than an empty instance.
+        let mut mib = Mib::from_identity(&IdentityConfig {
+            carrier: CarrierProfile::Ctc,
+            ..IdentityConfig::default()
+        });
+        let content = [0u8; 2];
+        let get = Request {
+            encoding: super::super::protocol::Encoding::Baseline,
+            tci: 1,
+            message_type: 0x0a,
+            action: ACTION_GET,
+            class_id: CLASS_CUC_ONU_CAPABILITY,
+            entity_id: 0,
+            attribute_mask: 0x8000,
+            payload: &content,
+            content: &content,
+        };
+
+        assert_eq!(mib.dispatch(&get).result(), Some(RESULT_UNKNOWN_ME));
     }
 
     #[test]

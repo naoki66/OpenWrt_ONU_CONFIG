@@ -133,24 +133,30 @@ return view.extend({
 		s.description = _('Line mode and registration identity take effect after the PON interface restarts.');
 
 		/*
-		 * ONUCAPA tells the OLT which broad ONU class this is, and the OLT picks
-		 * the provisioning template from it: an SFU is driven through PPTP UNIs,
-		 * an HGU through a VEIP. It sits with the line mode above it rather than
-		 * in the OMCI compatibility tab because it describes how the line
-		 * registers, not how OMCI itself negotiates.
-		 *
-		 * The wire value is the high octet of ONU2-G attribute 3; the low octet
-		 * is the finer sub-capability field, which this userspace leaves clear.
-		 * All three offered classes are below 8, so each encodes as a bare
-		 * octet.
+		 * The ONU class travels in the carrier ONU capability ME, and the
+		 * carriers do not share one: Telecom defines class 0xFFF9 and Unicom
+		 * 0xFFB1, each carrying the operator ID, the spec version, the ONU type
+		 * and the Tx power control in that order. Which of them a line offers -
+		 * and what it reports in it - describes how the line registers with the
+		 * operator, so both options sit with the line mode rather than in the
+		 * OMCI compatibility tab.
 		 */
-		o = s.option(form.ListValue, 'onu_capa', _('ONU type'));
+		o = s.option(form.ListValue, 'carrier', _('Operator profile'));
+		o.default = 'auto';
+		o.rmempty = false;
+		o.value('auto', _('Automatic'));
+		o.value('ctc', _('China Telecom'));
+		o.value('cuc', _('China Unicom'));
+		o.value('cmcc', _('China Mobile'));
+		o.description = _('Which carrier capability ME the line offers. Telecom and Unicom both define one; no reference defines a China Mobile one, so that profile keeps the standard MIB.');
+
+		o = s.option(form.ListValue, 'onu_type', _('ONU type'));
 		o.default = '1';
 		o.rmempty = false;
 		o.value('0', _('SFU'));
 		o.value('1', _('HGU'));
 		o.value('2', _('SBU'));
-		o.description = _('Broad ONU class reported to the OLT as ONUCAPA: 0 SFU, 1 HGU (default), 2 SBU.');
+		o.description = _('ONU class reported to the OLT in the capability ME: 0 SFU, 1 HGU (default), 2 SBU.');
 
 		o = s.option(form.ListValue, 'mode', _('Line mode'));
 		o.default = 'xgpon';

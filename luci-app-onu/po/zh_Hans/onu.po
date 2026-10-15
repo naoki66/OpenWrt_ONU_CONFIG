@@ -404,8 +404,26 @@ msgstr "HGU（家庭网关单元）"
 msgid "SBU"
 msgstr "SBU（单商业单元）"
 
-msgid "Broad ONU class reported to the OLT as ONUCAPA: 0 SFU, 1 HGU (default), 2 SBU."
-msgstr "以 ONUCAPA 上报给 OLT 的 ONU 大类型：0 为 SFU，1 为 HGU（默认），2 为 SBU。"
+msgid "ONU class reported to the OLT in the capability ME: 0 SFU, 1 HGU (default), 2 SBU."
+msgstr "在 ONU 能力 ME 中上报给 OLT 的 ONU 类型：0 为 SFU，1 为 HGU（默认），2 为 SBU。"
+
+msgid "Operator profile"
+msgstr "运营商制式"
+
+msgid "Automatic"
+msgstr "自动"
+
+msgid "China Telecom"
+msgstr "中国电信"
+
+msgid "China Unicom"
+msgstr "中国联通"
+
+msgid "China Mobile"
+msgstr "中国移动"
+
+msgid "Which carrier capability ME the line offers. Telecom and Unicom both define one; no reference defines a China Mobile one, so that profile keeps the standard MIB."
+msgstr "这条线上报哪家运营商的 ONU 能力 ME。电信与联通各有定义，现有参考实现中没有移动的能力 ME，因此移动制式保持标准 MIB。"
 
 msgid "OMCI VLAN IDs"
 msgstr "OMCI VLAN ID"
@@ -683,7 +701,7 @@ msgid "Usually the same as the first four characters of the serial number."
 msgstr "通常与序列号前四个字符相同。"
 
 msgid "Vendor ID"
-msgstr "厂商 ID"
+msgstr "厂商标识符"
 
 msgid "Voice"
 msgstr "语音"

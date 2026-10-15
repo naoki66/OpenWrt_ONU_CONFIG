@@ -14,7 +14,9 @@ Configuration is stored in `/etc/config/pon`.
 config xpon 'line0'
 	option device 'pon0'
 	option mode 'xgpon'
-	option onu_capa '1'
+	option carrier 'auto'
+	option onu_type '1'
+	option carrier_spec ''
 	option serial_number 'ABCD12345678'
 	option registration_id ''
 
@@ -53,11 +55,11 @@ config oam 'line0_oam'
 
 `mode` accepts `xgpon`, `xgspon`, `epon-10g-1g` and `epon-10g-10g`. An empty value keeps the current driver mode. `omcc_version` accepts `0x86`, `0xa0`, `0xa8`, `0xb0` and `0xb4`, in either case, and defaults to `0xb0`.
 
-`onu_capa` is ONUCAPA, the broad ONU class carried in the high octet of ONU2-G attribute 3: `0` SFU, `1` HGU, `2` SBU. It defaults to `1` (HGU), which is the class this userspace implements; an empty or unknown value keeps that default. The OLT picks its provisioning template from this field, so it lives on the `xpon` section beside `mode` rather than with the `omci` identity options.
+`carrier` selects which carrier ONU capability ME the line offers, and `onu_type` is the class reported in it: `0` SFU, `1` HGU, `2` SBU, defaulting to HGU, the class this userspace implements. The capability ME is the entity an OLT reads to pick its provisioning template, and the carriers do not share one: Telecom defines class `0xFFF9` (operator ID `CTC`) and Unicom `0xFFB1` (operator ID `CUC`), both carrying the operator ID, the spec version, the ONU type and the Tx power supply control in that order. `auto` offers both and lets each OLT read its own class; `ctc` and `cuc` offer one; `cmcc` offers none, because neither the Realtek OMCI reference nor the Airoha OMCI adapter implements a China Mobile capability ME, so a Mobile line keeps the standard MIB and the OLT its own template. `carrier_spec` overrides the spec version byte each carrier ships (Telecom `0`, Unicom `3`); empty follows the carrier default. Changing any of them takes effect when the PON interface restarts.
 
 `mode` 支持 `xgpon`、`xgspon`、`epon-10g-1g` 和 `epon-10g-10g`。空值使用驱动当前模式。`omcc_version` 支持 `0x86`、`0xa0`、`0xa8`、`0xb0` 和 `0xb4`（大小写不限），默认 `0xb0`。
 
-`onu_capa` 即 ONUCAPA，是 ONU2-G 属性 3 高字节中的 ONU 大类型：`0` 为 SFU、`1` 为 HGU、`2` 为 SBU，默认 `1`（HGU，即本用户态实际实现的类型）；空值或未知值保持该默认值。OLT 依此字段选择开局模板，因此它与 `mode` 同放在 `xpon` 段，而不放进 `omci` 的身份字段中。
+`carrier` 选择这条线提供哪家运营商的 ONU 能力（ONU capability）ME，`onu_type` 是其中上报的 ONU 类型：`0` SFU、`1` HGU、`2` SBU，默认 HGU（本用户态实际实现的类型）。OLT 读的正是这个能力 ME 来决定开局模板，而三家运营商并不共用同一个：电信为 `0xFFF9`（operator ID `CTC`），联通为 `0xFFB1`（operator ID `CUC`），两者属性顺序相同——operator ID、规范版本、ONU 类型、Tx 供电控制。`auto` 同时提供两者，各 OLT 只读自己那一类；`ctc`、`cuc` 只提供对应的一类；`cmcc` 不提供——Realtek OMCI 参考实现与 Airoha OMCI 适配库都没有移动的能力 ME，因此移动线路保持标准 MIB，类型由 OLT 自身模板决定。`carrier_spec` 覆盖各运营商自带的规范版本字节（电信 `0`、联通 `3`），留空即用默认值。以上选项都在 PON 接口重启后生效。
 
 `alloc_id_timeout` is the number of seconds an OMCI data path may wait for PLOAM to assign its Alloc-ID before the data path state becomes `alloc-id-timeout`. The kernel keeps the request, so a later assignment still applies it. `0` disables the timeout.
 
