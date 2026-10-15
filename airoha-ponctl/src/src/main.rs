@@ -13,6 +13,9 @@ const NET_CLASS: &str = "/sys/class/net";
 const ARPHRD_NONE: &str = "65534";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PROJECT_URL: &str = "https://github.com/pbs05/openwrt-pon-userspace/tree/main/airoha-ponctl";
+/// Line modes this build can select; the driver has no 1G mode entry, so GPON
+/// 2.5G/1.25G and EPON 1G/1G are not offered here.
+const SETTABLE_MODES: &str = "xgpon, xgspon, epon-10g-1g, epon-10g-10g";
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -318,7 +321,7 @@ fn print_help() {
          \x20 ponctl [--device ponX] status [--json]\n\
          \x20 ponctl [--device ponX] control|identity\n\
          \x20 ponctl [--device ponX] mode [show]\n\
-         \x20 ponctl [--device ponX] mode set MODE\n\
+         \x20 ponctl [--device ponX] mode set MODE ({SETTABLE_MODES})\n\
          \x20 ponctl [--device ponX] identity set [--serial SN] [--registration-id ID]\n\
          \x20 ponctl [--device ponX] data-path [show]\n\
          \x20 ponctl [--device ponX] igmp [show]\n\
@@ -404,8 +407,9 @@ fn run() -> Result<()> {
             if arguments.len() != 3 {
                 return Err("mode set requires one mode name".into());
             }
-            let mode = LineMode::parse(&arguments[2])
-                .ok_or("mode must be gpon, xgpon, xgspon, epon-1g, epon-10g-1g, or epon-10g-10g")?;
+            let mode = LineMode::parse(&arguments[2]).ok_or_else(|| {
+                format!("mode must be {SETTABLE_MODES}; this build has no GPON 2.5G/1.25G or EPON 1G/1G line mode")
+            })?;
             netlink::set_line(line_ifindex(&device)?, mode)?;
             show_mode(&device)?;
         }

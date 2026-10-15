@@ -60,12 +60,17 @@ pub enum LineMode {
 }
 
 impl LineMode {
+    /// Parse a line-mode name the CLI accepts.
+    ///
+    /// GPON 2.5G/1.25G and EPON 1G/1G are not part of this build: the driver
+    /// carries no line mode for them, so asking for either is refused here
+    /// instead of failing later in the kernel.  Both stay reachable through
+    /// `from_id()` and `name()`, which is what a board already configured with
+    /// one of them needs to report its state.
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "gpon" => Some(Self::Gpon),
             "xgpon" => Some(Self::Xgpon),
             "xgspon" => Some(Self::Xgspon),
-            "epon-1g" => Some(Self::Epon1g),
             "epon-10g-1g" => Some(Self::Epon10g1g),
             "epon-10g-10g" => Some(Self::Epon10g10g),
             _ => None,
