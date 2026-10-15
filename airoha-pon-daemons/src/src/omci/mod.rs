@@ -24,6 +24,7 @@ use self::backend::DataPathBackend;
 use self::control::{start_server, StatusHub};
 use self::mib::{Mib, CLASS_CTC_LOID_AUTH};
 use self::protocol::{Request, Response, ACTION_SET};
+use crate::runtime::HostIdentity;
 use crate::transport::{line_is_down, PacketSocket, PACKET_OUTGOING};
 
 const RECEIVE_BUFFER_LEN: usize = 2048;
@@ -82,6 +83,12 @@ pub fn run_agent(
     if let Some(serial) = backend.active_serial_number()? {
         identity.serial_number = serial.to_vec();
     }
+    /*
+     * The remaining identity fields describe the unit itself, and the serial
+     * number has just been learned from the registration, so the vendor bytes
+     * can be taken from it.
+     */
+    identity.adopt_system_identity(&HostIdentity::detect());
     let mut mib = Mib::from_identity(&identity);
     let socket = PacketSocket::open(interface)?;
     let status = StatusHub::new(

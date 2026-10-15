@@ -1,6 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 use crate::config::Section;
+use crate::runtime::HostIdentity;
+
+/// Vendor code reported when neither the configuration nor the serial number
+/// names one.
+///
+/// This is a last resort and not an answer: G.988 defines ONU-G attribute 1 as
+/// the vendor bytes of the serial number, so the serial number is what names
+/// the vendor on every line that has one.
+const VENDOR_ID_FALLBACK: &[u8] = b"OWRT";
+
+/// Software version reported when the running image does not name itself.
+const SOFTWARE_VERSION_FALLBACK: &[u8] = b"OpenWrt";
+
+/// Equipment ID reported when the board does not name itself.
+const EQUIPMENT_ID_FALLBACK: &[u8] = b"AN7581-XG-PON-ONU";
+
+/// Hardware version reported when the board does not name itself.
+const HARDWARE_VERSION_FALLBACK: &[u8] = b"AN7581";
 
 /// How the operator authenticates this line.
 ///
@@ -150,11 +168,14 @@ pub struct IdentityConfig {
     pub disable_enhanced_security: bool,
     /// Seconds a data path may wait for PLOAM Alloc-IDs before it is reported as failed; 0 never fails.
     pub alloc_id_timeout: u32,
+    /// Empty follows the vendor bytes of the serial number.
     pub vendor_id: Vec<u8>,
     pub equipment_id: Vec<u8>,
     /// Equipment model name from the nameplate, reported with the equipment ID.
     pub model: Vec<u8>,
+    /// Empty follows the board model.
     pub hardware_version: Vec<u8>,
+    /// Empty follows the firmware version of the running image.
     pub software_version: Vec<u8>,
     pub loid: Vec<u8>,
     pub loid_password: Vec<u8>,
@@ -172,11 +193,11 @@ impl Default for IdentityConfig {
             carrier_spec: None,
             disable_enhanced_security: false,
             alloc_id_timeout: 30,
-            vendor_id: b"OWRT".to_vec(),
-            equipment_id: b"AN7581-XG-PON-ONU".to_vec(),
-            model: b"AN7581-XG-PON-ONU".to_vec(),
-            hardware_version: b"AN7581".to_vec(),
-            software_version: b"OpenWrt".to_vec(),
+            vendor_id: Vec::new(),
+            equipment_id: Vec::new(),
+            model: Vec::new(),
+            hardware_version: Vec::new(),
+            software_version: Vec::new(),
             loid: Vec::new(),
             loid_password: Vec::new(),
             operator_id: b"CTC".to_vec(),
@@ -338,39 +359,95 @@ impl IdentityConfig {
     }
 
     pub fn onu_g_serial(&self) -> Vec<u8> {
-        let fallback = || {
-            let mut value = fixed_width(&self.vendor_id, 4);
-            value.extend_from_slice(&[0; 4]);
-            value
-        };
+        match self.parsed_serial() {
+            Some(serial) => serial,
+            None => {
+                if !self.serial_number.is_empty() {
+                    println!("Invalid OMCI serial number; using the vendor ID with a zero VSSN");
+                }
 
+                let mut value = fixed_width(&self.vendor_id, 4);
+                value.extend_from_slice(&[0; 4]);
+                value
+            }
+        }
+    }
+
+    /// Fill the fields this configuration left empty from the unit that runs it.
+    ///
+    /// The identity an OLT reads describes the unit rather than the userspace
+    /// reporting it. The vendor ID is defined as the vendor bytes of the serial
+    /// number the ONU registers with, so a placeholder there would contradict
+    /// the serial number the OLT has just registered; the software version
+    /// belongs to the running image and the hardware version to the board, and
+    /// both are read from the system instead of being pinned as constants. A
+    /// field the configuration names explicitly is never overwritten, and the
+    /// placeholders below only cover a unit that cannot answer for itself.
+    pub fn adopt_system_identity(&mut self, host: &HostIdentity) {
+        if self.vendor_id.is_empty() {
+            self.vendor_id = self
+                .serial_vendor_id()
+                .unwrap_or_else(|| VENDOR_ID_FALLBACK.to_vec());
+        }
+        if self.equipment_id.is_empty() {
+            self.equipment_id = host
+                .model
+                .clone()
+                .unwrap_or_else(|| EQUIPMENT_ID_FALLBACK.to_vec());
+        }
+        if self.model.is_empty() {
+            self.model = host
+                .model
+                .clone()
+                .unwrap_or_else(|| EQUIPMENT_ID_FALLBACK.to_vec());
+        }
+        if self.hardware_version.is_empty() {
+            self.hardware_version = host
+                .model
+                .clone()
+                .unwrap_or_else(|| HARDWARE_VERSION_FALLBACK.to_vec());
+        }
+        if self.software_version.is_empty() {
+            self.software_version = host
+                .firmware
+                .clone()
+                .unwrap_or_else(|| SOFTWARE_VERSION_FALLBACK.to_vec());
+        }
+    }
+
+    /// The vendor bytes of the serial number this ONU registers with.
+    fn serial_vendor_id(&self) -> Option<Vec<u8>> {
+        self.parsed_serial()
+            .map(|serial| serial[..4].to_vec())
+    }
+
+    /// The eight-byte serial number, when one is configured or has been learned
+    /// from the active PLOAM registration.
+    fn parsed_serial(&self) -> Option<Vec<u8>> {
         if self.serial_number.is_empty() {
-            return fallback();
+            return None;
         }
 
         if self.serial_number.len() == 8 {
-            return self.serial_number.clone();
+            return Some(self.serial_number.clone());
         }
 
-        let text = match std::str::from_utf8(&self.serial_number) {
-            Ok(text) => text.trim(),
-            Err(_) => return fallback(),
-        };
+        let text = std::str::from_utf8(&self.serial_number).ok()?.trim();
         let raw_hex = text.strip_prefix("hex:").unwrap_or(text);
         if raw_hex.len() == 16 {
             if let Ok(value) = decode_hex(raw_hex) {
-                return value;
+                return Some(value);
             }
         }
         if text.len() == 12 && text.is_ascii() {
             if let Ok(tail) = decode_hex(&text[4..]) {
                 let mut value = text.as_bytes()[..4].to_vec();
                 value.extend_from_slice(&tail);
-                return value;
+                return Some(value);
             }
         }
-        println!("Invalid OMCI serial number; using the vendor ID with a zero VSSN");
-        fallback()
+
+        None
     }
 }
 
@@ -411,19 +488,94 @@ mod tests {
     use crate::config::PonConfig;
 
     #[test]
-    fn empty_uci_values_keep_protocol_defaults() {
+    fn empty_uci_values_are_filled_from_the_unit() {
+        // An empty option means "not decided here", so the identity comes from
+        // the unit itself: the vendor bytes of the registered serial number, the
+        // model on the board, and the firmware the image was built from.
         let config = PonConfig::parse(
             "config omci 'line0_omci'\n\
              \toption line 'line0'\n\
              \toption vendor_id ''\n\
+             \toption equipment_id ''\n\
+             \toption hardware_version ''\n\
+             \toption software_version ''\n\
+             \toption serial_number 'GTKM12345678'\n\
              \toption loid ''\n",
         )
         .unwrap();
-        let identity =
+        let mut identity =
             IdentityConfig::from_section(config.linked_section("omci", "line0").unwrap());
 
-        assert_eq!(identity.vendor_id, b"OWRT");
+        assert!(identity.vendor_id.is_empty());
         assert!(identity.loid.is_empty());
+
+        identity.adopt_system_identity(&HostIdentity {
+            model: Some(b"Gemtek XG2010G".to_vec()),
+            firmware: Some(b"23.05.4".to_vec()),
+        });
+
+        assert_eq!(identity.vendor_id, b"GTKM");
+        assert_eq!(identity.equipment_id, b"Gemtek XG2010G");
+        assert_eq!(identity.hardware_version, b"Gemtek XG2010G");
+        assert_eq!(identity.software_version, b"23.05.4");
+        // The eight ASCII digits of the serial are the four binary serial bytes.
+        assert_eq!(identity.onu_g_serial(), b"GTKM\x12\x34\x56\x78");
+    }
+
+    #[test]
+    fn a_configured_identity_is_never_overwritten() {
+        let config = PonConfig::parse(
+            "config omci 'line0_omci'\n\
+             \toption line 'line0'\n\
+             \toption vendor_id 'ABCD'\n\
+             \toption model 'NAME-PLATE'\n\
+             \toption hardware_version 'V1.0'\n\
+             \toption software_version 'V1.0.0'\n\
+             \toption serial_number 'GTKM12345678'\n",
+        )
+        .unwrap();
+        let mut identity =
+            IdentityConfig::from_section(config.linked_section("omci", "line0").unwrap());
+
+        identity.adopt_system_identity(&HostIdentity {
+            model: Some(b"Gemtek XG2010G".to_vec()),
+            firmware: Some(b"23.05.4".to_vec()),
+        });
+
+        assert_eq!(identity.vendor_id, b"ABCD");
+        assert_eq!(identity.model, b"NAME-PLATE");
+        assert_eq!(identity.hardware_version, b"V1.0");
+        assert_eq!(identity.software_version, b"V1.0.0");
+    }
+
+    #[test]
+    fn a_unit_that_cannot_name_itself_keeps_the_placeholders() {
+        // Nothing configured and nothing readable: the placeholders are the last
+        // resort so the attributes are never blank.
+        let mut identity = IdentityConfig::default();
+
+        identity.adopt_system_identity(&HostIdentity::default());
+
+        assert_eq!(identity.vendor_id, VENDOR_ID_FALLBACK);
+        assert_eq!(identity.equipment_id, EQUIPMENT_ID_FALLBACK);
+        assert_eq!(identity.hardware_version, HARDWARE_VERSION_FALLBACK);
+        assert_eq!(identity.software_version, SOFTWARE_VERSION_FALLBACK);
+        assert_eq!(identity.onu_g_serial(), b"OWRT\0\0\0\0");
+    }
+
+    #[test]
+    fn the_vendor_id_follows_the_serial_learned_from_the_registration() {
+        // The kernel reports the active serial number as eight raw bytes, which
+        // is what the OLT has just registered the ONU under.
+        let mut identity = IdentityConfig {
+            serial_number: b"HWTC\0\x12\x34\x56".to_vec(),
+            ..IdentityConfig::default()
+        };
+
+        identity.adopt_system_identity(&HostIdentity::default());
+
+        assert_eq!(identity.vendor_id, b"HWTC");
+        assert_eq!(identity.onu_g_serial(), b"HWTC\0\x12\x34\x56");
     }
 
     #[test]

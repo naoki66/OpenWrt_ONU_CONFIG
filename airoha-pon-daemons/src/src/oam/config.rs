@@ -3,6 +3,18 @@
 use std::io;
 
 use crate::config::Section;
+use crate::runtime::HostIdentity;
+
+/// Vendor code reported when neither the configuration nor the serial number
+/// names one.
+///
+/// The CTC ONU serial number is reported as vendor bytes followed by the model
+/// code, so an unset vendor ID follows the serial number this ONU registers
+/// with instead of contradicting it.
+const VENDOR_ID_FALLBACK: &[u8] = b"OWRT";
+
+/// Software version reported when the running image does not name itself.
+const SOFTWARE_VERSION_FALLBACK: &[u8] = b"OpenWrt";
 
 #[derive(Clone, Debug)]
 pub struct OamConfig {
@@ -27,12 +39,12 @@ impl Default for OamConfig {
             operator: "ctc".to_owned(),
             ctc_oui: [0x11, 0x11, 0x11],
             ctc_versions: vec![0x21, 0x30],
-            vendor_id: b"OWRT".to_vec(),
+            vendor_id: Vec::new(),
             model: b"AN75".to_vec(),
             equipment_id: b"AN75".to_vec(),
             hardware_version: b"AN7581".to_vec(),
-            software_version: b"OpenWrt".to_vec(),
-            firmware_version: b"OpenWrt".to_vec(),
+            software_version: Vec::new(),
+            firmware_version: Vec::new(),
             chipset_id: [0x00, 0x00, 0x75, 0x81, 0x00, 0x00, 0x00, 0x00],
             loid: Vec::new(),
             loid_password: Vec::new(),
@@ -42,6 +54,32 @@ impl Default for OamConfig {
 }
 
 impl OamConfig {
+    /// Fill the fields this configuration left empty from the unit that runs it.
+    ///
+    /// `serial` is the serial number the line registers with, whose first four
+    /// bytes are the vendor code the CTC ONU serial number carries; the software
+    /// versions belong to the running image and are read from the system rather
+    /// than pinned as constants. The CTC model and hardware fields are narrow
+    /// fixed-width codes, so they keep their own defaults.
+    pub fn adopt_system_identity(&mut self, host: &HostIdentity, serial: Option<&[u8; 8]>) {
+        if self.vendor_id.is_empty() {
+            self.vendor_id = serial
+                .map(|serial| serial[..4].to_vec())
+                .unwrap_or_else(|| VENDOR_ID_FALLBACK.to_vec());
+        }
+
+        let firmware = host
+            .firmware
+            .clone()
+            .unwrap_or_else(|| SOFTWARE_VERSION_FALLBACK.to_vec());
+        if self.software_version.is_empty() {
+            self.software_version = firmware.clone();
+        }
+        if self.firmware_version.is_empty() {
+            self.firmware_version = firmware;
+        }
+    }
+
     pub fn from_section(section: &Section) -> io::Result<Self> {
         let mut config = Self::default();
 
@@ -200,18 +238,69 @@ mod tests {
     }
 
     #[test]
-    fn empty_uci_values_keep_protocol_defaults() {
+    fn empty_uci_values_are_filled_from_the_unit() {
         let config = PonConfig::parse(
             "config oam 'line0_oam'\n\
              \toption line 'line0'\n\
              \toption vendor_id ''\n\
+             \toption software_version ''\n\
+             \toption firmware_version ''\n\
              \toption chipset_id ''\n",
         )
         .unwrap();
-        let oam = OamConfig::from_section(config.linked_section("oam", "line0").unwrap()).unwrap();
+        let mut oam =
+            OamConfig::from_section(config.linked_section("oam", "line0").unwrap()).unwrap();
 
-        assert_eq!(oam.vendor_id, b"OWRT");
         assert_eq!(oam.chipset_id, [0x00, 0x00, 0x75, 0x81, 0, 0, 0, 0]);
+        assert!(oam.vendor_id.is_empty());
+
+        oam.adopt_system_identity(
+            &HostIdentity {
+                model: Some(b"Gemtek XG2010G".to_vec()),
+                firmware: Some(b"23.05.4".to_vec()),
+            },
+            Some(b"GTKM\x12\x34\x56\x78"),
+        );
+
+        assert_eq!(oam.vendor_id, b"GTKM");
+        assert_eq!(oam.software_version, b"23.05.4");
+        assert_eq!(oam.firmware_version, b"23.05.4");
+    }
+
+    #[test]
+    fn a_configured_identity_is_never_overwritten() {
+        let config = PonConfig::parse(
+            "config oam 'line0_oam'\n\
+             \toption line 'line0'\n\
+             \toption vendor_id 'ABCD'\n\
+             \toption software_version 'V1.0.0'\n\
+             \toption firmware_version 'V1.0.0'\n",
+        )
+        .unwrap();
+        let mut oam =
+            OamConfig::from_section(config.linked_section("oam", "line0").unwrap()).unwrap();
+
+        oam.adopt_system_identity(
+            &HostIdentity {
+                model: Some(b"Gemtek XG2010G".to_vec()),
+                firmware: Some(b"23.05.4".to_vec()),
+            },
+            Some(b"GTKM\x12\x34\x56\x78"),
+        );
+
+        assert_eq!(oam.vendor_id, b"ABCD");
+        assert_eq!(oam.software_version, b"V1.0.0");
+        assert_eq!(oam.firmware_version, b"V1.0.0");
+    }
+
+    #[test]
+    fn a_line_without_a_serial_number_keeps_the_vendor_placeholder() {
+        let mut oam = OamConfig::default();
+
+        oam.adopt_system_identity(&HostIdentity::default(), None);
+
+        assert_eq!(oam.vendor_id, VENDOR_ID_FALLBACK);
+        assert_eq!(oam.software_version, SOFTWARE_VERSION_FALLBACK);
     }
 
     #[test]

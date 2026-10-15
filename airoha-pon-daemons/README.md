@@ -65,6 +65,10 @@ config oam 'line0_oam'
 
 `alloc_id_timeout` 是 OMCI 数据通道等待 PLOAM 分配 Alloc-ID 的秒数，超时后数据通道状态变为 `alloc-id-timeout`。内核仍保留该请求，之后分配到时照常生效。`0` 表示不超时。
 
+The identity options (`vendor_id`, `equipment_id`, `model`, `hardware_version`, `software_version`) describe the unit itself, so an empty value is read from the running system instead of being reported as a placeholder: the vendor ID follows the vendor bytes of the serial number the line registers with, the equipment ID, model and hardware version follow the board model name, and the software version follows the release of the running image (`/etc/openwrt_release`, for example `23.05.4`, or its revision on a development build). A value set here always wins; the placeholders only appear on a unit that cannot answer for itself. On the EPON side the same rule fills `vendor_id`, `software_version` and `firmware_version`; `model`, `hardware_version` and `chipset_id` are CTC's own fixed-width codes and keep their defaults.
+
+身份字段（`vendor_id`、`equipment_id`、`model`、`hardware_version`、`software_version`）描述的是这台设备本身，因此留空时按运行中的系统取值，而不是上报占位常量：厂商 ID 取这条线注册所用序列号的厂商字节，设备标识、设备型号与硬件版本取板型名称，软件版本取当前镜像的发布版本（`/etc/openwrt_release`，如 `23.05.4`；开发版取修订号）。此处显式填写的值始终优先，占位值只在设备自己也答不上来时才出现。EPON 侧同样处理 `vendor_id`、`software_version`、`firmware_version`；`model`、`hardware_version`、`chipset_id` 是 CTC 自己的定长编码，保持原有默认值。
+
 ## CLI
 
 ```sh

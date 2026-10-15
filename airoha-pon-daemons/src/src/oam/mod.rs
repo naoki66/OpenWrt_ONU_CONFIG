@@ -12,7 +12,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::runtime::{parent_interface_mac, parent_xpon_attribute};
+use crate::runtime::{active_serial, parent_interface_mac, parent_xpon_attribute, HostIdentity};
 use crate::transport::{line_is_down, PacketSocket, PACKET_OUTGOING};
 
 use self::control::{start_server, StatusHub};
@@ -27,8 +27,21 @@ const RECEIVE_BUFFER_LEN: usize = 2048;
 
 pub use self::config::OamConfig;
 
-pub fn run_agent(interface: &str, config: OamConfig, control_socket: &Path) -> io::Result<()> {
+pub fn run_agent(interface: &str, mut config: OamConfig, control_socket: &Path) -> io::Result<()> {
     let source_mac = parent_interface_mac(interface)?;
+    /*
+     * The vendor code follows the serial number the line registers with. A
+     * driver that cannot report one leaves the identity at its own default
+     * instead of stopping the agent.
+     */
+    let serial = match active_serial(interface) {
+        Ok(serial) => serial,
+        Err(error) => {
+            println!("Cannot read the active PON serial number: {error}");
+            None
+        }
+    };
+    config.adopt_system_identity(&HostIdentity::detect(), serial.as_ref());
     let socket = PacketSocket::open(interface)?;
     let service_ready = parent_xpon_attribute(interface, "service_ready")?;
     publish_service_ready(service_ready.as_deref(), false);

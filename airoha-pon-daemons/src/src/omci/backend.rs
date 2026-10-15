@@ -4,9 +4,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::runtime::parent_xpon_attribute;
+use crate::runtime::{parent_xpon_attribute, serial_from_attribute};
 
-use super::config::decode_hex;
 use super::provisioning::{DataPathCandidate, ProvisioningSnapshot, DATA_PATH_VLAN_ANY};
 
 /* The kernel applies deferred paths on its own; pond polls to report the outcome. */
@@ -274,20 +273,7 @@ impl DataPathBackend {
     }
 
     pub fn active_serial_number(&self) -> io::Result<Option<[u8; 8]>> {
-        let text = fs::read_to_string(&self.active_serial_number)?;
-        let text = text.trim();
-        if text == "none" {
-            return Ok(None);
-        }
-        let bytes =
-            decode_hex(text).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let serial = bytes.try_into().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "active PON serial number is not eight bytes",
-            )
-        })?;
-        Ok(Some(serial))
+        serial_from_attribute(&self.active_serial_number)
     }
 
     fn clear_applied(&mut self) -> io::Result<()> {
