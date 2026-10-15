@@ -541,6 +541,25 @@ return view.extend({
 			return serial ? serial.substring(0, 4) : '';
 		}
 
+		/*
+		 * The SN override set on the line, when there is one: it wins over the
+		 * burned value for the serial number and for the vendor prefix derived
+		 * from it.
+		 */
+		function serialOverride() {
+			var lines = uci.sections('pon', 'xpon') || [];
+
+			for (var i = 0; i < lines.length; i++) {
+				var sid = lines[i].name || lines[i]['.name'] || lines[i].sid;
+				var saved = sid ? uci.get('pon', sid, 'serial_number') : null;
+
+				if (saved)
+					return saved;
+			}
+
+			return null;
+		}
+
 		var serialOption = s.option(form.Value, '_serial_number', _('Serial number (SN)'));
 		serialOption.placeholder = boardSerial;
 		serialOption.rmempty = true;
@@ -563,41 +582,32 @@ return view.extend({
 		serialOption.description = _('Overrides the serial number burned into the board identity. Leave empty to register under the burned value.');
 
 		/*
-		 * Vendor ID is the four-character vendor code of the serial number, so
-		 * an unset value defaults to the first four characters of the effective
-		 * SN (the override above, or the burned serial when the box is empty).
-		 * The default only fills the box: leaving it untouched keeps vendor_id
-		 * unset in UCI, where the PON stack derives it from the SN.
+		 * Vendor ID is the four-character vendor code of the serial number, so an
+		 * unset value reports the first four characters of the serial number the
+		 * line registers with. The default is shown as a placeholder rather than
+		 * as a value: LuCI only writes a field the operator changed, so a value
+		 * placed in the box would look set while UCI stayed empty - and an
+		 * operator who then changed the SN would keep reporting the old prefix.
 		 */
 		var vendorOption = s.option(form.Value, 'vendor_id', _('Vendor ID'));
 		vendorOption.rmempty = true;
 		vendorOption.validate = asciiLength(4, 4);
-		vendorOption.cfgvalue = function(sectionId) {
-			var stored = uci.get('pon', sectionId, 'vendor_id');
-
-			if (stored != null && stored !== '')
-				return stored;
-
-			return vendorPrefixFrom(effectiveSerial(sectionId));
-		};
+		vendorOption.placeholder = vendorPrefixFrom(serialOverride() || boardSerial);
 		vendorOption.description = _('Usually the same as the first four characters of the serial number.');
 
 		/*
-		 * Keep the default in sync while the SN is being typed: once a vendor
-		 * ID is explicitly stored in UCI or the vendor box has been edited by
-		 * hand, stop touching it.
+		 * Keep the shown default in sync while the SN is being typed, and leave
+		 * the stored value alone: typing into the vendor box is what names a
+		 * vendor explicitly.
 		 */
 		serialOption.onchange = function(ev, sectionId, value) {
-			if (uci.get('pon', sectionId, 'vendor_id') != null)
-				return;
-
 			var node = vendorOption.getUIElement(sectionId);
+			var input = node
+				? (node.tagName === 'INPUT' ? node : node.querySelector('input'))
+				: null;
 
-			if (node && node.isChanged && node.isChanged())
-				return;
-
-			if (node && typeof node.setValue === 'function')
-				node.setValue(vendorPrefixFrom(effectiveSerial(sectionId, value)));
+			if (input)
+				input.placeholder = vendorPrefixFrom(effectiveSerial(sectionId, value));
 		};
 
 	o = s.option(form.Value, 'equipment_id', _('Equipment ID'));
@@ -641,6 +651,7 @@ return view.extend({
 		o = s.option(form.Value, 'vendor_id', _('Vendor ID'));
 	o.rmempty = true;
 	o.validate = asciiLength(4, 4);
+	o.placeholder = vendorPrefixFrom(serialOverride() || boardSerial);
 
 	o = s.option(form.Value, 'model', _('ONU short model'));
 	o.rmempty = true;

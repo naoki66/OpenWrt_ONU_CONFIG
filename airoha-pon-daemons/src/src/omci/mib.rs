@@ -248,6 +248,10 @@ pub struct Mib {
     table_snapshot: Option<TableSnapshot>,
     upload_snapshot: Vec<UploadRecord>,
     onu_serial: [u8; 8],
+    /// Whether ONU-G attribute 1 follows the serial number instead of the
+    /// configuration, so a serial number latched at line open still names the
+    /// vendor on the wire.
+    vendor_id_follows_serial: bool,
     pending_master_session_key: Option<[u8; 16]>,
     attribute_value_changes: Vec<AttributeValueChange>,
     enhanced_security: bool,
@@ -284,6 +288,7 @@ impl Mib {
             table_snapshot: None,
             upload_snapshot: Vec::new(),
             onu_serial,
+            vendor_id_follows_serial: !identity.vendor_id_configured,
             pending_master_session_key: None,
             attribute_value_changes: Vec::new(),
             enhanced_security: !identity.disable_enhanced_security,
@@ -1111,13 +1116,29 @@ impl Mib {
 
     pub fn set_onu_serial(&mut self, serial: [u8; 8]) {
         self.onu_serial = serial;
-        /* ONU-G attribute 3 and Class 332 use the same active PLOAM serial number. */
+        /*
+         * ONU-G attributes 1 and 3 and Class 332 describe the same
+         * registration: attribute 3 is the serial number, attribute 1 its
+         * vendor bytes. The driver only latches that identity when the line
+         * opens, which is after this agent starts, so a vendor ID taken from
+         * the serial number is refreshed together with it instead of staying
+         * at the value that was there when the MIB was built.
+         */
+        let vendor_id = self.vendor_id_follows_serial.then(|| serial[..4].to_vec());
         for entities in [&mut self.entities, &mut self.autonomous_defaults] {
             if let Some(attribute) = entities
                 .get_mut(&(CLASS_ONU_G, 0))
                 .and_then(|entity| entity.attributes.get_mut(&3))
             {
                 attribute.value = serial.to_vec();
+            }
+            if let Some(vendor_id) = vendor_id.as_ref() {
+                if let Some(attribute) = entities
+                    .get_mut(&(CLASS_ONU_G, 0))
+                    .and_then(|entity| entity.attributes.get_mut(&1))
+                {
+                    attribute.value = vendor_id.clone();
+                }
             }
         }
     }
@@ -1751,6 +1772,7 @@ fn collect_multicast_downstream_tci(
 mod tests {
     use super::*;
     use super::super::config::{AuthMode, ONU_TYPE_HGU, ONU_TYPE_SBU, ONU_TYPE_SFU};
+    use crate::runtime::HostIdentity;
 
     fn empty_mib() -> Mib {
         Mib {
@@ -1762,6 +1784,7 @@ mod tests {
             table_snapshot: None,
             upload_snapshot: Vec::new(),
             onu_serial: [0; 8],
+            vendor_id_follows_serial: true,
             pending_master_session_key: None,
             attribute_value_changes: Vec::new(),
             enhanced_security: true,
@@ -1993,6 +2016,55 @@ mod tests {
         assert_eq!(
             mib.entities[&(CLASS_ONU2_G, 0)].attributes[&1].value,
             fixed_width(b"EQID", 20)
+        );
+    }
+
+    /*
+     * The driver latches the registration identity when the line opens, which
+     * is after this agent built its MIB, so the first identity may carry the
+     * vendor placeholder. Attribute 1 is the vendor bytes of the serial number
+     * attribute 3 carries, so it has to follow it when the serial number
+     * arrives.
+     */
+    #[test]
+    fn the_vendor_id_follows_a_serial_number_that_arrives_later() {
+        let mut identity = IdentityConfig::default();
+        identity.adopt_system_identity(&HostIdentity::default());
+        let mut mib = Mib::from_identity(&identity);
+
+        assert_eq!(
+            mib.entities[&(CLASS_ONU_G, 0)].attributes[&1].value,
+            fixed_width(b"OWRT", 4)
+        );
+
+        mib.set_onu_serial(*b"ZTEG\x10\x50\x2e\x88");
+
+        assert_eq!(
+            mib.entities[&(CLASS_ONU_G, 0)].attributes[&1].value,
+            b"ZTEG"
+        );
+        assert_eq!(
+            mib.entities[&(CLASS_ONU_G, 0)].attributes[&3].value,
+            b"ZTEG\x10\x50\x2e\x88"
+        );
+    }
+
+    #[test]
+    fn a_configured_vendor_id_does_not_follow_the_serial_number() {
+        // A vendor ID the configuration names is a decision, not a derived
+        // value: the line reports it as it stands.
+        let identity = IdentityConfig {
+            vendor_id: b"ABCD".to_vec(),
+            vendor_id_configured: true,
+            ..IdentityConfig::default()
+        };
+        let mut mib = Mib::from_identity(&identity);
+
+        mib.set_onu_serial(*b"ZTEG\x10\x50\x2e\x88");
+
+        assert_eq!(
+            mib.entities[&(CLASS_ONU_G, 0)].attributes[&1].value,
+            fixed_width(b"ABCD", 4)
         );
     }
 

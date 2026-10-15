@@ -384,6 +384,17 @@ OMCI 区块里 `model` 紧挨在 `equipment_id` 之下、`hardware_version` 之�
 `AN7581` / `OpenWrt`。OAM 侧同理只补 `vendor_id`、`software_version`、`firmware_version`，
 CTC 的 `model`、`hardware_version`、`chipset_id` 是定长编码，保持各自默认值。
 
+> ⚠️ **厂商 ID 输入框里的默认值必须是 `placeholder`，不能是 `cfgvalue` 派生出来的值。**
+> LuCI 只写控件被改过的字段（`isChanged()` 拿控件值与 `cfgvalue()` 比），把派生值填进框里
+> 会显得"已经设置"，实际 UCI 里仍然是空的——现场表现就是"框里明明写着 `ZTEG`，OLT 读到的
+> 还是 `OWRT`"。占位提示既说清了留空是什么意思，也不会冻结这个值。
+>
+> 另外，驱动只在线路 opened 时才把 pending 身份锁存成 active（`airoha-xpon-main.c`
+> 的 `identity.active_identity = identity.pending_identity`），守护进程启动时读到的
+> `active_serial_number` 常常还是 `none`。因此厂商 ID 必须与 ONU-G 属性 3 一起刷新：
+> `Mib::set_onu_serial()` 在 `vendor_id` 不是配置里写死的时候，同时把属性 1 更新成该
+> 序列号的前四个字节，晚到的 SN 也能跟上；OAM 侧则在拿到 SN 后重新 adopt 一次。
+
 ### ONU 类型与运营商制式：走「ONU 能力」ME，不走 ONU2-G 属性 3
 
 > ⚠️ **ONU2-G（ME 257）属性 3 不是 ONU 类型。** 它是 **vendor product code**（厂商产品码，

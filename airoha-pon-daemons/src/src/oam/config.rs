@@ -22,6 +22,13 @@ pub struct OamConfig {
     pub ctc_oui: [u8; 3],
     pub ctc_versions: Vec<u8>,
     pub vendor_id: Vec<u8>,
+    /// Whether `vendor_id` came from the configuration.
+    ///
+    /// A vendor ID that follows the serial number has to keep following it: the
+    /// driver latches the registration identity when the line opens, which can
+    /// be after this agent starts, so the serial number may still be missing
+    /// when the identity is first adopted.
+    pub vendor_id_configured: bool,
     pub model: Vec<u8>,
     pub equipment_id: Vec<u8>,
     pub hardware_version: Vec<u8>,
@@ -40,6 +47,7 @@ impl Default for OamConfig {
             ctc_oui: [0x11, 0x11, 0x11],
             ctc_versions: vec![0x21, 0x30],
             vendor_id: Vec::new(),
+            vendor_id_configured: false,
             model: b"AN75".to_vec(),
             equipment_id: b"AN75".to_vec(),
             hardware_version: b"AN7581".to_vec(),
@@ -62,7 +70,7 @@ impl OamConfig {
     /// than pinned as constants. The CTC model and hardware fields are narrow
     /// fixed-width codes, so they keep their own defaults.
     pub fn adopt_system_identity(&mut self, host: &HostIdentity, serial: Option<&[u8; 8]>) {
-        if self.vendor_id.is_empty() {
+        if !self.vendor_id_configured {
             self.vendor_id = serial
                 .map(|serial| serial[..4].to_vec())
                 .unwrap_or_else(|| VENDOR_ID_FALLBACK.to_vec());
@@ -111,6 +119,10 @@ impl OamConfig {
                 *destination = value.as_bytes().to_vec();
             }
         }
+        /* A vendor ID written into the configuration is a decision, an empty
+         * one is not: the serial number decides what the vendor code is. */
+        config.vendor_id_configured = !config.vendor_id.is_empty();
+
         if let Some(value) = section
             .option("chipset_id")
             .filter(|value| !value.is_empty())
@@ -301,6 +313,20 @@ mod tests {
 
         assert_eq!(oam.vendor_id, VENDOR_ID_FALLBACK);
         assert_eq!(oam.software_version, SOFTWARE_VERSION_FALLBACK);
+    }
+
+    #[test]
+    fn a_late_serial_number_still_names_the_vendor() {
+        // The identity is adopted again when the driver latches the serial
+        // number at line open, so the placeholder must not stick.
+        let mut oam = OamConfig::default();
+
+        oam.adopt_system_identity(&HostIdentity::default(), None);
+        assert_eq!(oam.vendor_id, VENDOR_ID_FALLBACK);
+
+        oam.adopt_system_identity(&HostIdentity::default(), Some(b"ZTEG\x10\x50\x2e\x88"));
+
+        assert_eq!(oam.vendor_id, b"ZTEG");
     }
 
     #[test]

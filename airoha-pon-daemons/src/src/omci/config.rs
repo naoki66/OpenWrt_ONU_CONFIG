@@ -170,6 +170,13 @@ pub struct IdentityConfig {
     pub alloc_id_timeout: u32,
     /// Empty follows the vendor bytes of the serial number.
     pub vendor_id: Vec<u8>,
+    /// Whether `vendor_id` came from the configuration.
+    ///
+    /// A vendor ID that follows the serial number has to keep following it: the
+    /// driver latches the registration identity when the line opens, which can
+    /// be after this agent starts, so the serial number may still be missing
+    /// when the identity is first adopted.
+    pub vendor_id_configured: bool,
     pub equipment_id: Vec<u8>,
     /// Equipment model name from the nameplate, reported with the equipment ID.
     pub model: Vec<u8>,
@@ -194,6 +201,7 @@ impl Default for IdentityConfig {
             disable_enhanced_security: false,
             alloc_id_timeout: 30,
             vendor_id: Vec::new(),
+            vendor_id_configured: false,
             equipment_id: Vec::new(),
             model: Vec::new(),
             hardware_version: Vec::new(),
@@ -260,6 +268,10 @@ impl IdentityConfig {
                 *destination = value.as_bytes().to_vec();
             }
         }
+
+        /* A vendor ID written into the configuration is a decision, an empty
+         * one is not: the serial number decides what the vendor code is. */
+        config.vendor_id_configured = !config.vendor_id.is_empty();
 
         /*
          * Read after the identity fields, because an unset option is not "no
@@ -384,7 +396,7 @@ impl IdentityConfig {
     /// field the configuration names explicitly is never overwritten, and the
     /// placeholders below only cover a unit that cannot answer for itself.
     pub fn adopt_system_identity(&mut self, host: &HostIdentity) {
-        if self.vendor_id.is_empty() {
+        if !self.vendor_id_configured {
             self.vendor_id = self
                 .serial_vendor_id()
                 .unwrap_or_else(|| VENDOR_ID_FALLBACK.to_vec());
@@ -576,6 +588,23 @@ mod tests {
 
         assert_eq!(identity.vendor_id, b"HWTC");
         assert_eq!(identity.onu_g_serial(), b"HWTC\0\x12\x34\x56");
+    }
+
+    #[test]
+    fn a_late_serial_number_still_names_the_vendor() {
+        // The driver only latches the registration identity when the line opens,
+        // so the first adoption can find no serial number at all. The placeholder
+        // must not survive once the serial number does arrive.
+        let mut identity = IdentityConfig::default();
+
+        identity.adopt_system_identity(&HostIdentity::default());
+        assert_eq!(identity.vendor_id, VENDOR_ID_FALLBACK);
+
+        identity.serial_number = b"ZTEG\x10\x50\x2e\x88".to_vec();
+        identity.adopt_system_identity(&HostIdentity::default());
+
+        assert_eq!(identity.vendor_id, b"ZTEG");
+        assert_eq!(identity.onu_g_serial(), b"ZTEG\x10\x50\x2e\x88");
     }
 
     #[test]

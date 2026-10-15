@@ -89,6 +89,19 @@ pub fn run_agent(
      * can be taken from it.
      */
     identity.adopt_system_identity(&HostIdentity::detect());
+    /*
+     * What the OLT is about to read, and whether the vendor code was decided
+     * here: a vendor ID that follows the serial number can only be taken from
+     * it once the driver has latched that identity at line open.
+     */
+    println!(
+        "OMCI identity: vendor_id={} vendor_id_configured={} model={} software_version={} serial_known={}",
+        String::from_utf8_lossy(&identity.vendor_id),
+        identity.vendor_id_configured,
+        String::from_utf8_lossy(&identity.model),
+        String::from_utf8_lossy(&identity.software_version),
+        !identity.serial_number.is_empty()
+    );
     let mut mib = Mib::from_identity(&identity);
     let socket = PacketSocket::open(interface)?;
     let status = StatusHub::new(

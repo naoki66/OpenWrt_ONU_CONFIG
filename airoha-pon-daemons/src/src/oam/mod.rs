@@ -41,7 +41,9 @@ pub fn run_agent(interface: &str, mut config: OamConfig, control_socket: &Path) 
             None
         }
     };
-    config.adopt_system_identity(&HostIdentity::detect(), serial.as_ref());
+    let mut serial = serial;
+    let host = HostIdentity::detect();
+    config.adopt_system_identity(&host, serial.as_ref());
     let socket = PacketSocket::open(interface)?;
     let service_ready = parent_xpon_attribute(interface, "service_ready")?;
     publish_service_ready(service_ready.as_deref(), false);
@@ -65,6 +67,22 @@ pub fn run_agent(interface: &str, mut config: OamConfig, control_socket: &Path) 
     );
 
     loop {
+        /*
+         * The driver latches the registration identity when the line opens,
+         * which can be after this agent starts: until the serial number is
+         * there, the vendor code cannot be taken from it, so the identity is
+         * adopted again as soon as it appears.
+         */
+        if serial.is_none() {
+            if let Ok(Some(found)) = active_serial(interface) {
+                serial = Some(found);
+                config.adopt_system_identity(&host, serial.as_ref());
+                println!(
+                    "OAM identity: serial number latched, vendor_id={}",
+                    String::from_utf8_lossy(&config.vendor_id)
+                );
+            }
+        }
         let received = match socket.receive(&mut receive_buffer) {
             Ok(frame) => frame,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
