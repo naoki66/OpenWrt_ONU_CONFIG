@@ -75,7 +75,12 @@ PKG_VERSION:=0.1.0
 # wrong UCI package and silently detaches nothing. Every script skips ports
 # another service still bridges when handing ports back to br-lan, and all
 # three pages drop taken ports from their pickers.
-PKG_RELEASE:=25
+# 26: the IPTV and voice links no longer compete with the internet WAN for the
+# default route: both write defaultroute=0 and a high gateway metric (IPTV 2000,
+# voice 2100). The IPTV page drops its tabs and its multicast-to-unicast tab:
+# the bridge rows, then the IGMP/MLD switches, now sit in one flat card, and the
+# relay is driven by rtp2httpd's own page.
+PKG_RELEASE:=26
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

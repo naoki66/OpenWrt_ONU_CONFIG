@@ -1238,6 +1238,12 @@ msgstr "IPTV 业务中 IGMP 与 IPv4 组播流量的处理方式。"
 msgid "How MLD and the IPv6 multicast traffic of the IPTV service are handled."
 msgstr "IPTV 业务中 MLD 与 IPv6 组播流量的处理方式。"
 
+msgid "IPv4 / IPv6 multicast"
+msgstr "IPv4 / IPv6 组播"
+
+msgid "IGMP handles the IPv4 side, MLD the IPv6 side; both act on the bridge configured above."
+msgstr "IGMP 负责 IPv4 侧、MLD 负责 IPv6 侧；两者都作用于上方配置的网桥。"
+
 msgid "Enable IGMP snooping"
 msgstr "启用 IGMP snooping"
 
@@ -2051,8 +2057,8 @@ msgstr "子网掩码"
 msgid "Gateway"
 msgstr "网关"
 
-msgid "Default gateway of the voice VLAN."
-msgstr "语音 VLAN 的默认网关。"
+msgid "Gateway of the voice VLAN. It is only used to reach the voice network and is never installed as the default route."
+msgstr "语音 VLAN 的网关。仅用于访问语音网络，不会作为默认路由。"
 
 msgid "DNS servers"
 msgstr "DNS 服务器"

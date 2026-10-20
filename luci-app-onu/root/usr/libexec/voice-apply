@@ -52,6 +52,12 @@ ZONE_NAME='voice'
 IFACE='voice'
 LEGACY_IFACE='luci_voice'
 
+# Gateway metric of the L3 voice interface. The voice VLAN shares the operator's
+# access network with IPTV, but the internet WAN owns the default route: the
+# voice gateway is never published as the default one, and the high metric
+# keeps everything this link does install behind the WAN and behind IPTV.
+VOICE_METRIC='2100'
+
 # Bridge mode (UCI section names use underscores; kernel devices may carry
 # hyphens):
 BR_VLAN_SEC='voice_br_vlan'
@@ -426,6 +432,12 @@ write_route_network() {
 	uci set network.$IFACE.force_link='1'
 	uci set network.$IFACE.delegate='0'
 	uci set network.$IFACE.luci_voice='1'
+	# The voice gateway reaches the softswitch, it does not route the customer:
+	# defaultroute=0 keeps a DHCP-supplied (or manually entered) gateway out of
+	# the default route, and the high metric loses against the WAN even where
+	# the protocol still installs one.
+	uci set network.$IFACE.defaultroute='0'
+	uci set network.$IFACE.metric="$VOICE_METRIC"
 
 	if [ "$VN_PROTO" = 'static' ]; then
 		uci set network.$IFACE.ipaddr="$VN_IPADDR"

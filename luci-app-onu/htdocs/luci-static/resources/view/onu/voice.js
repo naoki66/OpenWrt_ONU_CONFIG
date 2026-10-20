@@ -453,7 +453,7 @@ return view.extend({
 		o.depends({ enabled: '1', mode: 'route', proto: 'static' });
 
 		o = s.option(form.Value, 'gateway', _('Gateway'),
-			_('Default gateway of the voice VLAN.'));
+			_('Gateway of the voice VLAN. It is only used to reach the voice network and is never installed as the default route.'));
 		o.datatype = 'ip4addr';
 		o.placeholder = '10.0.0.1';
 		o.rmempty = true;

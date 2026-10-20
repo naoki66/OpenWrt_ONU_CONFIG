@@ -8,6 +8,12 @@ NFT_FILE="/etc/iptv.nft"
 PROXY_INIT="/etc/init.d/omcproxy"
 UNICAST_INIT="/etc/init.d/rtp2httpd"
 
+# Gateway metric of every IPTV interface. The IPTV link shares the operator's
+# access network with the voice link, but the internet WAN owns the default
+# route: no IPTV interface may publish its own gateway as the default one, and
+# the high metric keeps everything this link does install behind the WAN.
+IPTV_METRIC='2000'
+
 # Managed section/device naming. UCI section names accept [A-Za-z0-9_] only
 # (no hyphens - uci rejects them), while kernel device names may carry them.
 #
@@ -648,6 +654,12 @@ configure_interface_address() {
 
 	uci set "network.$section.auto"='1'
 	uci set "network.$section.delegate"='0'
+	# defaultroute=0 keeps the interface gateway out of the default route, and
+	# the high metric deprioritises every route this link does install: the
+	# internet WAN must stay the default path even when the relay address makes
+	# the IPTV link look like a routed uplink.
+	uci set "network.$section.defaultroute"='0'
+	uci set "network.$section.metric"="$IPTV_METRIC"
 
 	if [ "$UNICAST_ACTIVE" -eq 1 ] && [ "$UNICAST_DEV" = "$device" ] && [ -n "$UNICAST_ADDR" ]; then
 		ip="${UNICAST_ADDR%%/*}"

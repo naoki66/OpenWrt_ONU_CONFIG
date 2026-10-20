@@ -825,20 +825,27 @@ bridge fdb show br br-wanup
 ### IPTV 页
 
 一张卡片：`form.Map('onu-iptv')` → 单个 `NamedSection('config')`，**section 不带标题**（页面标题已经
-是「IPTV」），卡内四个 tab：
+是「IPTV」），**没有任何 tab**，字段按顺序平铺在卡内：
 
-| Tab | 字段 |
+| 顺序 | 字段 |
 | --- | --- |
-| IPTV bridge | PON interfaces（只读）、启用、透传方式、IPTV LAN 口 / Trunk 端口、要透传的 VLAN、上联设备、**业务 VLAN、组播 VLAN、IGMP 上行 VLAN** |
-| IPv4 | 启用 IGMP snooping、启用 IGMP proxy、启用组播查询器 |
-| IPv6 | 启用 MLD snooping、启用 MLD proxy |
-| 组播转单播 | 把组播中继为 HTTP 单播、HTTP 端口、中继地址、**中继 VLAN（仅单线复用）**、上游设备（只读，由中继 VLAN / 组播 VLAN / 代理状态推导）、中继程序设置（rtp2httpd / udpxy / msd_lite 三个跳转按钮） |
+| 1 | PON interfaces（只读）、启用、透传方式、IPTV LAN 口 / Trunk 端口、要透传的 VLAN、上联设备、**业务 VLAN、组播 VLAN、IGMP 上行 VLAN** |
+| 2 | 分隔行 `IPv4 / IPv6 multicast`（`form.DummyValue`，`cfgvalue` 返回空串，只看标签） |
+| 3 | 启用 PON 硬件 IGMP snooping / Fast leave / 组播 VLAN 隔离 + 隔离表 + PON 表只读状态、启用 IGMP snooping / IGMP proxy / 组播查询器、启用 MLD snooping / MLD proxy |
 
-用 `s.tab()` + `s.taboption()` 分组，而不是拆成多张卡片：运营商光猫的 IGMP 面板就是
-「IPv4 / IPv6 / 组播VLAN」三个小分组挤在一个页面里，tab 既还原了这个结构，又保持「一页一卡片」。
+> **PKG_RELEASE 26 起本页没有 tab。** 最早是 bridge / IPv4 / IPv6 / 组播转单播四个 tab，中继那一页先被
+> 删掉，剩下三个随后也拆平：页面本身只有一屏，tab 反而把"IGMP/MLD 开关作用在上面那个网桥上"
+> 这层关系藏起来。
+> 分隔行用的是 `form.DummyValue`（`rawhtml` + `cfgvalue` 返回 `''`），在主题里就是标签列的一行文字，
+> 不是新的卡片。
+>
+> **组播转单播（rtp2httpd）已无页面入口。** 中继的实例开关、HTTP 监听、频道列表与
+> `upstream_interface` 全部在 rtp2httpd 自己的页面上配置；`iptv-apply` 仍然读 `onu-iptv` 里的
+> `unicast` / `unicast_addr` / `unicast_vlan`，手改配置里的既有中继保持原行为。下文「组播转单播」
+> 与「中继 VLAN」两节保留为 `iptv-apply` 的行为文档。
 
-> **组播 VLAN 不单独成 tab，紧跟业务 VLAN。** 它与业务 VLAN 是一对：留空就表示"组播也走业务
-> VLAN"（校验器还会拒绝两者填成同一个值）。拆成独立 tab 会把这个"非此即彼"的关系藏起来，
+> **组播 VLAN 紧跟业务 VLAN。** 它与业务 VLAN 是一对：留空就表示"组播也走业务
+> VLAN"（校验器还会拒绝两者填成同一个值），所以两者之间不插任何别的东西，
 > 上游 `luci-app-iptv` 也是把 `multicast_vlan` / `igmp_vlan` 平铺在 `service_vlan` 后面的。
 
 > ⚠️ **页面标题不能重复出现。** `form.Map` 的标题已经是「IPTV」，section 再写一个「IPTV」就是
@@ -874,7 +881,8 @@ VLAN 只存在于 8021q 段的 `.vid` 选项和 onu-iptv 配置里）：
 
 > 用序号而不是 VLAN ID 命名，是为了不在 LuCI 接口页/设备列表里暴露运营商 VLAN 号；`unicast_vlan`
 > 配置仍保存 VLAN ID（语义值），由 `mux_index_of_vid()` 在 apply 时映射为序号，前端 `unicastUpstream()`
-> 用 `trunkVlanList().indexOf()+1` 做同一映射。全部受管段每次 apply 先整体清扫再重建，所以透传列表
+> 用 `trunkVlanList().indexOf()+1` 做同一映射（这两个前端函数已随组播转单播 tab 在 PKG_RELEASE 26 删除）。
+> 全部受管段每次 apply 先整体清扫再重建，所以透传列表
 > 增删/重排只会让序号平移，不产生残留；实测把 `44 3799` 调成 `3799 44`，`.vid` 与中继地址随序号正确换位。
 >
 > 历史命名：最早是 `luci_iptv*` / `ct-up<vid>` / `ct-dn<vid>` / `br-iptv-<vid>`，中间版本一度用
@@ -888,6 +896,21 @@ Trunk 端口不需要移出 `br-lan`：内核 `vlan_do_receive()` 会先把带�
 
 代理与单线复用互斥：proxy 必须终结 VLAN（自己发成员报告、自己收组播流），而 trunk 是二层透明透传。
 `resolve_proxy()` 在 `MODE=trunk` 时直接返回并打日志说明原因，UI 上对应开关也已经用 `depends` 隐藏。
+
+#### 默认路由与网关跃点
+
+IPTV 与语音共用运营商接入网，但**默认路由只属于上网 WAN**。两个 apply 脚本在写接口时一并写入：
+
+| 脚本 | 位置 | 写入 |
+| --- | --- | --- |
+| `iptv-apply` | `configure_interface_address()`（`br_iptv` / `br_iptv_mc` / `br_iptv_igmp` / `mux_iptv_<n>`） | `defaultroute='0'`、`metric=2000`（`IPTV_METRIC`） |
+| `voice-apply` | `write_route_network()`（`voice`） | `defaultroute='0'`、`metric=2100`（`VOICE_METRIC`） |
+
+- `defaultroute='0'`：接口即使拿到或手填了网关，也不作为默认网关发布；
+- `metric` 2000 / 2100：仍然进路由表的条目排在上网 WAN（跃点 0）之后，阶梯值让 IPTV 优先于语音。
+
+> ⚠️ `static` 协议的默认路由由 netifd 的 `gateway` 直接生成，`defaultroute` 不一定被它读取。
+> 语音页的「网关」只用于访问语音网络，真正挡住它抢默认路由的是 2100 的跃点。
 
 #### Option 与 OpenWrt 能力的对应关系（四个开关不是都能独立实现）
 
@@ -909,24 +932,26 @@ Trunk 端口不需要移出 `br-lan`：内核 `vlan_do_receive()` 会先把带�
 
 #### 组播转单播（rtp2httpd）
 
-本页**只写** rtp2httpd 的两件事：实例是否 `enabled`，以及 `upstream_interface` 绑哪个设备。
+`iptv-apply` **只写** rtp2httpd 的两件事：实例是否 `enabled`，以及 `upstream_interface` 绑哪个设备
+（发起写操作的是 `write_unicast_config()`，输入来自 `/etc/config/onu-iptv` 的 `unicast*` 选项——
+页面入口已在 PKG_RELEASE 26 删除）。
 监听地址 `list listen`（即 HTTP 端口）、频道列表、FCC（快速切台）、工作线程等参数留在 rtp2httpd
-自己的页面，本页只放跳转按钮，避免两处写同一个文件互相覆盖。「中继程序设置」一行同时给出
-**rtp2httpd / udpxy / msd_lite** 三个跳转：rtp2httpd 是本页驱动的那个，udpxy 与 msd_lite 是可替换
-的其它中继程序，各有自己的页面、**不由此处配置**（且只有装了对应软件包时跳转才可用）。
+自己的页面，避免两处写同一个文件互相覆盖；原先页面上的「中继程序设置」一行（rtp2httpd / udpxy /
+msd_lite 三个跳转按钮）已随 tab 一起删除——udpxy 与 msd_lite 是可替换的其它中继程序，各有自己的
+页面、**从来不由此处配置**。
 
 > ⚠️ **固件里的 rtp2httpd 配置是匿名 `config instance`（`enabled` / `list listen` /
 > `upstream_interface`），不是早期脚本假设的命名 `main` 段 + `disabled` + `port`。**
 > `write_unicast_config()` 先按类型 `instance`（含 `@instance[0]` 匿名段）查找，再回退旧类型；
-> 找不到就自建一个带默认 listen 的 `iptv` 实例。停用时把 `enabled` 置 0 并删掉本页写入的
-> `upstream_interface`（该字段归本页托管）。
+> 找不到就自建一个带默认 listen 的 `iptv` 实例。停用时把 `enabled` 置 0 并删掉 `iptv-apply` 写入的
+> `upstream_interface`（该字段归它托管）。
 
 `upstream_interface` 必须是**能加入组播组的三层接口**，也就是网桥本身（`br-iptv` 或 `br-mux-<n>`），
 **绝不能是网桥的成员端口**：作为 bridge slave 的端口收上来的帧不会交给本机协议栈，绑上去收不到组播。
 所以中继要生效，网桥必须带 IP（`unicast_addr`），否则没有可用于 join 的源地址。
 
-> **「上游设备」是推导出来的，不是让用户选的**——页面上它是只读的一行。`iptv-apply` 按 VLAN 配置
-> 创建网桥，中继只能绑到已经存在的那个网桥上。
+> **「上游设备」是推导出来的，不是让用户选的**——页面上它曾是只读的一行（已删除，推导仍在
+> `iptv-apply` 里）。`iptv-apply` 按 VLAN 配置创建网桥，中继只能绑到已经存在的那个网桥上。
 > ⚠️ 但**推导逻辑必须和 `resolve_unicast()` 逐分支对齐**，否则页面显示的与实际写入的不是同一个接口：
 > 单线复用模式 → `br-mux-<mux_index_of_vid(resolve_relay_vlan())>`；**组播代理激活时** → 代理的上联口
 > （`ct-iptv-igmp` 或 `ct-iptv-mc`，因为该 VLAN 已从 `br-iptv` 里被拿出去终结了）；
@@ -944,7 +969,7 @@ Trunk 端口不需要移出 `br-lan`：内核 `vlan_do_receive()` 会先把带�
 | `/etc/config/onu-iptv` | `option unicast_vlan ''`，留空走回落链 |
 | `iptv-apply` `resolve_unicast_vlan()` | 显式值非空时：非 trunk 模式 → 警告并忽略；不是 1–4094 → `fail`；**不在 `TRUNK_VLAN_LIST` 里 → `fail`** |
 | `iptv-apply` `resolve_relay_vlan()` + `mux_index_of_vid()` | 留空时的四级回落：①显式 `unicast_vlan` → ②组播 VLAN（须在透传列表内）→ ③业务 VLAN（须在列表内）→ ④列表第一个 VLAN（warn）。②③被自定义透传列表排除时逐个 warn；确定 VLAN 后再映射为透传列表序号得到 `br-mux-<n>` |
-| UI | `unicast_vlan` 字段 `depends({ enabled:'1', unicast:'1', mode:'trunk' })`；占位符与只读「上游设备」由 `relayFallbackVlan()` 按同一四级链推导，校验器拒绝不在 `trunkVlanList()` 里的值；「上游设备」显示时把 VLAN 映射成 `br-mux-<indexOf+1>` |
+| UI | **PKG_RELEASE 26 起页面上没有中继字段**（组播转单播 tab 已删除），`unicast_vlan` 只能手改 UCI；被删掉的 `relayFallbackVlan()` / `trunkVlanList()` 曾按同一四级链推导占位符并把 VLAN 映射成 `br-mux-<indexOf+1>` 显示在「上游设备」行 |
 
 > ⚠️ **显式值必须在 `TRUNK_VLAN_LIST` 里，不能只校验取值范围。** 没有透传就没有
 > `br-mux-<n>`，中继绑到一个不存在的网桥上一个包都收不到，而且这种失败是静默的——
@@ -1008,7 +1033,7 @@ CTC 的 fast-leave / leave retry。其中只有 fast-leave 能直接用（bridge
 | `htdocs/.../view/onu/status.js` | 重构为卡片 + 指标网格 + 状态点；线路详情改为常显键值列表，计数改为分组键值列表并折叠，保留轮询与展开态 |
 | `htdocs/.../view/onu/hardware.js` | 底部由一张「校准数据」卡拆成两块：**「板载身份」**（身份字段按存储目标分组、逐个就地改写）+ **最下面「PON board data」**（移植自上游 `config.js`：目标存储 + 「下载备份」/「上传并写入」，目标多于一个时才出下拉）；两块**永远渲染**、缺数据时写原因；`loadIdentity()` 的每个 field read 各自 `.catch()`，单个字段读失败不再让整块消失；两个合成 section 用不同实例名（`board` / `image`）且 `anonymous = true`；ONU 身份仍按 EPON/GPON 分流 |
 | `htdocs/.../view/onu/config.js` | 移除两个 ONU 身份标签页与「PON board data」上传卡片，只保留线路模式与认证/兼容性 |
-| `htdocs/.../view/onu/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转。**后已改**：派生网桥按透传列表序号显示为 `br-mux-<n>`（不含 VLAN 号，`unicastUpstream()` 内 indexOf+1 映射），新增 `relayFallbackVlan()` 镜像后端四级回落，中继 VLAN 占位符改为显示实际回落 VLAN |**后已改**：本页也读 `onu-internet`/`onu-voice`（原来只 `uci.load('pon')`，连自己的 `onu-iptv` 都没加载）；`lan_port` / `trunk_port` 的候选项过滤掉上网网桥与语音已占用的端口，并各自挂 `validateIptvLanPort` / `validateIptvTrunkPort`（前者连语音 trunk 口也拒绝，后者允许与语音 trunk 口共享） |
+| `htdocs/.../view/onu/iptv.js` | 由 `luci-app-iptv/view/iptv/config.js` 迁入并改为 PON 子页；四个 tab（bridge / IPv4 / IPv6 / 组播转单播），组播 VLAN 与 IGMP 上行 VLAN 归入 bridge tab 紧跟业务 VLAN；section 去掉重复的「IPTV」标题与说明（并入 Map 说明）；新增透传方式、Trunk 端口、要透传的 VLAN、组播转单播四个字段；新增「中继 VLAN」（仅单线复用，校验须在透传列表内）与 `trunkVlanList()`，`unicastUpstream()` 与之对齐；「中继程序设置」一行给出 rtp2httpd / udpxy / msd_lite 三个跳转。**后已改**：派生网桥按透传列表序号显示为 `br-mux-<n>`（不含 VLAN 号，`unicastUpstream()` 内 indexOf+1 映射），新增 `relayFallbackVlan()` 镜像后端四级回落，中继 VLAN 占位符改为显示实际回落 VLAN |**后已改**：本页也读 `onu-internet`/`onu-voice`（原来只 `uci.load('pon')`，连自己的 `onu-iptv` 都没加载）；`lan_port` / `trunk_port` 的候选项过滤掉上网网桥与语音已占用的端口，并各自挂 `validateIptvLanPort` / `validateIptvTrunkPort`（前者连语音 trunk 口也拒绝，后者允许与语音 trunk 口共享） |**后已改**：删除「组播转单播」tab 及其全部字段与 `trunkVlanList()` / `relayFallbackVlan()` / `unicastUpstream()` / `relayButtons()`，中继改由 rtp2httpd 自己的页面配置（`iptv-apply` 仍读既有 `unicast*` 配置）；随后删除全部 tab，bridge 行之后用一行 `form.DummyValue` 分隔行 `IPv4 / IPv6 multicast` 接 IGMP/MLD 开关，全页平铺无 tab |
 | `htdocs/.../view/onu/internet.js` | 新增：上网业务页（order 35，插在认证配置与 IPTV 之间）。单张 `form.Map('onu-internet')` + `NamedSection('config')`，**不分 tab**，用 `depends()` 切换；字段：启用、上网方式（**桥接 / DHCP / 系统拨号三种**）、上联设备、VLAN、LAN 口（`MultiValue`，校验至少选 1 且与 IPTV 机顶盒口互斥）、IPoE、IP 版本（**IPv4 only / 双栈，DHCP 与 PPPoE 都显示**）、PPPoE 用户名 / 密码、MTU、`derivedDevices()` 只读派生设备行。**硬件卸载开关已移出本页** |**后已改**：UNTAG 时整行隐藏「上网 VLAN」（`depends({enabled:'1',transparent_mode:'tag'})`）而非置灰；LAN 口候选项过滤掉 IPTV/语音已占用的端口，`validatePorts()` 由「只查 IPTV 机顶盒口」扩为查 IPTV 专用口/trunk 口与语音专用口/trunk 口；全部端口被占时给出单独文案 |
 | `htdocs/.../view/onu/voice.js` | 新增：语音配置页（语音网络 / 语音配置 / H.248 / SIP / 数图配置 / 线路设置 / 编码设置，字段取自真机「宽带电话设置」与 `help.cgi?help=use_sip`）。**后已改**：删掉「线路设置」卡片改为单 FXS 口（三行只读标识 + 端口参数并入 `onu-voice.config`）；删掉无消费者的 `onu-voice.config.enabled`，全页只留 `onu-voice.network.enabled` 一个开关（文案「启用语音业务」）。**语音 VLAN 交付三模式**：新增 `mode`（route/bridge/trunk）、`lan_port`、`trunk_port` 控件与跨页端口/VLAN 校验，IP 四件套改为仅 route 显示，派生设备行随模式显示 ct-voice/br-voice/br-voice-mux |**后已改**：`lan_port` / `trunk_port` 的候选项同样过滤掉被占用端口（保留本页已存值以免静默丢配置），语义与 `validateVoicePort()` 一致——语音 trunk 可与 IPTV trunk 共享，专用口不行 |
 | `root/etc/config/onu-voice` | 新增：`voice` / `h248` / `sip` / `digitmap` 四个配置段与四个 `codec` 段。**后已改为单 FXS 口**：删掉两个 `line` 段，端口参数（`auth_username` / `auth_password` / `phone_number` / `transmit_gain` / `receive_gain` / `echo_cancellation`）并入 `onu-voice.config`，`codec` 段去掉 `line` 字段。**network 段新增** `mode`（route/bridge/trunk，缺省 route）/ `lan_port` / `trunk_port` |
