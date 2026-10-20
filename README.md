@@ -11,6 +11,10 @@ diagnostics, and a top-level **ONU** LuCI menu for identity, authentication, int
 > Forked from [pbs05/openwrt-pon-userspace](https://github.com/pbs05/openwrt-pon-userspace) and heavily
 > reworked since merge base `cce9d75`.
 
+![Uploading QQ20261021-011227_f9d7a8d6-09f4-4125-8801-6e6af90d527e.png…]()
+
+
+
 ## 软件包 / Packages
 
 | 软件包 / Package | 版本 | 用途 / Purpose |
