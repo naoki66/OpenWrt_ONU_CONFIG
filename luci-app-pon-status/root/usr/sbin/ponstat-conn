@@ -1,0 +1,22 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Connection and hardware offload counters for the PON status overview card.
+# Prints key=value lines that the card's view parses:
+#   tcp_total / tcp_npu / udp_total / udp_npu
+
+CT=/proc/net/nf_conntrack
+
+if [ -r "$CT" ]; then
+	set -- $(awk '
+		$3 == "tcp" { t++; if ($0 ~ /\[(HW_)?OFFLOAD\]/) tn++ }
+		$3 == "udp" { u++; if ($0 ~ /\[(HW_)?OFFLOAD\]/) un++ }
+		END { print t + 0, tn + 0, u + 0, un + 0 }
+	' "$CT" 2>/dev/null)
+
+	echo "tcp_total=${1:-0}"
+	echo "tcp_npu=${2:-0}"
+	echo "udp_total=${3:-0}"
+	echo "udp_npu=${4:-0}"
+fi

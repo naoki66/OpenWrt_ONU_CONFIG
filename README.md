@@ -24,6 +24,7 @@ diagnostics, and a top-level **ONU** LuCI menu for identity, authentication, int
 | `airoha-ponctl` | 0.2.0 | 线路模式、身份、状态与数据通路配置 / Line control |
 | `airoha-pon-debug` | 0.1.0 | 状态、日志与抓包诊断 / Diagnostics and capture |
 | `luci-app-onu` | 0.1.0 | ONU 菜单：状态、硬件身份、认证、上网、IPTV、语音、诊断 / LuCI ONU menu |
+| `luci-app-pon-status` | 0.1.0 | 状态概览页 PON 卡片：光模块指标、端口速率、连接卸载数 / PON card on the status overview page |
 
 ## 主要特性 / Highlights
 
