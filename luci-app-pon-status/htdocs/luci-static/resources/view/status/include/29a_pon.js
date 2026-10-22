@@ -465,7 +465,7 @@ function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal
 
 	/* RX only: the LOS threshold sits at -28 dBm inside the fault zone */
 	if (kind == 'rx')
-		bar.children.push(E('span', {
+		bar.appendChild(E('span', {
 			'style': 'position: absolute; top: 1px; left: 8.33%; transform: translateX(-50%); font-size: 7px; line-height: 1; color: #a94442',
 			'title': '无光：接收功率低于 -28 dBm'
 		}, '▼'));
