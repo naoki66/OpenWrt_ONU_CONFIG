@@ -386,7 +386,7 @@ var RX_TICKS = [
 	{ at: -30, label: '-30' },
 	{ at: -25, label: '-25' },
 	{ at: -12, label: '-12' },
-	{ at: -8, label: '饱和 -8' }
+	{ at: -8, label: '-8' }
 ];
 
 var TX_ZONES = [
@@ -468,18 +468,11 @@ function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal
 			return E('div', { 'style': 'flex: ' + (z.to - z.from) + ' 1 0; background: ' + z.color });
 		}));
 
-	/* RX only: the LOS threshold sits at -28 dBm inside the fault zone */
-	if (kind == 'rx')
-		bar.appendChild(E('span', {
-			'style': 'position: absolute; top: 1px; left: 8.33%; transform: translateX(-50%); font-size: 7px; line-height: 1; color: #a94442',
-			'title': '无光：接收功率低于 -28 dBm'
-		}, '▼'));
-
 	var marks = ticks.map(tickNode);
 
 	if (pct != null)
 		marks.push(E('span', {
-			'style': 'position: absolute; bottom: 7px; left: ' + pct.toFixed(2) + '%; transform: translateX(-50%); font-size: 9px; line-height: 1; color: #3465a4',
+			'style': 'position: absolute; bottom: 6px; left: ' + pct.toFixed(2) + '%; transform: translateX(-50%); font-size: 13px; line-height: 1; color: #3465a4',
 			'title': value.toFixed(2) + ' dBm'
 		}, '▲'));
 
@@ -501,7 +494,7 @@ function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal
 				}, status.text)
 			]),
 			bar,
-			E('div', { 'style': 'position: relative; height: 12px; flex-wrap: nowrap; gap: 0' }, marks)
+			E('div', { 'style': 'position: relative; height: 14px; flex-wrap: nowrap; gap: 0' }, marks)
 		])
 	]);
 }
