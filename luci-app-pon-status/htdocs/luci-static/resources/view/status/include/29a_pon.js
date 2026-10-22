@@ -52,6 +52,16 @@ var LIFECYCLE_LABEL = {
 	'error': '故障'
 };
 
+var ONU_STATES = {
+	'O1': { zh: '初始状态', en: 'Initial-state' },
+	'O2': { zh: '待机状态', en: 'Standby-state' },
+	'O3': { zh: '序列号状态', en: 'Serial-number-state' },
+	'O4': { zh: '测距状态', en: 'Ranging-state' },
+	'O5': { zh: '运行状态', en: 'Operation-state' },
+	'O6': { zh: 'POPUP 状态', en: 'POPUP-state' },
+	'O7': { zh: '紧急停止状态', en: 'Emergency-stop-state' }
+};
+
 var BADGE_BG = {
 	error: '#d9534f',
 	warning: '#f0ad4e',
@@ -82,7 +92,8 @@ function readFrontend(device) {
 
 			return {
 				line: L.isObject(snapshot.line) ? snapshot.line : {},
-				frontend: L.isObject(snapshot.frontend) ? snapshot.frontend : {}
+				frontend: L.isObject(snapshot.frontend) ? snapshot.frontend : {},
+				registration: L.isObject(snapshot.registration) ? snapshot.registration : {}
 			};
 		}
 		catch (e) {
@@ -338,27 +349,116 @@ function connRow(conns) {
 	return E('div', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, '连接数不可用');
 }
 
-function fiberGraphic(mode) {
-	var w = WAVELENGTHS[mode] || WAVELENGTHS['gpon'];
-	var chip = 'flex: 0 0 auto; padding: 2px 10px; border-radius: 9px; font-size: 11px; white-space: nowrap; color: ' + TXT_STRONG;
+/*
+ * SFP optical module icon, drawn in the same visual language as the
+ * luci-mod-status Ethernet port icons (icons/port_up.svg / port_down.svg):
+ * 48x48 viewBox, metallic cage gradients, #888a85 outlines, round linecaps.
+ * Up: link LED plus a green TX and a blue RX beam leaving the optical bores.
+ * Down: dimmed module, dark bores and amber LOS ticks like port_down.
+ * Inlined as a data URI so the view stays a single self-contained file.
+ */
+var PON_ICON_SVG_UP =
+	'<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 48 48">' +
+	'<defs>' +
+	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
+	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
+	'</linearGradient>' +
+	'<linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">' +
+	'<stop stop-color="#d3d7cf"/><stop offset="1" stop-color="#babdb6"/>' +
+	'</linearGradient>' +
+	'</defs>' +
+	'<rect x="8" y="30" width="32" height="10" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.3"/>' +
+	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
+	'<circle cx="20.5" cy="22" r="2.8" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
+	'<circle cx="27.5" cy="22" r="2.8" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
+	'<circle cx="30" cy="14.8" r="1.2" fill="#4e9a06"/>' +
+	'<path d="M20.5 25.8 17.2 40.5" stroke="#4e9a06" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
+	'<path d="M27.5 25.8 30.8 40.5" stroke="#3465a4" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
+	'</svg>';
 
-	return E('div', { 'style': 'flex: 0 0 auto; display: flex; align-items: center; gap: 8px' }, [
-		E('div', {
-			'style': 'display: flex; flex-direction: column; justify-content: center; gap: 4px; width: 26px; height: 34px; padding: 0 6px; border-radius: 5px; background: ' + TILE_BG
-		}, [
-			E('span', { 'style': 'width: 6px; height: 6px; border-radius: 50%; background: ' + TXT_MUTED }),
-			E('span', { 'style': 'width: 6px; height: 6px; border-radius: 50%; background: ' + TXT_MUTED })
-		]),
-		E('span', { 'style': 'font-size: 14px; color: ' + TXT_MUTED }, '→'),
-		E('div', { 'style': 'display: flex; flex-direction: column; gap: 4px' }, [
-			E('div', { 'style': chip + '; background: rgba(0, 150, 90, 0.14)' }, '↑ ' + w[0] + ' nm'),
-			E('div', { 'style': chip + '; background: rgba(230, 160, 20, 0.16)' }, '↓ ' + w[1] + ' nm')
+var PON_ICON_SVG_DOWN =
+	'<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 48 48">' +
+	'<defs>' +
+	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
+	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
+	'</linearGradient>' +
+	'<linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">' +
+	'<stop stop-color="#d3d7cf"/><stop offset="1" stop-color="#babdb6"/>' +
+	'</linearGradient>' +
+	'</defs>' +
+	'<g opacity="0.72">' +
+	'<rect x="8" y="30" width="32" height="10" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.45"/>' +
+	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
+	'<circle cx="20.5" cy="22" r="2.8" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
+	'<circle cx="27.5" cy="22" r="2.8" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
+	'</g>' +
+	'<path d="M20 41.8v3.2M24 41.8v3.2M28 41.8v3.2" stroke="#edd400" stroke-width="1.6" stroke-linecap="round" fill="none"/>' +
+	'</svg>';
+
+function ponIcon(up) {
+	return E('img', {
+		'src': 'data:image/svg+xml,' + encodeURIComponent(up ? PON_ICON_SVG_UP : PON_ICON_SVG_DOWN),
+		'style': 'flex: 0 0 auto'
+	});
+}
+
+function waveChip(dir, nm, color) {
+	return E('div', {
+		'style': 'display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9px; font-size: 11px; white-space: nowrap; color: ' + TXT_STRONG + '; background: ' + TILE_BG
+	}, [
+		E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + color + '; flex: 0 0 auto' }),
+		dir + ' ' + nm + ' nm'
+	]);
+}
+
+function fiberGraphic(mode, up) {
+	var w = WAVELENGTHS[mode] || WAVELENGTHS['gpon'];
+
+	return E('div', { 'style': 'flex: 0 0 auto; display: flex; align-items: center; gap: 10px' }, [
+		ponIcon(up),
+		E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px' }, [
+			waveChip('↑', w[0], '#4e9a06'),
+			waveChip('↓', w[1], '#3465a4')
 		])
 	]);
 }
 
+function onuBadge(registration) {
+	var code = (registration && typeof(registration.onu_state) == 'string')
+		? registration.onu_state.toUpperCase() : '';
+	var info = ONU_STATES[code];
+
+	if (!info)
+		return null;
+
+	var tip = 'ONU 状态（ITU-T G.984.3 / G.987.3）';
+
+	for (var k in ONU_STATES) {
+		if (Object.prototype.hasOwnProperty.call(ONU_STATES, k))
+			tip += '\n' + k + ' ' + ONU_STATES[k].zh + ' ' + ONU_STATES[k].en;
+	}
+
+	return E('span', {
+		'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: ' + TXT_STRONG + '; background: ' + TILE_BG,
+		'title': tip
+	}, code + ' ' + info.zh);
+}
+
 function renderBox(item) {
 	var state = lineState(item.line);
+	var badges = [
+		E('span', {
+			'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; color: #ffffff; background: ' + BADGE_BG[state.severity]
+		}, state.text)
+	];
+	var onu = onuBadge(item.registration);
+
+	if (onu)
+		badges.push(onu);
 
 	return E('div', { 'class': 'ifacebox' }, [
 		E('div', {
@@ -366,13 +466,11 @@ function renderBox(item) {
 			'style': 'display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0'
 		}, [
 			E('strong', item.device),
-			E('span', {
-				'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; color: #ffffff; background: ' + BADGE_BG[state.severity]
-			}, state.text)
+			E('div', { 'style': 'display: flex; align-items: center; gap: 6px; flex: 0 0 auto' }, badges)
 		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
 			E('div', { 'style': 'display: flex; align-items: center; gap: 14px; flex-wrap: wrap' }, [
-				fiberGraphic((item.line && item.line.active_mode) || ''),
+				fiberGraphic((item.line && item.line.active_mode) || '', state.severity == 'success'),
 				E('div', { 'style': 'flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0' }, [
 					metricTile('接收光功率', item.frontend, 'rx_power_dbm', 'dBm', 2),
 					metricTile('发射光功率', item.frontend, 'tx_power_dbm', 'dBm', 2),
@@ -410,7 +508,8 @@ return baseclass.extend({
 							device: section.device,
 							line: res[0] ? res[0].line : {},
 							frontend: res[0] ? res[0].frontend : null,
-							rate: res[1]
+							registration: res[0] ? res[0].registration : {},
+						rate: res[1]
 						};
 					});
 				}))

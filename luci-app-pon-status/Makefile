@@ -5,7 +5,7 @@ include $(TOPDIR)/rules.mk
 LUCI_TITLE:=LuCI PON optics, port rate and connection counters (overview card)
 LUCI_DEPENDS:=+luci-base +luci-mod-status +airoha-ponctl
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=Apache-2.0
 
