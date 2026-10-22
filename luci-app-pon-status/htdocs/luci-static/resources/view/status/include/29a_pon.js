@@ -53,13 +53,13 @@ var LIFECYCLE_LABEL = {
 };
 
 var ONU_STATES = {
-	'O1': { zh: '初始状态', en: 'Initial-state' },
-	'O2': { zh: '待机状态', en: 'Standby-state' },
-	'O3': { zh: '序列号状态', en: 'Serial-number-state' },
-	'O4': { zh: '测距状态', en: 'Ranging-state' },
-	'O5': { zh: '运行状态', en: 'Operation-state' },
-	'O6': { zh: 'POPUP 状态', en: 'POPUP-state' },
-	'O7': { zh: '紧急停止状态', en: 'Emergency-stop-state' }
+	'O1': { zh: '初始状态', en: 'Initial-state', severity: 'muted' },
+	'O2': { zh: '待机状态', en: 'Standby-state', severity: 'muted' },
+	'O3': { zh: '序列号状态', en: 'Serial-number-state', severity: 'warning' },
+	'O4': { zh: '测距状态', en: 'Ranging-state', severity: 'warning' },
+	'O5': { zh: '运行状态', en: 'Operation-state', severity: 'success' },
+	'O6': { zh: 'POPUP 状态', en: 'POPUP-state', severity: 'warning' },
+	'O7': { zh: '紧急停止状态', en: 'Emergency-stop-state', severity: 'error' }
 };
 
 var BADGE_BG = {
@@ -320,42 +320,51 @@ function ratePanel(rate) {
 	]);
 }
 
-function connCell(label, c) {
-	return E('div', { 'style': 'display: flex; align-items: baseline; gap: 4px; white-space: nowrap' }, [
-		E('span', { 'style': 'font-size: 12px; font-weight: 600; color: ' + TXT_MUTED }, label),
-		E('strong', {
-			'style': 'font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
-		}, String(c.total)),
-		E('span', { 'style': 'font-size: 11px; color: ' + TXT_MUTED }, '卸载'),
-		E('strong', {
-			'style': 'font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
-		}, String(c.npu))
-	]);
-}
+/*
+ * Connection counters as one block, laid out like the rate panel:
+ * TCP on the upper row, UDP on the lower row. Each row shows the
+ * live connection count and how many of them are hardware offloaded.
+ */
+function connBlock(conns) {
+	if (!conns || (!conns.tcp && !conns.udp))
+		return E('div', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, '连接数不可用');
 
-function connRow(conns) {
-	var cells = [];
-
-	if (conns && (conns.tcp || conns.udp)) {
-		if (conns.tcp)
-			cells.push(connCell('TCP', conns.tcp));
-
-		if (conns.udp)
-			cells.push(connCell('UDP', conns.udp));
-
-		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap' }, cells);
+	function row(label, c) {
+		return E('div', { 'style': 'display: flex; align-items: center; gap: 6px; white-space: nowrap' }, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
+			E('span', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, label),
+			E('strong', {
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
+			}, String(c.total)),
+			E('span', { 'style': 'font-size: 11px; color: ' + TXT_MUTED }, ' 卸载 '),
+			E('strong', {
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
+			}, String(c.npu))
+		]);
 	}
 
-	return E('div', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, '连接数不可用');
+	var rows = [];
+
+	if (conns.tcp)
+		rows.push(row('TCP', conns.tcp));
+
+	if (conns.udp)
+		rows.push(row('UDP', conns.udp));
+
+	return E('div', {
+		'style': 'flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 6px; background: ' + TILE_BG
+	}, rows);
 }
 
 /*
  * SFP optical module icon, drawn in the same visual language as the
  * luci-mod-status Ethernet port icons (icons/port_up.svg / port_down.svg):
  * 48x48 viewBox, metallic cage gradients, #888a85 outlines, round linecaps.
- * Up: link LED plus a green TX and a blue RX beam leaving the optical bores.
- * Down: dimmed module, dark bores and amber LOS ticks like port_down.
- * Inlined as a data URI so the view stays a single self-contained file.
+ * The optical interface is a single SC port (rectangular shell with the
+ * ferrule in the middle) - XPON is bidirectional over one fiber, so the
+ * green TX and blue RX beams both leave that one port. Up: link LED plus
+ * both beams. Down: dimmed module, dark port and amber LOS ticks like
+ * port_down. Inlined as a data URI so the view stays a single file.
  */
 var PON_ICON_SVG_UP =
 	'<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 48 48">' +
@@ -371,8 +380,8 @@ var PON_ICON_SVG_UP =
 	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.3"/>' +
 	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
 	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
-	'<circle cx="20.5" cy="22" r="2.8" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
-	'<circle cx="27.5" cy="22" r="2.8" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
+	'<rect x="19" y="18" width="10" height="7.5" rx="1.5" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
+	'<rect x="21.5" y="20.2" width="5" height="3.1" rx="0.8" fill="#555753" opacity="0.55"/>' +
 	'<circle cx="30" cy="14.8" r="1.2" fill="#4e9a06"/>' +
 	'<path d="M20.5 25.8 17.2 40.5" stroke="#4e9a06" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
 	'<path d="M27.5 25.8 30.8 40.5" stroke="#3465a4" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
@@ -393,8 +402,8 @@ var PON_ICON_SVG_DOWN =
 	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.45"/>' +
 	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
 	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
-	'<circle cx="20.5" cy="22" r="2.8" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
-	'<circle cx="27.5" cy="22" r="2.8" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
+	'<rect x="19" y="18" width="10" height="7.5" rx="1.5" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
+	'<rect x="21.5" y="20.2" width="5" height="3.1" rx="0.8" fill="#2e3436" opacity="0.6"/>' +
 	'</g>' +
 	'<path d="M20 41.8v3.2M24 41.8v3.2M28 41.8v3.2" stroke="#edd400" stroke-width="1.6" stroke-linecap="round" fill="none"/>' +
 	'</svg>';
@@ -443,30 +452,27 @@ function onuBadge(registration) {
 	}
 
 	return E('span', {
-		'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: ' + TXT_STRONG + '; background: ' + TILE_BG,
+		'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: #ffffff; background: ' + BADGE_BG[info.severity],
 		'title': tip
 	}, code + ' ' + info.zh);
 }
 
 function renderBox(item) {
 	var state = lineState(item.line);
-	var badges = [
-		E('span', {
-			'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; color: #ffffff; background: ' + BADGE_BG[state.severity]
-		}, state.text)
-	];
 	var onu = onuBadge(item.registration);
-
-	if (onu)
-		badges.push(onu);
 
 	return E('div', { 'class': 'ifacebox' }, [
 		E('div', {
 			'class': 'ifacebox-head center active',
 			'style': 'display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0'
 		}, [
-			E('strong', item.device),
-			E('div', { 'style': 'display: flex; align-items: center; gap: 6px; flex: 0 0 auto' }, badges)
+			E('div', { 'style': 'display: flex; align-items: center; gap: 8px; min-width: 0' }, [
+				E('strong', item.device),
+				E('span', {
+					'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; color: #ffffff; background: ' + BADGE_BG[state.severity]
+				}, state.text)
+			]),
+			E('div', { 'style': 'display: flex; align-items: center; gap: 6px; flex: 0 0 auto' }, onu ? [ onu ] : [])
 		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
 			E('div', { 'style': 'display: flex; align-items: center; gap: 14px; flex-wrap: wrap' }, [
@@ -478,9 +484,9 @@ function renderBox(item) {
 					metricTile('光模块电流', item.frontend, 'tx_bias_ma', 'mA', 2),
 					metricTile('电压', item.frontend, 'voltage_volts', 'V', 4)
 				]),
-				ratePanel(item.rate)
-			]),
-			connRow(item.conns)
+				ratePanel(item.rate),
+				connBlock(item.conns)
+			])
 		])
 	]);
 }
