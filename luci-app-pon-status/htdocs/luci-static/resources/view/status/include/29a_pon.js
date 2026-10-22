@@ -38,9 +38,13 @@ var callDeviceStatus = rpc.declare({
 	method: 'status'
 });
 
-var TILE_BG = 'var(--background-color-medium, #f4f4f4)';
-var TXT_MUTED = 'var(--text-color-medium, #808080)';
-var TXT_STRONG = 'var(--text-color-highest, #000000)';
+/*
+ * Colors are never hardcoded on text: every value inherits the theme text
+ * color (Argon: --text-color, light #525f7f / dark #ccc) and the heads use
+ * the ifacebox-head pair (--iface-head-bg / --iface-head-text), exactly like
+ * the network port cards in 29_ports.js. Secondary text is muted with
+ * opacity instead of a fixed grey so it follows light/dark themes.
+ */
 
 var LIFECYCLE_LABEL = {
 	'operational': '在线',
@@ -292,12 +296,12 @@ function metricTile(label, frontend, field, unit, digits) {
 			'class': 'ifacebox-head',
 			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap'
 		}, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
 			label
 		]),
 		E('div', {
 			'class': 'ifacebox-body',
-			'style': 'padding: 6px 10px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG + '; white-space: nowrap'
+			'style': 'padding: 6px 10px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap'
 		}, value)
 	]);
 }
@@ -307,12 +311,12 @@ function ratePanel(rate) {
 
 	function row(dir, arrow, value) {
 		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
-			E('span', { 'style': 'font-size: 13px; color: ' + TXT_MUTED }, arrow),
-			E('span', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, dir),
+			E('span', { 'style': 'font-size: 13px; opacity: 0.6' }, arrow),
+			E('span', { 'style': 'font-size: 12px; opacity: 0.6' }, dir),
 			E('strong', {
-				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
 			}, (value != null) ? value.toFixed(2) : '—'),
-			E('span', { 'style': 'font-size: 10px; color: ' + TXT_MUTED }, 'Mibit/s')
+			E('span', { 'style': 'font-size: 10px; opacity: 0.6' }, 'Mibit/s')
 		]);
 	}
 
@@ -338,18 +342,18 @@ function ratePanel(rate) {
  */
 function connBlock(conns) {
 	if (!conns || (!conns.tcp && !conns.udp))
-		return E('div', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, '连接数不可用');
+		return E('div', { 'style': 'font-size: 12px; opacity: 0.6' }, '连接数不可用');
 
 	function row(label, c) {
 		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto; align-self: center' }),
-			E('span', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, label),
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto; align-self: center' }),
+			E('span', { 'style': 'font-size: 12px; opacity: 0.6' }, label),
 			E('strong', {
-				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
 			}, String(c.total)),
-			E('span', { 'style': 'font-size: 11px; color: ' + TXT_MUTED }, ' 卸载 '),
+			E('span', { 'style': 'font-size: 11px; opacity: 0.6' }, ' 卸载 '),
 			E('strong', {
-				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
 			}, String(c.npu))
 		]);
 	}
@@ -367,7 +371,7 @@ function connBlock(conns) {
 			'class': 'ifacebox-head',
 			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600'
 		}, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
 			'连接 / 卸载'
 		]),
 		E('div', {
@@ -438,7 +442,7 @@ function ponIcon(up) {
 
 function waveChip(dir, nm, color) {
 	return E('div', {
-		'style': 'display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9px; font-size: 11px; white-space: nowrap; color: ' + TXT_STRONG + '; background: ' + TILE_BG
+		'style': 'display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: var(--iface-head-bg, #eee); color: var(--iface-head-text, inherit)'
 	}, [
 		E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + color + '; flex: 0 0 auto' }),
 		dir + ' ' + nm + ' nm'
