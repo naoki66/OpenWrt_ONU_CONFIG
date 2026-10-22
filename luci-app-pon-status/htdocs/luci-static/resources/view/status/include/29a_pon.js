@@ -382,6 +382,81 @@ function connBlock(conns) {
 }
 
 /*
+ * Module supply voltage and TX bias current as one block, laid out like
+ * the rate panel: voltage on the upper row, bias current on the lower row.
+ */
+function voltAmpPanel(frontend) {
+	function row(label, field, unit, digits) {
+		var value;
+
+		if (frontend == null || frontend.error)
+			value = '读取失败';
+		else if (!Object.prototype.hasOwnProperty.call(frontend, field))
+			value = '不支持';
+		else
+			value = Number(frontend[field]).toFixed(digits) + ' ' + unit;
+
+		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto; align-self: center' }),
+			E('span', { 'style': 'font-size: 12px; opacity: 0.6' }, label),
+			E('strong', {
+				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
+			}, value)
+		]);
+	}
+
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 0 0 auto; margin: 0' }, [
+		E('div', {
+			'class': 'ifacebox-head',
+			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600'
+		}, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
+			'模块电压/电流'
+		]),
+		E('div', {
+			'class': 'ifacebox-body',
+			'style': 'display: flex; flex-direction: column; gap: 6px; padding: 6px 10px'
+		}, [
+			row('电压', 'voltage_volts', 'V', 4),
+			row('电流', 'tx_bias_ma', 'mA', 2)
+		])
+	]);
+}
+
+/*
+ * Optical frontend temperature and the OMCI ONU lifecycle state as one
+ * block: the temperature reading on the upper row, the colored O1-O7
+ * badge (full state table as tooltip) on the lower row.
+ */
+function tempStatePanel(frontend, onu) {
+	var value;
+
+	if (frontend == null || frontend.error)
+		value = '读取失败';
+	else if (!Object.prototype.hasOwnProperty.call(frontend, 'temperature_celsius'))
+		value = '不支持';
+	else
+		value = Number(frontend.temperature_celsius).toFixed(2) + ' °C';
+
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 0 0 auto; margin: 0' }, [
+		E('div', {
+			'class': 'ifacebox-head',
+			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600'
+		}, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
+			'温度/状态'
+		]),
+		E('div', {
+			'class': 'ifacebox-body',
+			'style': 'display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 10px'
+		}, [
+			E('div', { 'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap' }, value),
+			onu ? onu : E('span', { 'style': 'font-size: 12px; opacity: 0.6' }, '状态未知')
+		])
+	]);
+}
+
+/*
  * SFP optical module icon, drawn in the same visual language as the
  * luci-mod-status Ethernet port icons (icons/port_up.svg / port_down.svg):
  * 48x48 viewBox, metallic cage gradients, #888a85 outlines, round linecaps.
@@ -392,7 +467,7 @@ function connBlock(conns) {
  * port_down. Inlined as a data URI so the view stays a single file.
  */
 var PON_ICON_SVG_UP =
-	'<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 48 48">' +
+	'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 48 48">' +
 	'<defs>' +
 	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
 	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
@@ -413,7 +488,7 @@ var PON_ICON_SVG_UP =
 	'</svg>';
 
 var PON_ICON_SVG_DOWN =
-	'<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 48 48">' +
+	'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 48 48">' +
 	'<defs>' +
 	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
 	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
@@ -449,11 +524,21 @@ function waveChip(dir, nm, color) {
 	]);
 }
 
-function fiberGraphic(mode, up) {
+/*
+ * The optics figure: the SFP module icon (same 32x32 footprint as the
+ * port status icons) with the lifecycle badge underneath it, and the
+ * TX/RX wavelength chips beside it.
+ */
+function fiberGraphic(mode, up, state) {
 	var w = WAVELENGTHS[mode] || WAVELENGTHS['gpon'];
 
 	return E('div', { 'style': 'flex: 0 0 auto; display: flex; align-items: center; gap: 10px' }, [
-		ponIcon(up),
+		E('div', { 'style': 'display: flex; flex-direction: column; align-items: center; gap: 6px' }, [
+			ponIcon(up),
+			E('span', {
+				'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: #ffffff; background: ' + BADGE_BG[state.severity]
+			}, state.text)
+		]),
 		E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px' }, [
 			waveChip('↑', w[0], '#4e9a06'),
 			waveChip('↓', w[1], '#3465a4')
@@ -488,27 +573,20 @@ function renderBox(item) {
 
 	return E('div', { 'class': 'ifacebox' }, [
 		E('div', {
-			'class': 'ifacebox-head center active',
-			'style': 'display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0'
+			'class': 'ifacebox-head active',
+			'style': 'display: flex; align-items: center; gap: 10px; min-width: 0'
 		}, [
-			E('div', { 'style': 'display: flex; align-items: center; gap: 8px; min-width: 0' }, [
-				E('strong', item.device),
-				E('span', {
-					'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; color: #ffffff; background: ' + BADGE_BG[state.severity]
-				}, state.text)
-			]),
-			E('div', { 'style': 'display: flex; align-items: center; gap: 6px; flex: 0 0 auto' }, onu ? [ onu ] : [])
+			E('strong', item.device)
 		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
 			E('div', { 'style': 'display: flex; align-items: center; gap: 14px; flex-wrap: wrap' }, [
-				fiberGraphic((item.line && item.line.active_mode) || '', state.severity == 'success'),
+				fiberGraphic((item.line && item.line.active_mode) || '', state.severity == 'success', state),
 				E('div', { 'style': 'flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0' }, [
 					metricTile('接收光功率', item.frontend, 'rx_power_dbm', 'dBm', 2),
-					metricTile('发射光功率', item.frontend, 'tx_power_dbm', 'dBm', 2),
-					metricTile('光前端温度', item.frontend, 'temperature_celsius', '°C', 2),
-					metricTile('光模块电流', item.frontend, 'tx_bias_ma', 'mA', 2),
-					metricTile('电压', item.frontend, 'voltage_volts', 'V', 4)
+					metricTile('发射光功率', item.frontend, 'tx_power_dbm', 'dBm', 2)
 				]),
+				tempStatePanel(item.frontend, onu),
+				voltAmpPanel(item.frontend),
 				ratePanel(item.rate),
 				connBlock(item.conns)
 			])
