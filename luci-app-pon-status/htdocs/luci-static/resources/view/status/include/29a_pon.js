@@ -271,6 +271,12 @@ function lineState(line) {
 	};
 }
 
+/*
+ * Metric tile in the port-card style: grey ifacebox-head strip with the
+ * label, white ifacebox-body with the value. The ifacebox classes come
+ * from the theme (luci-theme-argon cascade.css), so the block follows the
+ * light/dark theme like the port status cards do.
+ */
 function metricTile(label, frontend, field, unit, digits) {
 	var value;
 
@@ -281,19 +287,17 @@ function metricTile(label, frontend, field, unit, digits) {
 	else
 		value = Number(frontend[field]).toFixed(digits) + ' ' + unit;
 
-	return E('div', {
-		'style': 'flex: 1 1 118px; min-width: 104px; padding: 7px 10px; border-radius: 6px; background: ' + TILE_BG
-	}, [
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 1 1 118px; min-width: 104px; margin: 0' }, [
 		E('div', {
-			'style': 'display: flex; align-items: center; gap: 5px; font-size: 12px; color: ' + TXT_MUTED + '; white-space: nowrap'
+			'class': 'ifacebox-head',
+			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap'
 		}, [
-			E('span', {
-				'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto'
-			}),
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
 			label
 		]),
 		E('div', {
-			'style': 'margin-top: 3px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG + '; white-space: nowrap'
+			'class': 'ifacebox-body',
+			'style': 'padding: 6px 10px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG + '; white-space: nowrap'
 		}, value)
 	]);
 }
@@ -302,7 +306,7 @@ function ratePanel(rate) {
 	var ok = (rate != null && !rate.error && rate.rx != null && rate.tx != null);
 
 	function row(dir, arrow, value) {
-		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; white-space: nowrap' }, [
+		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
 			E('span', { 'style': 'font-size: 13px; color: ' + TXT_MUTED }, arrow),
 			E('span', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, dir),
 			E('strong', {
@@ -312,11 +316,18 @@ function ratePanel(rate) {
 		]);
 	}
 
-	return E('div', {
-		'style': 'flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 6px; background: ' + TILE_BG
-	}, [
-		row('上行', '↑', ok ? rate.tx : null),
-		row('下行', '↓', ok ? rate.rx : null)
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 0 0 auto; margin: 0' }, [
+		E('div', {
+			'class': 'ifacebox-head',
+			'style': 'padding: 3px 10px; font-size: 12px; font-weight: 600'
+		}, '端口速率'),
+		E('div', {
+			'class': 'ifacebox-body',
+			'style': 'display: flex; flex-direction: column; gap: 6px; padding: 6px 10px'
+		}, [
+			row('上行', '↑', ok ? rate.tx : null),
+			row('下行', '↓', ok ? rate.rx : null)
+		])
 	]);
 }
 
@@ -330,8 +341,8 @@ function connBlock(conns) {
 		return E('div', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, '连接数不可用');
 
 	function row(label, c) {
-		return E('div', { 'style': 'display: flex; align-items: center; gap: 6px; white-space: nowrap' }, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
+		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto; align-self: center' }),
 			E('span', { 'style': 'font-size: 12px; color: ' + TXT_MUTED }, label),
 			E('strong', {
 				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: ' + TXT_STRONG
@@ -351,9 +362,19 @@ function connBlock(conns) {
 	if (conns.udp)
 		rows.push(row('UDP', conns.udp));
 
-	return E('div', {
-		'style': 'flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 6px; background: ' + TILE_BG
-	}, rows);
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 0 0 auto; margin: 0' }, [
+		E('div', {
+			'class': 'ifacebox-head',
+			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600'
+		}, [
+			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + TXT_MUTED + '; flex: 0 0 auto' }),
+			'连接 / 卸载'
+		]),
+		E('div', {
+			'class': 'ifacebox-body',
+			'style': 'display: flex; flex-direction: column; gap: 6px; padding: 6px 10px'
+		}, rows)
+	]);
 }
 
 /*
