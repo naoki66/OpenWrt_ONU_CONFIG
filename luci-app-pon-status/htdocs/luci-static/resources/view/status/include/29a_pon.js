@@ -19,7 +19,6 @@
  *   uci pon                 xpon sections name the PON netdev of each line
  *   ponctl --json           line state and optical frontend readings
  *   ubus network.device     byte counters for the port rates (sysfs fallback)
- *   ponstat-conn            TCP/UDP connection and hardware offload counts
  *
  * When no xpon section carries a device, the pon config is missing, or
  * ponctl is unavailable on every line, load() rejects and the overview page
@@ -28,7 +27,6 @@
  */
 
 var PONCTL = '/usr/sbin/ponctl';
-var CONNSTAT = '/usr/sbin/ponstat-conn';
 
 var prevRates = {};
 var statsSource = null;
@@ -202,39 +200,6 @@ function readRate(device) {
 	});
 }
 
-function readConns() {
-	/*
-	 * /bin/ash, not /bin/sh: the stock rpcd file-exec ACL lists /bin/ash,
-	 * so a restricted (non-root) session can run the counter script only
-	 * through the ash path. On OpenWrt /bin/sh is a symlink to ash anyway.
-	 */
-	return L.resolveDefault(fs.exec_direct('/bin/ash', [ CONNSTAT ]), null).then(function(output) {
-		var vals = {},
-		    lines = String(output || '').split('\n'),
-		    i, m;
-
-		for (i = 0; i < lines.length; i++) {
-			m = lines[i].match(/^([a-z0-9_]+)=(\d+)$/);
-
-			if (m)
-				vals[m[1]] = parseInt(m[2]);
-		}
-
-		if (typeof(vals.tcp_total) != 'number' &&
-		    typeof(vals.udp_total) != 'number')
-			return null;
-
-		function pair(total, npu) {
-			return (typeof(total) == 'number')
-				? { total: total, npu: (typeof(npu) == 'number') ? npu : 0 }
-				: null;
-		}
-
-		return { tcp: pair(vals.tcp_total, vals.tcp_npu),
-		         udp: pair(vals.udp_total, vals.udp_npu) };
-	});
-}
-
 function lineState(line) {
 	var mode = (line && line.active_mode) || '';
 	var lifecycle = (line && line.lifecycle) || '';
@@ -312,52 +277,6 @@ function ratePanel(rate) {
 			row('上行', '↑', ok ? rate.tx : null),
 			row('下行', '↓', ok ? rate.rx : null)
 		])
-	]);
-}
-
-/*
- * Connection counters as one block, laid out like the rate panel:
- * TCP on the upper row, UDP on the lower row. Each row shows the
- * live connection count and how many of them are hardware offloaded.
- */
-function connBlock(conns) {
-	if (!conns || (!conns.tcp && !conns.udp))
-		return E('div', { 'style': 'font-size: 12px; opacity: 0.6' }, '连接数不可用');
-
-	function row(label, c) {
-		return E('div', { 'style': 'display: flex; align-items: baseline; gap: 6px; flex-wrap: nowrap; white-space: nowrap' }, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto; align-self: center' }),
-			E('span', { 'style': 'font-size: 12px; opacity: 0.6' }, label),
-			E('strong', {
-				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
-			}, String(c.total)),
-			E('span', { 'style': 'font-size: 11px; opacity: 0.6' }, ' 卸载 '),
-			E('strong', {
-				'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums'
-			}, String(c.npu))
-		]);
-	}
-
-	var rows = [];
-
-	if (conns.tcp)
-		rows.push(row('TCP', conns.tcp));
-
-	if (conns.udp)
-		rows.push(row('UDP', conns.udp));
-
-	return E('div', { 'class': 'ifacebox', 'style': 'flex: 0 0 auto; margin: 0' }, [
-		E('div', {
-			'class': 'ifacebox-head',
-			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600'
-		}, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
-			'连接 / 卸载'
-		]),
-		E('div', {
-			'class': 'ifacebox-body',
-			'style': 'display: flex; flex-direction: column; gap: 6px; padding: 6px 10px'
-		}, rows)
 	]);
 }
 
@@ -678,6 +597,12 @@ function onuBadge(registration) {
 	}, code + ' ' + info.zh);
 }
 
+/*
+ * The card carries no head strip: the device name and the colored title
+ * bar were dropped, so the body row starts directly with the optics
+ * figure. The ifacebox wrapper still provides the panel background and
+ * border from the theme.
+ */
 function renderBox(item) {
 	var state = lineState(item.line);
 	var onu = onuBadge(item.registration);
@@ -685,12 +610,6 @@ function renderBox(item) {
 	var hasSignal = !(item.line && item.line.optical_signal === false);
 
 	return E('div', { 'class': 'ifacebox' }, [
-		E('div', {
-			'class': 'ifacebox-head active',
-			'style': 'display: flex; align-items: center; gap: 10px; min-width: 0'
-		}, [
-			E('strong', item.device)
-		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
 			E('div', { 'style': 'display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap' }, [
 				fiberGraphic(state.severity == 'success', state),
@@ -698,8 +617,7 @@ function renderBox(item) {
 				powerPanel('tx', '发光功率 Tx · ' + w[0] + ' nm', item.frontend, 'tx_power_dbm', TX_ZONES, TX_RANGE, TX_TICKS, hasSignal),
 				tempStatePanel(item.frontend, onu),
 				voltAmpPanel(item.frontend),
-				ratePanel(item.rate),
-				connBlock(item.conns)
+				ratePanel(item.rate)
 			])
 		])
 	]);
@@ -717,30 +635,22 @@ return baseclass.extend({
 			if (!sections.length)
 				return Promise.reject();
 
-			return Promise.all([
-				readConns(),
-				Promise.all(sections.map(function(section) {
-					return Promise.all([
-						readFrontend(section.device),
-						readRate(section.device)
-					]).then(function(res) {
-						return {
-							device: section.device,
-							line: res[0] ? res[0].line : {},
-							frontend: res[0] ? res[0].frontend : null,
-							registration: res[0] ? res[0].registration : {},
+			return Promise.all(sections.map(function(section) {
+				return Promise.all([
+					readFrontend(section.device),
+					readRate(section.device)
+				]).then(function(res) {
+					return {
+						device: section.device,
+						line: res[0] ? res[0].line : {},
+						frontend: res[0] ? res[0].frontend : null,
+						registration: res[0] ? res[0].registration : {},
 						rate: res[1]
-						};
-					});
-				}))
-			]).then(function(res) {
-				var conns = res[0];
-				var items = res[1];
-
+					};
+				});
+			})).then(function(items) {
 				if (!items.some(function(item) { return item.frontend != null }))
 					return Promise.reject();
-
-				items.forEach(function(item) { item.conns = conns; });
 
 				return items;
 			});
