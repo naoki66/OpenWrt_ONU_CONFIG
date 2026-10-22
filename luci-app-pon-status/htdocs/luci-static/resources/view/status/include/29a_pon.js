@@ -299,7 +299,7 @@ function ratePanel(rate) {
 		E('div', {
 			'class': 'ifacebox-head',
 			'style': 'padding: 3px 10px; font-size: 12px; font-weight: 600'
-		}, '端口速率'),
+		}, 'PON流量'),
 		E('div', {
 			'class': 'ifacebox-body',
 			'style': 'display: flex; flex-direction: column; gap: 6px; padding: 6px 10px'
@@ -458,7 +458,12 @@ function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal
 		}, t.label);
 	}
 
-	var bar = E('div', { 'style': 'position: relative; height: 9px; border-radius: 4px; overflow: hidden; display: flex' },
+	/*
+	 * The bar must override the theme rule
+	 * .network-status-table .ifacebox-body > div { gap: .5rem;
+	 * flex-wrap: wrap }, otherwise the zone segments come apart.
+	 */
+	var bar = E('div', { 'style': 'position: relative; height: 9px; border-radius: 4px; overflow: hidden; display: flex; flex-wrap: nowrap; gap: 0' },
 		zones.map(function(z) {
 			return E('div', { 'style': 'flex: ' + (z.to - z.from) + ' 1 0; background: ' + z.color });
 		}));
@@ -496,7 +501,7 @@ function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal
 				}, status.text)
 			]),
 			bar,
-			E('div', { 'style': 'position: relative; height: 12px' }, marks)
+			E('div', { 'style': 'position: relative; height: 12px; flex-wrap: nowrap; gap: 0' }, marks)
 		])
 	]);
 }
@@ -576,18 +581,19 @@ function tempStatePanel(frontend, onu) {
 }
 
 /*
- * SFP optical module icon, drawn in the same visual language as the
- * luci-mod-status Ethernet port icons (icons/port_up.svg / port_down.svg):
- * 48x48 viewBox rendered at their 32x32 footprint, metallic cage
- * gradients, #888a85 outlines, round linecaps.
- * The optical interface is a single SC port (rectangular shell with the
- * ferrule in the middle) - XPON is bidirectional over one fiber, so the
- * green TX and blue RX beams both leave that one port. Up: link LED plus
- * both beams. Down: dimmed module, dark port and amber LOS ticks like
- * port_down. Inlined as a data URI so the view stays a single file.
+ * PON optical module icon with a UPC SC connector, drawn in the same
+ * visual language as the luci-mod-status Ethernet port icons
+ * (icons/port_up.svg / port_down.svg): 48x48 viewBox rendered at a 40px
+ * footprint, metallic cage gradients, #888a85 outlines, round linecaps.
+ * UPC (Ultra Physical Contact) is the flat-polish, blue-coded ferrule
+ * used by PON SC ports, so the connector carries the UPC blue; XPON is
+ * bidirectional over one fiber, so the green TX and blue RX beams both
+ * leave that one port. Up: link LED plus both beams. Down: dimmed
+ * module, dark port and amber LOS ticks like port_down. Inlined as a
+ * data URI so the view stays a single file.
  */
 var PON_ICON_SVG_UP =
-	'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 48 48">' +
+	'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 48 48">' +
 	'<defs>' +
 	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
 	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
@@ -596,19 +602,21 @@ var PON_ICON_SVG_UP =
 	'<stop stop-color="#d3d7cf"/><stop offset="1" stop-color="#babdb6"/>' +
 	'</linearGradient>' +
 	'</defs>' +
-	'<rect x="8" y="30" width="32" height="10" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
-	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.3"/>' +
-	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
-	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
-	'<rect x="19" y="18" width="10" height="7.5" rx="1.5" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
-	'<rect x="21.5" y="20.2" width="5" height="3.1" rx="0.8" fill="#555753" opacity="0.55"/>' +
-	'<circle cx="30" cy="14.8" r="1.2" fill="#4e9a06"/>' +
-	'<path d="M20.5 25.8 17.2 40.5" stroke="#4e9a06" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
-	'<path d="M27.5 25.8 30.8 40.5" stroke="#3465a4" stroke-width="2.6" stroke-linecap="round" fill="none"/>' +
+	'<rect x="6" y="27" width="36" height="14" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<rect x="10" y="34" width="28" height="3.5" rx="1.75" fill="#888a85" opacity="0.3"/>' +
+	'<rect x="12" y="7" width="24" height="22" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<path d="M16 7.5V5a8 8 0 0 1 16 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
+	'<rect x="15.5" y="11.5" width="17" height="12" rx="2.5" fill="none" stroke="#0d76e0" stroke-width="1.6"/>' +
+	'<rect x="17" y="13" width="13" height="9" rx="1.5" fill="#ffffff" stroke="#888a85" stroke-width="1.2"/>' +
+	'<rect x="20" y="15.5" width="7" height="4" rx="1" fill="#0d76e0"/>' +
+	'<circle cx="23.5" cy="17.5" r="0.9" fill="#cfe4f7"/>' +
+	'<circle cx="33" cy="11" r="1.3" fill="#4e9a06"/>' +
+	'<path d="M21 23 17.5 41" stroke="#4e9a06" stroke-width="2.8" stroke-linecap="round" fill="none"/>' +
+	'<path d="M26 23 30.5 41" stroke="#3465a4" stroke-width="2.8" stroke-linecap="round" fill="none"/>' +
 	'</svg>';
 
 var PON_ICON_SVG_DOWN =
-	'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 48 48">' +
+	'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 48 48">' +
 	'<defs>' +
 	'<linearGradient id="mg" x1="0" y1="0" x2="0" y2="1">' +
 	'<stop stop-color="#ffffff"/><stop offset="1" stop-color="#d3d7cf"/>' +
@@ -618,14 +626,16 @@ var PON_ICON_SVG_DOWN =
 	'</linearGradient>' +
 	'</defs>' +
 	'<g opacity="0.72">' +
-	'<rect x="8" y="30" width="32" height="10" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
-	'<rect x="12" y="36.5" width="24" height="3.5" rx="1.75" fill="#888a85" opacity="0.45"/>' +
-	'<rect x="15" y="11" width="18" height="20" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
-	'<path d="M19.5 11.5v-2.5a4.5 4.5 0 0 1 9 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
-	'<rect x="19" y="18" width="10" height="7.5" rx="1.5" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
-	'<rect x="21.5" y="20.2" width="5" height="3.1" rx="0.8" fill="#2e3436" opacity="0.6"/>' +
+	'<rect x="6" y="27" width="36" height="14" rx="2.5" fill="url(#cg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<rect x="10" y="34" width="28" height="3.5" rx="1.75" fill="#888a85" opacity="0.45"/>' +
+	'<rect x="12" y="7" width="24" height="22" rx="2" fill="url(#mg)" stroke="#888a85" stroke-width="1.4"/>' +
+	'<path d="M16 7.5V5a8 8 0 0 1 16 0v2.5" fill="none" stroke="#888a85" stroke-width="1.6" stroke-linecap="round"/>' +
+	'<rect x="15.5" y="11.5" width="17" height="12" rx="2.5" fill="none" stroke="#8a8a8a" stroke-width="1.4"/>' +
+	'<rect x="17" y="13" width="13" height="9" rx="1.5" fill="#888a85" stroke="#555753" stroke-width="1.2"/>' +
+	'<rect x="20" y="15.5" width="7" height="4" rx="1" fill="#2e3436" opacity="0.6"/>' +
+	'<circle cx="33" cy="11" r="1.3" fill="#8a8a8a"/>' +
 	'</g>' +
-	'<path d="M20 41.8v3.2M24 41.8v3.2M28 41.8v3.2" stroke="#edd400" stroke-width="1.6" stroke-linecap="round" fill="none"/>' +
+	'<path d="M18 42v3M24 42v3M30 42v3" stroke="#edd400" stroke-width="1.8" stroke-linecap="round" fill="none"/>' +
 	'</svg>';
 
 function ponIcon(up) {
@@ -635,34 +645,17 @@ function ponIcon(up) {
 	});
 }
 
-function waveChip(dir, nm, color) {
-	return E('div', {
-		'style': 'display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: var(--iface-head-bg, #eee); color: var(--iface-head-text, inherit)'
-	}, [
-		E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: ' + color + '; flex: 0 0 auto' }),
-		dir + ' ' + nm + ' nm'
-	]);
-}
-
 /*
- * The optics figure: the SFP module icon (same 32x32 footprint as the
- * port status icons) with the lifecycle badge underneath it, and the
- * TX/RX wavelength chips beside it.
+ * The optics figure: the PON module icon with the lifecycle badge
+ * underneath it. The wavelengths live in the power panel titles, so no
+ * separate chips are drawn here.
  */
-function fiberGraphic(mode, up, state) {
-	var w = WAVELENGTHS[mode] || WAVELENGTHS['gpon'];
-
-	return E('div', { 'style': 'flex: 0 0 auto; display: flex; align-items: center; gap: 10px' }, [
-		E('div', { 'style': 'display: flex; flex-direction: column; align-items: center; gap: 6px' }, [
-			ponIcon(up),
-			E('span', {
-				'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: #ffffff; background: ' + BADGE_BG[state.severity]
-			}, state.text)
-		]),
-		E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px' }, [
-			waveChip('↑', w[0], '#4e9a06'),
-			waveChip('↓', w[1], '#3465a4')
-		])
+function fiberGraphic(up, state) {
+	return E('div', { 'style': 'flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 6px' }, [
+		ponIcon(up),
+		E('span', {
+			'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; color: #ffffff; background: ' + BADGE_BG[state.severity]
+		}, state.text)
 	]);
 }
 
@@ -702,9 +695,9 @@ function renderBox(item) {
 		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
 			E('div', { 'style': 'display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap' }, [
-				fiberGraphic((item.line && item.line.active_mode) || '', state.severity == 'success', state),
-				powerPanel('rx', '收光功率 Rx · ' + w[1] + ' nm 接收', item.frontend, 'rx_power_dbm', RX_ZONES, RX_RANGE, RX_TICKS, hasSignal),
-				powerPanel('tx', '发光功率 Tx · ' + w[0] + ' nm 发送', item.frontend, 'tx_power_dbm', TX_ZONES, TX_RANGE, TX_TICKS, hasSignal),
+				fiberGraphic(state.severity == 'success', state),
+				powerPanel('rx', '收光功率 Rx · ' + w[1] + ' nm', item.frontend, 'rx_power_dbm', RX_ZONES, RX_RANGE, RX_TICKS, hasSignal),
+				powerPanel('tx', '发光功率 Tx · ' + w[0] + ' nm', item.frontend, 'tx_power_dbm', TX_ZONES, TX_RANGE, TX_TICKS, hasSignal),
 				tempStatePanel(item.frontend, onu),
 				voltAmpPanel(item.frontend),
 				ratePanel(item.rate),
