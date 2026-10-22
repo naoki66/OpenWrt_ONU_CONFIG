@@ -276,36 +276,11 @@ function lineState(line) {
 }
 
 /*
- * Metric tile in the port-card style: grey ifacebox-head strip with the
- * label, white ifacebox-body with the value. The ifacebox classes come
- * from the theme (luci-theme-argon cascade.css), so the block follows the
- * light/dark theme like the port status cards do.
+ * Port rate block: grey ifacebox-head strip, two rows for the upstream
+ * and downstream rates. The ifacebox classes come from the theme
+ * (luci-theme-argon cascade.css), so the block follows the light/dark
+ * theme like the port status cards do.
  */
-function metricTile(label, frontend, field, unit, digits) {
-	var value;
-
-	if (frontend == null || frontend.error)
-		value = '读取失败';
-	else if (!Object.prototype.hasOwnProperty.call(frontend, field))
-		value = '不支持';
-	else
-		value = Number(frontend[field]).toFixed(digits) + ' ' + unit;
-
-	return E('div', { 'class': 'ifacebox', 'style': 'flex: 1 1 118px; min-width: 104px; margin: 0' }, [
-		E('div', {
-			'class': 'ifacebox-head',
-			'style': 'display: flex; align-items: center; gap: 5px; padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap'
-		}, [
-			E('span', { 'style': 'width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: 0 0 auto' }),
-			label
-		]),
-		E('div', {
-			'class': 'ifacebox-body',
-			'style': 'padding: 6px 10px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap'
-		}, value)
-	]);
-}
-
 function ratePanel(rate) {
 	var ok = (rate != null && !rate.error && rate.rx != null && rate.tx != null);
 
@@ -381,6 +356,150 @@ function connBlock(conns) {
 	]);
 }
 
+/*
+ * Optical power diagnostic panel, drawn after the reference design: the
+ * live reading with a severity pill above a zone scale carrying a marker
+ * at the current value. Zone boundaries follow the ONU power budget:
+ *   RX (dBm): < -29 fault | -29..-27 warning | -27..-8 normal
+ *             (-22..-12 is the ideal band) | > -8 overload
+ *   TX (dBm): < +0.5 below the window | +0.5..+5 good | > +5 overload
+ */
+var PWR_ZONE = {
+	fault: '#f2b3b3',
+	warn: '#f6d9a6',
+	ok: '#bcd9a8',
+	ideal: '#4e9a06',
+	over: '#f2b3b3',
+	good: '#79c47f'
+};
+
+var RX_ZONES = [
+	{ from: -30, to: -29, color: PWR_ZONE.fault },
+	{ from: -29, to: -27, color: PWR_ZONE.warn },
+	{ from: -27, to: -22, color: PWR_ZONE.ok },
+	{ from: -22, to: -12, color: PWR_ZONE.ideal },
+	{ from: -12, to: -8, color: PWR_ZONE.ok },
+	{ from: -8, to: -6, color: PWR_ZONE.over }
+];
+var RX_RANGE = { min: -30, max: -6 };
+var RX_TICKS = [
+	{ at: -30, label: '-30' },
+	{ at: -25, label: '-25' },
+	{ at: -12, label: '-12' },
+	{ at: -8, label: '饱和 -8' }
+];
+
+var TX_ZONES = [
+	{ from: 0, to: 0.5, color: PWR_ZONE.warn },
+	{ from: 0.5, to: 5, color: PWR_ZONE.good },
+	{ from: 5, to: 8, color: PWR_ZONE.over }
+];
+var TX_RANGE = { min: 0, max: 8 };
+var TX_TICKS = [
+	{ at: 0, label: '0' },
+	{ at: 0.5, label: '+0.5' },
+	{ at: 5, label: '+5' },
+	{ at: 8, label: '+8' }
+];
+
+function powerStatus(kind, value, hasSignal) {
+	if (!hasSignal)
+		return { text: '无光', severity: 'muted' };
+
+	if (value == null)
+		return { text: '读取失败', severity: 'muted' };
+
+	if (kind == 'rx') {
+		if (value > -8)
+			return { text: '饱和/过载', severity: 'error' };
+		if (value >= -12)
+			return { text: '正常', severity: 'success' };
+		if (value >= -22)
+			return { text: '理想良好', severity: 'success' };
+		if (value >= -27)
+			return { text: '正常', severity: 'success' };
+		if (value >= -29)
+			return { text: '临界预警', severity: 'warning' };
+		return { text: '差/故障', severity: 'error' };
+	}
+
+	if (value > 5)
+		return { text: '过载', severity: 'error' };
+	if (value >= 0.5)
+		return { text: '良好', severity: 'success' };
+	if (value >= -5)
+		return { text: '临界预警', severity: 'warning' };
+	return { text: '差/故障', severity: 'error' };
+}
+
+function powerPanel(kind, title, frontend, field, zones, range, ticks, hasSignal) {
+	var value = null;
+
+	if (frontend != null && !frontend.error && Object.prototype.hasOwnProperty.call(frontend, field))
+		value = Number(frontend[field]);
+
+	var status = powerStatus(kind, value, hasSignal);
+	var showMarker = (value != null && hasSignal);
+	var pct = showMarker
+		? Math.max(0, Math.min(100, (value - range.min) / (range.max - range.min) * 100))
+		: null;
+
+	function tickNode(t) {
+		var p = (t.at - range.min) / (range.max - range.min) * 100;
+		var shift = 'translateX(-50%)';
+
+		if (p < 10)
+			shift = 'translateX(0)';
+		else if (p > 90)
+			shift = 'translateX(-100%)';
+
+		return E('span', {
+			'style': 'position: absolute; bottom: 0; left: ' + p.toFixed(2) + '%; transform: ' + shift + '; font-size: 9px; line-height: 1; opacity: 0.65; white-space: nowrap'
+		}, t.label);
+	}
+
+	var bar = E('div', { 'style': 'position: relative; height: 9px; border-radius: 4px; overflow: hidden; display: flex' },
+		zones.map(function(z) {
+			return E('div', { 'style': 'flex: ' + (z.to - z.from) + ' 1 0; background: ' + z.color });
+		}));
+
+	/* RX only: the LOS threshold sits at -28 dBm inside the fault zone */
+	if (kind == 'rx')
+		bar.children.push(E('span', {
+			'style': 'position: absolute; top: 1px; left: 8.33%; transform: translateX(-50%); font-size: 7px; line-height: 1; color: #a94442',
+			'title': '无光：接收功率低于 -28 dBm'
+		}, '▼'));
+
+	var marks = ticks.map(tickNode);
+
+	if (pct != null)
+		marks.push(E('span', {
+			'style': 'position: absolute; bottom: 7px; left: ' + pct.toFixed(2) + '%; transform: translateX(-50%); font-size: 9px; line-height: 1; color: #3465a4',
+			'title': value.toFixed(2) + ' dBm'
+		}, '▲'));
+
+	return E('div', { 'class': 'ifacebox', 'style': 'flex: 1 1 220px; min-width: 200px; margin: 0' }, [
+		E('div', {
+			'class': 'ifacebox-head',
+			'style': 'padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis'
+		}, title),
+		E('div', {
+			'class': 'ifacebox-body',
+			'style': 'display: flex; flex-direction: column; gap: 5px; padding: 6px 10px'
+		}, [
+			E('div', { 'style': 'display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0' }, [
+				E('strong', {
+					'style': 'font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap'
+				}, (value != null) ? value.toFixed(2) + ' dBm' : '—'),
+				E('span', {
+					'style': 'flex: 0 0 auto; padding: 1px 9px; border-radius: 10px; font-size: 11px; white-space: nowrap; color: #ffffff; background: ' + BADGE_BG[status.severity]
+				}, status.text)
+			]),
+			bar,
+			E('div', { 'style': 'position: relative; height: 12px' }, marks)
+		])
+	]);
+}
 /*
  * Module supply voltage and TX bias current as one block, laid out like
  * the rate panel: voltage on the upper row, bias current on the lower row.
@@ -459,7 +578,8 @@ function tempStatePanel(frontend, onu) {
 /*
  * SFP optical module icon, drawn in the same visual language as the
  * luci-mod-status Ethernet port icons (icons/port_up.svg / port_down.svg):
- * 48x48 viewBox, metallic cage gradients, #888a85 outlines, round linecaps.
+ * 48x48 viewBox rendered at their 32x32 footprint, metallic cage
+ * gradients, #888a85 outlines, round linecaps.
  * The optical interface is a single SC port (rectangular shell with the
  * ferrule in the middle) - XPON is bidirectional over one fiber, so the
  * green TX and blue RX beams both leave that one port. Up: link LED plus
@@ -570,6 +690,8 @@ function onuBadge(registration) {
 function renderBox(item) {
 	var state = lineState(item.line);
 	var onu = onuBadge(item.registration);
+	var w = WAVELENGTHS[(item.line && item.line.active_mode) || ''] || WAVELENGTHS['gpon'];
+	var hasSignal = !(item.line && item.line.optical_signal === false);
 
 	return E('div', { 'class': 'ifacebox' }, [
 		E('div', {
@@ -579,12 +701,10 @@ function renderBox(item) {
 			E('strong', item.device)
 		]),
 		E('div', { 'class': 'ifacebox-body left', 'style': 'display: flex; flex-direction: column; gap: 10px' }, [
-			E('div', { 'style': 'display: flex; align-items: center; gap: 14px; flex-wrap: wrap' }, [
+			E('div', { 'style': 'display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap' }, [
 				fiberGraphic((item.line && item.line.active_mode) || '', state.severity == 'success', state),
-				E('div', { 'style': 'flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0' }, [
-					metricTile('接收光功率', item.frontend, 'rx_power_dbm', 'dBm', 2),
-					metricTile('发射光功率', item.frontend, 'tx_power_dbm', 'dBm', 2)
-				]),
+				powerPanel('rx', '收光功率 Rx · ' + w[1] + ' nm 接收', item.frontend, 'rx_power_dbm', RX_ZONES, RX_RANGE, RX_TICKS, hasSignal),
+				powerPanel('tx', '发光功率 Tx · ' + w[0] + ' nm 发送', item.frontend, 'tx_power_dbm', TX_ZONES, TX_RANGE, TX_TICKS, hasSignal),
 				tempStatePanel(item.frontend, onu),
 				voltAmpPanel(item.frontend),
 				ratePanel(item.rate),
