@@ -203,7 +203,12 @@ function readRate(device) {
 }
 
 function readConns() {
-	return L.resolveDefault(fs.exec_direct('/bin/sh', [ CONNSTAT ]), null).then(function(output) {
+	/*
+	 * /bin/ash, not /bin/sh: the stock rpcd file-exec ACL lists /bin/ash,
+	 * so a restricted (non-root) session can run the counter script only
+	 * through the ash path. On OpenWrt /bin/sh is a symlink to ash anyway.
+	 */
+	return L.resolveDefault(fs.exec_direct('/bin/ash', [ CONNSTAT ]), null).then(function(output) {
 		var vals = {},
 		    lines = String(output || '').split('\n'),
 		    i, m;
