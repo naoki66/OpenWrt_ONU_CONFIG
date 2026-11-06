@@ -1,0 +1,11 @@
+#!/bin/sh
+# internet-apply runs at START=18, before netifd creates ct-wanup. Until that
+# device exists, `nft -c` rejects the complete bridge flowtable the same way a
+# kernel without bridge flowtable support does. Reprobe on wan ifup and, when
+# the kernel accepts the full table, swap it in. reprobe reloads firewall4
+# only, not netifd, so this hotplug cannot loop.
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "wan" ] || exit 0
+
+/usr/libexec/internet-apply reprobe

@@ -395,44 +395,117 @@ write_offload_defaults() {
 #
 # These rules only ever see what the CPU forwards: slow path and first packet.
 #
-# The table also carries a bridge-family flowtable so that the frames the
-# downstream router forwards through br-wanup can be offloaded into the Airoha
-# PPE as native L2B entries. Two kernel-side prerequisites are easy to miss and
-# are handled here:
+# The table prefers a bridge-family flowtable so frames the downstream router
+# forwards through br-wanup can be offloaded into the Airoha PPE as native L2B
+# entries. Two kernel-side prerequisites are easy to miss:
 #
 #   1. The bridge family needs CONFIG_BRIDGE_NETFILTER / NF_CONNTRACK_BRIDGE /
-#      NF_FLOW_TABLE / NFT_FLOW_OFFLOAD. Without them `nft -c` below fails and
-#      this whole table is not installed, so the bridge silently stays in the
-#      software path. The check is therefore not optional.
+#      NF_FLOW_TABLE / NFT_FLOW_OFFLOAD. write_nft_rules probes the complete
+#      table with `nft -c` and, if that check fails, installs the same
+#      PPPoE/IPoE EtherType filter without the flowtable, the conntrack zone,
+#      or the flow offload statement. The filter is what keeps local traffic
+#      off the operator path; dropping the whole table used to leave the bridge
+#      unfiltered. The next apply tries the complete table again, so a kernel
+#      that later accepts the bridge flowtable picks it up with no script change.
 #
 #   2. A PPPoE session inside a bridge is only tracked (and therefore only
 #      offloadable) when the flow sits in a non-default conntrack zone. The
 #      bridge conntrack code resolves the inner PPPoE/802.1q encapsulation only
 #      when nf_ct_zone_id() != NF_CT_DEFAULT_ZONE_ID - it refuses to mix
-#      differently-tagged L2 encapsulations in one zone. So every frame on this
-#      bridge gets `ct zone set` first; the offload then carries the PPPoE
-#      Session-ID into the hardware entry, and the driver turns it into
-#      FLOW_ACTION_PPPOE_PUSH with ib1.PPPOE / pppoe_id in the FOE.
+#      differently-tagged L2 encapsulations in one zone. The complete table
+#      therefore sets `ct zone` before the offload statement. The filter
+#      fallback does not: the zone exists only to feed hardware offload.
 #
 # ZONE_ID has to stay distinct from any zone another bridge uses, hence it is a
 # fixed, documented constant (1) rather than the default zone 0.
+#
+# Timing: this script runs at START=18, before netifd creates ct-wanup. A
+# flowtable that names a device which does not exist yet fails `nft -c` the
+# same way a kernel without bridge flowtable support does. Installing that
+# file anyway would make firewall4 reject its whole ruleset. The boot/apply
+# path therefore keeps the filter until `nft -c` of the complete table passes.
+# /etc/hotplug.d/iface/99-internet-bridge-nft calls `internet-apply reprobe`
+# on wan ifup, when the device is present, and upgrades the file in place.
 BRIDGE_CT_ZONE=1
+NFT_RULESET=inactive
 
-write_nft_rules() {
-	local tmp port
-	# UNTAG bridge references the raw uplink (ct-wanup does not exist there);
-	# every other mode references ct-wanup.
+# UNTAG bridge references the raw uplink (ct-wanup does not exist there);
+# every other mode references ct-wanup.
+bridge_uplink_ref() {
 	local uplink_ref="$VLAN_DEV"
+
 	[ "$TRANSMODE" = 'untag' ] && [ "$MODE" = 'bridge' ] && uplink_ref="$UPLINK"
+	printf '%s' "$uplink_ref"
+}
 
-	tmp="$(mktemp /etc/internet.nft.XXXXXX)" || fail "Cannot create nftables staging file"
+# Remember the last nft -c failure as a single log line.
+nft_rules_ok() {
+	local err
 
-	if [ "$ENABLED" -ne 1 ] || [ "$MODE" != 'bridge' ]; then
-		cat >"$tmp" <<'EOF'
-# No internet bridge: the page is off or the ONT dials itself.
+	err="$(nft -c -f "$1" 2>&1)" && return 0
+	NFT_LAST_NFT_ERROR="$(printf '%s' "$err" | tr '\n' ' ')"
+	return 1
+}
+
+install_nft_file() {
+	local tmp="$1" ruleset="$2"
+
+	# The old stamp must not survive a replacement, even if apply later aborts.
+	if ! chmod 0644 "$tmp" || ! nft_clear_loaded ||
+	   ! mv -f "$tmp" "$NFT_FILE"; then
+		rm -f "$tmp"
+		return 1
+	fi
+	NFT_RULESET="$ruleset"
+}
+
+# PPPoE discovery/session, and IPoE when the page asked for it. Shared by the
+# complete table and the filter fallback so the two stay the same filter.
+append_bridge_filters() {
+	local tmp="$1" uplink_ref="$2" port
+
+	for port in $PORTS; do
+		cat >>"$tmp" <<EOF
+
+		# Session of the router plugged into $port.
+		iifname "$port" oifname "$uplink_ref" ether type { 0x8863, 0x8864 } \
+			counter accept comment "pppoe-to-uplink-$port"
+		iifname "$uplink_ref" oifname "$port" ether type { 0x8863, 0x8864 } \
+			counter accept comment "pppoe-from-uplink-$port"
 EOF
-	else
+	done
+
+	if [ "$IPOE" -eq 1 ]; then
+		for port in $PORTS; do
+			cat >>"$tmp" <<EOF
+
+		# IPoE operators carry native IPv4/IPv6 instead of a PPPoE session.
+		iifname "$port" oifname "$uplink_ref" ether type { arp, ip, ip6 } \
+			counter accept comment "ipoe-to-uplink-$port"
+		iifname "$uplink_ref" oifname "$port" ether type { arp, ip, ip6 } \
+			counter accept comment "ipoe-from-uplink-$port"
+EOF
+		done
+	fi
+
+	cat >>"$tmp" <<EOF
+
+		# Everything else is local: it must not reach the operator path.
+		iifname "$uplink_ref" counter drop comment "drop-non-pppoe-from-uplink"
+		oifname "$uplink_ref" counter drop comment "drop-non-pppoe-to-uplink"
+		counter accept comment "allow-traffic-between-lan-ports"
+EOF
+}
+
+# ruleset is "full" (flowtable + ct zone + offload) or "filter".
+render_bridge_rules() {
+	local tmp="$1" ruleset="$2" uplink_ref
+
+	uplink_ref="$(bridge_uplink_ref)"
+
+	if [ "$ruleset" = 'full' ]; then
 		cat >"$tmp" <<EOF
+# internet-apply bridge ruleset: full
 # Flush the table so repeated firewall reloads use the current rules.
 table bridge wanup
 flush table bridge wanup
@@ -449,45 +522,28 @@ table bridge wanup {
 	}
 
 	chain wanup_forward {
-EOF
-		# Every frame entering the bridge is pinned into the dedicated
-		# conntrack zone first: the bridge conntrack only parses an inner
-		# PPPoE/802.1q encapsulation when the zone is not the default one.
-		cat >>"$tmp" <<EOF
 		# Put the flow in its own zone so the bridge conntrack resolves the
 		# PPPoE header (required for the hardware PPPoE_PUSH action).
 		ct zone set $BRIDGE_CT_ZONE counter comment "internet-bridge-ct-zone"
 EOF
-		for port in $PORTS; do
-			cat >>"$tmp" <<EOF
+	else
+		cat >"$tmp" <<EOF
+# internet-apply bridge ruleset: filter
+# Flush the table so repeated firewall reloads use the current rules.
+# nft -c rejected the bridge flowtable table. This is the PPPoE/IPoE filter
+# only: no flowtable, no conntrack zone, no flow offload statement.
+table bridge wanup
+flush table bridge wanup
 
-		# Session of the router plugged into $port.
-		iifname "$port" oifname "$uplink_ref" ether type { 0x8863, 0x8864 } \
-			counter accept comment "pppoe-to-uplink-$port"
-		iifname "$uplink_ref" oifname "$port" ether type { 0x8863, 0x8864 } \
-			counter accept comment "pppoe-from-uplink-$port"
+table bridge wanup {
+	chain wanup_forward {
 EOF
-		done
+	fi
 
-		if [ "$IPOE" -eq 1 ]; then
-			for port in $PORTS; do
-				cat >>"$tmp" <<EOF
+	append_bridge_filters "$tmp" "$uplink_ref"
 
-		# IPoE operators carry native IPv4/IPv6 instead of a PPPoE session.
-		iifname "$port" oifname "$uplink_ref" ether type { arp, ip, ip6 } \
-			counter accept comment "ipoe-to-uplink-$port"
-		iifname "$uplink_ref" oifname "$port" ether type { arp, ip, ip6 } \
-			counter accept comment "ipoe-from-uplink-$port"
-EOF
-			done
-		fi
-
+	if [ "$ruleset" = 'full' ]; then
 		cat >>"$tmp" <<EOF
-
-		# Everything else is local: it must not reach the operator path.
-		iifname "$uplink_ref" counter drop comment "drop-non-pppoe-from-uplink"
-		oifname "$uplink_ref" counter drop comment "drop-non-pppoe-to-uplink"
-		counter accept comment "allow-traffic-between-lan-ports"
 	}
 
 	chain forward {
@@ -500,15 +556,251 @@ EOF
 	}
 }
 EOF
+	else
+		cat >>"$tmp" <<EOF
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 1; policy accept;
+
+		# The bridge hook sees every bridge; this match scopes the filter.
+		meta ibrname "$BRIDGE_DEV" jump wanup_forward
+	}
+}
+EOF
+	fi
+}
+
+stage_nft_file() {
+	mktemp "${NFT_STAGE_DIR:-/etc}/internet.nft.XXXXXX"
+}
+
+# Render $2 (full|filter) into $1 and accept only when nft -c passes.
+# Shared by LuCI apply and wan ifup reprobe so the probe order cannot drift.
+stage_validated_rules() {
+	local tmp="$1" ruleset="$2"
+
+	render_bridge_rules "$tmp" "$ruleset"
+	nft_rules_ok "$tmp"
+}
+
+write_nft_rules() {
+	local tmp
+
+	# Serialize with wan ifup reprobe on the same /etc/internet.nft.
+	nft_file_lock || fail "Cannot lock internet nft file"
+
+	tmp="$(stage_nft_file)" || fail "Cannot create nftables staging file"
+
+	if [ "$ENABLED" -ne 1 ] || [ "$MODE" != 'bridge' ]; then
+		cat >"$tmp" <<'EOF'
+# internet-apply bridge ruleset: inactive
+# No internet bridge: the page is off or the ONT dials itself.
+EOF
+		if ! nft_rules_ok "$tmp"; then
+			rm -f "$tmp"
+			fail "Generated nftables rules failed validation: $NFT_LAST_NFT_ERROR"
+		fi
+		install_nft_file "$tmp" inactive || fail "Cannot install nftables rules"
+		return 0
 	fi
 
-	if ! nft -c -f "$tmp" >/dev/null 2>&1; then
+	if stage_validated_rules "$tmp" full; then
+		install_nft_file "$tmp" full || fail "Cannot install nftables rules"
+		return 0
+	fi
+
+	warn "Complete bridge rules (flowtable) rejected by nft -c (${NFT_LAST_NFT_ERROR}); falling back to the PPPoE/IPoE filter"
+	if stage_validated_rules "$tmp" filter; then
+		warn "Installed PPPoE/IPoE bridge filter without flowtable; the next apply retries the full table"
+		install_nft_file "$tmp" filter || fail "Cannot install nftables rules"
+		return 0
+	fi
+	rm -f "$tmp"
+	fail "Generated nftables rules failed validation: $NFT_LAST_NFT_ERROR"
+}
+
+# Shared exclusive lock for every writer of /etc/internet.nft (LuCI apply and
+# wan ifup reprobe). Nested callers that already hold it are no-ops.
+nft_file_lock() {
+	local lockfile
+
+	[ "${NFT_FILE_LOCK_HELD:-0}" -eq 1 ] && return 0
+	lockfile="${NFT_REPROBE_LOCK:-/var/lock/internet-nft-reprobe.lock}"
+	mkdir -p "$(dirname "$lockfile")" 2>/dev/null || true
+	exec 8>"$lockfile" || return 1
+	flock 8 || return 1
+	NFT_FILE_LOCK_HELD=1
+}
+
+# Snapshot of the exact file last successfully loaded via firewall
+# reload. A failed reload clears the stamp so the next wan ifup retries instead
+# of treating the on-disk file as already live. Never mark loaded without a
+# successful reload (or an equivalent kernel verification).
+nft_loaded_stamp() {
+	printf '%s' "${NFT_LOADED_STAMP:-/var/run/internet-nft.loaded}"
+}
+
+nft_mark_loaded() {
+	local stamp tmp
+
+	nft_file_is "$1" || return 1
+	stamp="$(nft_loaded_stamp)"
+	mkdir -p "$(dirname "$stamp")" 2>/dev/null || return 1
+	# Publish only a complete snapshot, using a rename on the same filesystem.
+	tmp="$(mktemp "${stamp}.XXXXXX")" || return 1
+	if cp "$NFT_FILE" "$tmp" && mv -f "$tmp" "$stamp"; then
+		return 0
+	fi
+	rm -f "$tmp"
+	return 1
+}
+
+nft_clear_loaded() {
+	rm -f "$(nft_loaded_stamp)"
+}
+
+nft_loaded_is() {
+	local stamp
+
+	stamp="$(nft_loaded_stamp)"
+	nft_file_is "$1" && [ -f "$stamp" ] && cmp -s "$NFT_FILE" "$stamp"
+}
+
+nft_file_is() {
+	[ -f "$NFT_FILE" ] &&
+		grep -qx "# internet-apply bridge ruleset: $1" "$NFT_FILE"
+}
+
+# Disk file is $1, stamp says $1 is loaded, and the on-disk file still validates.
+nft_already_live() {
+	nft_file_is "$1" && nft_loaded_is "$1" && nft_rules_ok "$NFT_FILE"
+}
+
+# Reload firewall4 and stamp $1 as loaded. Returns 0 on success, 1 on failure
+# (stamp cleared). Does not install files. Shared by apply reload_runtime,
+# ensure_rules_loaded, and commit_probed_rules.
+firewall_reload_stamp() {
+	local ruleset="$1"
+
+	NFT_RULESET="$ruleset"
+	# Clear before reload as well: an interrupted reload is not a success.
+	nft_clear_loaded || return 1
+	nft_file_is "$ruleset" || return 1
+	if /etc/init.d/firewall reload && nft_mark_loaded "$ruleset"; then
+		return 0
+	fi
+	nft_clear_loaded
+	return 1
+}
+
+# Disk already has a validated ruleset: reload+stamp if needed, never install.
+# Always returns 0 so hotplug cannot abort later iface scripts.
+ensure_rules_loaded() {
+	local ruleset="$1"
+
+	NFT_RULESET="$ruleset"
+	if nft_loaded_is "$ruleset"; then
+		return 0
+	fi
+	if firewall_reload_stamp "$ruleset"; then
+		logger -t internet "internet bridge nft reloaded $ruleset rules"
+		return 0
+	fi
+	warn "firewall reload of internet bridge $ruleset rules failed; the next wan ifup retries"
+	return 0
+}
+
+# Install a rendered staging file when disk is not already this ruleset, then
+# reload+stamp. Refuses empty/incomplete tmp (must carry the ruleset header).
+# Always returns 0: hotplug must not abort later iface scripts.
+# Caller must hold nft_file_lock.
+commit_probed_rules() {
+	local ruleset="$1" tmp="$2"
+
+	if nft_file_is "$ruleset" && nft_rules_ok "$NFT_FILE"; then
 		rm -f "$tmp"
-		fail "Generated nftables rules failed validation"
+		ensure_rules_loaded "$ruleset"
+		return 0
 	fi
 
-	chmod 0644 "$tmp"
-	mv -f "$tmp" "$NFT_FILE"
+	if ! grep -qx "# internet-apply bridge ruleset: $ruleset" "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		warn "internet bridge nft: refusing to install incomplete staging file for $ruleset"
+		return 0
+	fi
+
+	if ! install_nft_file "$tmp" "$ruleset"; then
+		warn "internet bridge nft: cannot install $ruleset rules; the next wan ifup retries"
+		return 0
+	fi
+	if firewall_reload_stamp "$ruleset"; then
+		if [ "$ruleset" = 'full' ]; then
+			logger -t internet "internet bridge nft upgraded to full rules (flowtable)"
+		else
+			logger -t internet "internet bridge nft kept on PPPoE/IPoE filter fallback"
+		fi
+		return 0
+	fi
+	warn "firewall reload of internet bridge $ruleset rules failed; the next wan ifup retries"
+	return 0
+}
+
+# Called after netifd has created the bridge devices. Rewrites only the nft
+# file and reloads firewall4. It does not reload netifd, so the wan ifup
+# hotplug that calls it cannot loop.
+reprobe_bridge_nft() {
+	local tmp
+
+	[ "$ENABLED" -eq 1 ] && [ "$MODE" = 'bridge' ] || return 0
+	if [ -z "$PORTS" ]; then
+		warn "internet bridge nft reprobe: no LAN ports configured; skipping"
+		return 0
+	fi
+
+	nft_file_lock || {
+		warn "internet bridge nft reprobe: cannot lock"
+		return 0
+	}
+
+	# Already loaded full: validate disk, but skip staging and reload.
+	if nft_already_live full; then
+		NFT_RULESET=full
+		return 0
+	fi
+
+	tmp="$(stage_nft_file)" || {
+		warn "internet bridge nft reprobe: cannot stage rules"
+		return 0
+	}
+	if stage_validated_rules "$tmp" full; then
+		if nft_already_live full; then
+			rm -f "$tmp"
+			NFT_RULESET=full
+			return 0
+		fi
+		commit_probed_rules full "$tmp"
+		return 0
+	fi
+	rm -f "$tmp"
+
+	# Disk already holds a valid filter: reload+stamp only — never an empty tmp.
+	if nft_file_is filter && nft_rules_ok "$NFT_FILE"; then
+		ensure_rules_loaded filter
+		return 0
+	fi
+
+	tmp="$(stage_nft_file)" || {
+		warn "internet bridge nft reprobe: cannot stage rules"
+		return 0
+	}
+	if stage_validated_rules "$tmp" filter; then
+		commit_probed_rules filter "$tmp"
+		return 0
+	fi
+	rm -f "$tmp"
+	warn "internet bridge nft reprobe: filter rules also rejected (${NFT_LAST_NFT_ERROR})"
+	return 0
 }
 
 #
@@ -1013,18 +1305,27 @@ reload_runtime() {
 
 	if [ "$ENABLED" -eq 1 ]; then
 		# The bridge has to be filtered from its first forwarded frame.
-		/etc/init.d/firewall reload || fail "firewall4 reload failed"
+		firewall_reload_stamp "$NFT_RULESET" || fail "firewall4 reload failed"
 		ubus call network reload >/dev/null || fail "netifd reload failed"
 	else
 		ubus call network reload >/dev/null || fail "netifd reload failed"
 		if nft list table bridge wanup >/dev/null 2>&1; then
 			nft delete table bridge wanup || fail "Cannot delete internet filter table"
 		fi
-		/etc/init.d/firewall reload || fail "firewall4 reload failed"
+		if /etc/init.d/firewall reload; then
+			nft_clear_loaded
+		else
+			nft_clear_loaded
+			fail "firewall4 reload failed"
+		fi
 	fi
 }
 
 load_internet_config
+if [ "$ACTION" = 'reprobe' ]; then
+	reprobe_bridge_nft
+	exit 0
+fi
 load_iptv_port
 load_voice_port
 config_load network
@@ -1039,5 +1340,5 @@ write_firewall_config
 write_offload_defaults
 reload_runtime
 
-logger -t internet "Internet configuration applied (mode=$MODE)"
+logger -t internet "Internet configuration applied (mode=$MODE ruleset=$NFT_RULESET)"
 exit 0
