@@ -1,0 +1,126 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+# Keep the voice gateway out of the main table. A rule for the voice host
+# address sends locally bound SIP and RTP through this table.
+TABLE=20043
+PREFERENCE=20043
+PROTOCOL=196
+GATEWAY_METRIC=2100
+REJECT_METRIC=32767
+
+fail() {
+	printf 'voice-route: %s\n' "$1" >&2
+	exit 1
+}
+
+umask 077
+mkdir -p /var/lock || exit 1
+exec 9>/var/lock/onu-voice-route.lock
+flock -x 9 || exit 1
+
+# Refuse collisions with other policy-routing users. Only manage rules and
+# routes carrying this helper's protocol tag.
+rules="$(ip -4 -N -o rule show)" || exit 1
+routes="$(ip -4 -N -o route show table "$TABLE" 2>/dev/null || true)"
+sources="$(printf '%s\n' "$rules" | awk -v pref="$PREFERENCE:" -v table="$TABLE" -v protocol="$PROTOCOL" '
+	NF {
+		source = lookup = owner = ""
+		for (i = 1; i < NF; i++) {
+			if ($i == "from") source = $(i + 1)
+			if ($i == "lookup") lookup = $(i + 1)
+			if ($i == "proto") owner = $(i + 1)
+		}
+		if ($1 != pref && lookup != table)
+			next
+		if ($1 != pref || source == "" || source == "all" || lookup != table || owner != protocol)
+			exit 1
+		print source
+	}')" || fail 'rule priority 20043 is already in use'
+printf '%s\n' "$routes" | awk -v protocol="$PROTOCOL" '
+	NF {
+		owner = ""
+		for (i = 1; i < NF; i++)
+			if ($i == "proto") owner = $(i + 1)
+		if (owner != protocol)
+			exit 1
+	}' || fail 'routing table 20043 is already in use'
+
+clear_policy() {
+	local source
+	for source in $sources; do
+		ip -4 rule del pref "$PREFERENCE" from "$source" table "$TABLE" protocol "$PROTOCOL" || return 1
+	done
+	[ -z "$routes" ] || ip -4 route flush table "$TABLE" proto "$PROTOCOL"
+}
+
+block_policy() {
+	[ -n "$sources" ] || return 0
+	ip -4 route replace unreachable default table "$TABLE" metric "$REJECT_METRIC" proto "$PROTOCOL" || return 1
+	ip -4 route del default table "$TABLE" metric "$GATEWAY_METRIC" proto "$PROTOCOL" 2>/dev/null || true
+}
+
+mode="$(uci -q get onu-voice.network.mode)"
+if [ "$(uci -q get onu-voice.network.enabled)" != 1 ] ||
+   [ "${mode:-route}" != route ] ||
+   [ "$(uci -q get network.voice.luci_voice)" != 1 ]; then
+	clear_policy
+	exit $?
+fi
+
+# Read the current lease or static settings from netifd. Use the inactive
+# gateway because voice-apply deliberately disables the main default route.
+if ! network_is_up voice ||
+   ! network_get_device device voice || [ "$device" != ct-voice ] ||
+   ! network_get_subnet subnet voice; then
+	block_policy
+	exit $?
+fi
+
+# A voice service with no gateway can still use directly connected peers or
+# explicit routes. In that case keep the existing main-table behavior.
+if ! network_get_gateway gateway voice true; then
+	clear_policy
+	exit $?
+fi
+
+calculated="$(ipcalc.sh "$subnet")" || fail 'invalid IPv4 voice subnet'
+address="${subnet%/*}"
+network="$(printf '%s\n' "$calculated" | sed -n 's/^NETWORK=//p')"
+[ -n "$network" ] || fail 'missing IPv4 voice network'
+prefix="$network/${subnet#*/}"
+
+# Install the fallback first so a bound source never falls through to the
+# internet default while the policy is active and the voice gateway is down.
+ip -4 route replace unreachable default table "$TABLE" metric "$REJECT_METRIC" proto "$PROTOCOL" || exit 1
+ip -4 route replace "$prefix" table "$TABLE" dev "$device" scope link src "$address" proto "$PROTOCOL" || exit 1
+ip -4 route replace default table "$TABLE" via "$gateway" dev "$device" src "$address" \
+	metric "$GATEWAY_METRIC" proto "$PROTOCOL" onlink || exit 1
+
+found=0
+for source in $sources; do
+	case "$source" in
+		"$address"|"$address/32") found=1 ;;
+	esac
+done
+if [ "$found" -eq 0 ]; then
+	ip -4 rule add pref "$PREFERENCE" from "$address/32" table "$TABLE" protocol "$PROTOCOL" || exit 1
+fi
+for source in $sources; do
+	case "$source" in
+		"$address"|"$address/32") continue ;;
+	esac
+	ip -4 rule del pref "$PREFERENCE" from "$source" table "$TABLE" protocol "$PROTOCOL" || exit 1
+done
+
+# The address can move to a different subnet after a DHCP renew. An IPv4
+# prefix starts with an octet, unlike the numeric unreachable route type.
+for old_prefix in $(printf '%s\n' "$routes" | awk '$1 ~ /^[0-9]+[.]/ {print $1}'); do
+	[ "$old_prefix" = "$prefix" ] || [ "$old_prefix/32" = "$prefix" ] ||
+		ip -4 route del "$old_prefix" table "$TABLE" proto "$PROTOCOL" || exit 1
+done
+
+exit 0
