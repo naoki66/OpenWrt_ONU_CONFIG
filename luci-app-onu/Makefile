@@ -30,7 +30,7 @@ LUCI_TITLE:=LuCI ONU configuration
 LUCI_DEPENDS:=+luci-base +airoha-ponctl +airoha-pond \
 	+mtd +ubi-utils +nand-utils +jshn +jsonfilter \
 	+firewall4 +kmod-nft-bridge +kmod-nft-offload +kmod-nf-conntrack-bridge \
-	+omcproxy +ppp-mod-pppoe
+	+omcproxy +ppp-mod-pppoe +ip-full +flock
 PKG_VERSION:=0.1.0
 # 10: the shipped voice configuration drops the two line sections - the board has
 # a single FXS port, so its parameters moved into the voice profile.
@@ -80,7 +80,8 @@ PKG_VERSION:=0.1.0
 # voice 2100). The IPTV page drops its tabs and its multicast-to-unicast tab:
 # the bridge rows, then the IGMP/MLD switches, now sit in one flat card, and the
 # relay is driven by rtp2httpd's own page.
-PKG_RELEASE:=26
+# 27: route locally bound IPv4 SIP/RTP through the voice VLAN.
+PKG_RELEASE:=27
 
 PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 

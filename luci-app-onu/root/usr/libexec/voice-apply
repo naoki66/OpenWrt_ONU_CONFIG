@@ -561,6 +561,9 @@ reload_runtime() {
 	# firewall builds its ruleset, and a removed zone has to be flushed too.
 	ubus call network reload >/dev/null || fail "netifd reload failed"
 	/etc/init.d/firewall reload || fail "firewall4 reload failed"
+	# Reconcile an already-active interface too. Hotplug handles boot and
+	# subsequent address or gateway updates.
+	/usr/libexec/voice-route || warn "Cannot refresh IPv4 voice source policy"
 }
 
 load_voice_network
